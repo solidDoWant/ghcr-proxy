@@ -2,7 +2,7 @@
 
 Approved for the owner by the operator on 2026-11-15. Only the owner adds scenarios. Each scenario lists its tests on a `Tests:` line (`` `package/dir: TestName/subtest` ``); a scenario passes when every listed test passes on `master`. Workers add their tests to the line; that is not a new scenario. `make acceptance` prints the scoreboard.
 
-Scenarios marked **(live)** run against the real `ghcr.io` in the `live` CI job, which runs only when the `GHCR_LIVE_PAT` secret is set. Without it they count as not passing; the release gate treats them as the owner's to check.
+Scenarios marked **(live)** run against the real `ghcr.io` through `make test-live`, which only the operator runs, by hand and outside CI (the PAT is the owner's own). They pass when the operator's run is green and its result is posted on the issue; the scoreboard shows them as manual.
 
 ## Delete
 

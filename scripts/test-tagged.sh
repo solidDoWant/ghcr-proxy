@@ -6,7 +6,7 @@
 #
 #   scripts/test-tagged.sh integration
 #   E2E_CLUSTER=ghcr-proxy-12 scripts/test-tagged.sh e2e
-#   GHCR_LIVE_PAT=... scripts/test-tagged.sh live
+#   GHCR_LIVE_PAT_FILE=... GHCR_LIVE_OWNER=... scripts/test-tagged.sh live
 #
 # GO_TEST_JSON=file also writes the `go test -json` events there
 # (scripts/ci/go-test-json.sh).
@@ -19,8 +19,9 @@
 # deletes a cluster it created afterwards, unless KEEP_CLUSTER=1. Without
 # Docker the tests skip with a message.
 #
-# `live` talks to the real ghcr.io with the PAT in GHCR_LIVE_PAT; the tests
-# skip without it.
+# `live` talks to the real ghcr.io with the PAT in the file GHCR_LIVE_PAT_FILE
+# and the owner GHCR_LIVE_OWNER; the tests skip without them. Only the
+# operator runs them, by hand: never in CI, never by agents.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
@@ -63,8 +64,8 @@ if [[ "$tag" == e2e ]]; then
 	fi
 fi
 
-if [[ "$tag" == live && -z "${GHCR_LIVE_PAT:-}" ]]; then
-	echo "test-live: GHCR_LIVE_PAT is not set; the live tests skip" >&2
+if [[ "$tag" == live && -z "${GHCR_LIVE_PAT_FILE:-}" ]]; then
+	echo "test-live: GHCR_LIVE_PAT_FILE is not set; the live tests skip" >&2
 fi
 
 status=0

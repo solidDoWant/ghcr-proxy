@@ -63,7 +63,7 @@ Post a comment on the `pm:status` issue when something material happened since y
 
 ## Things only the human can do
 
-Label the issue `needs-human`, comment on it with exactly what is needed, mention it in the next status report, and move on. Examples: deploying to the cluster, creating the GitHub PAT, the `GHCR_LIVE_PAT` secret or other credentials, changing repository settings, granting tokens, spending money, changing a `SPEC.md` principle, editing `CLAUDE.md` (agents refuse to; route such lines to a `needs-human` issue).
+Label the issue `needs-human`, comment on it with exactly what is needed, mention it in the next status report, and move on. Examples: deploying to the cluster, creating the GitHub PAT or other credentials, running the live tests against the real ghcr.io (operator only, see issue #18), changing repository settings, granting tokens, spending money, changing a `SPEC.md` principle, editing `CLAUDE.md` (agents refuse to; route such lines to a `needs-human` issue).
 
 ## Hard limits
 

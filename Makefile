@@ -65,7 +65,7 @@ test-e2e: ## Run the e2e-tagged tests against the kind cluster E2E_CLUSTER (defa
 	E2E_CLUSTER="$(E2E_CLUSTER)" ./scripts/test-tagged.sh e2e
 
 .PHONY: test-live
-test-live: ## Run the live-tagged tests against the real ghcr.io with the PAT in GHCR_LIVE_PAT; they skip without it. Passes with "no tests yet" until there are any.
+test-live: ## Run the live-tagged tests against the real ghcr.io with the PAT in the file GHCR_LIVE_PAT_FILE and the owner in GHCR_LIVE_OWNER; they skip without them. Operator only, never in CI. Passes with "no tests yet" until there are any.
 	./scripts/test-tagged.sh live
 
 .PHONY: acceptance

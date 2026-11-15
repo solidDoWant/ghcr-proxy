@@ -4,8 +4,9 @@ Decides the behaviour of phase 2 on top of `docs/design/phase-1.md`. A case this
 
 ## 1. Live tests and GHCR's behaviour
 
-- `test/live` (`//go:build live`): runs the phase 1 Docker client flows (push, pull, mount, anonymous public pull) and the delete flows below through a proxy started in-process, pointed at `https://ghcr.io` with the PAT from `GHCR_LIVE_PAT`. Repositories are `<GHCR_LIVE_OWNER>/ghcr-proxy-live/<random>` and are deleted at the end (through the GitHub REST API directly, test cleanup only).
-- The CI job `live` runs on pushes to `master` and nightly, only when the secret exists; it is not part of `checks`.
+- `test/live` (`//go:build live`): runs the phase 1 client flows (push, pull, mount, anonymous public pull, using go-containerregistry as the client) and the delete flows below through a proxy started in-process, pointed at `https://ghcr.io` with the PAT read from the file named by `GHCR_LIVE_PAT_FILE`, owner from `GHCR_LIVE_OWNER`. Without both variables every live test skips.
+- **The PAT belongs to the owner's main GitHub account.** Live tests never run in CI and agents never run them: the worker builds them and checks they skip cleanly; the operator runs `make test-live` by hand and posts the results on the issue. No workflow, secret or variable for them is ever added to the repository.
+- **Blast radius.** Every repository a live run touches is `<owner>/ghcr-proxy-live-<run id>` or below it, where `<run id>` is random per run. Cleanup deletes only packages whose name starts with that run's prefix and that the run itself pushed, through the GitHub REST API. The tests never list, read, change or delete any other package, never change package visibility, and never print the PAT or tokens (failures show status codes and registry error codes only).
 - First live issue: record in `docs/dev/ghcr-behaviour.md` what GHCR answers for `DELETE /v2/<name>/manifests/<digest>`, `DELETE /v2/<name>/manifests/<tag>`, `DELETE /v2/<name>/blobs/<digest>`, the scopes its token endpoint accepts for delete (`delete`, `*`, `pull,push,delete`), and `expires_in`. The rest of section 2 depends on it.
 
 ## 2. Delete

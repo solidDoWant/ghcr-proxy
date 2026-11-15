@@ -27,7 +27,7 @@ mkdir -p "$results"
 
 # The proxy on kind for the e2e tests (test/e2e/up.sh); a cluster this script
 # created is deleted afterwards unless KEEP_CLUSTER=1. Without Docker those
-# tests skip. The live tests skip unless GHCR_LIVE_PAT is set.
+# tests skip. The live tests skip unless GHCR_LIVE_PAT_FILE is set (operator only).
 if docker info >/dev/null 2>&1; then
 	export E2E_CLUSTER="${E2E_CLUSTER:-ghcr-proxy-e2e}"
 	created=true

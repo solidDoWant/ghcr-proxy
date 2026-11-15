@@ -4,9 +4,6 @@ on:
   pull_request:
   push:
     branches: [master]
-  schedule:
-    # Nightly, for the live tests against the real ghcr.io.
-    - cron: "17 3 * * *"
   workflow_dispatch:
 
 permissions:
@@ -35,11 +32,7 @@ jobs:
   # commit replaces the code commit's run, and a filter on the push diff
   # would then skip the tests of the code commit too. Running the full suite
   # on every master push means each master run tests everything merged so far.
-  #
-  # The nightly schedule runs only the live job: everything that depends on
-  # this job is skipped.
   changes:
-    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     outputs:
       code: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/master') && 'true' || steps.filter.outputs.code }}
@@ -160,33 +153,6 @@ jobs:
       - name: Save Go caches
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         uses: ./.github/actions/go-cache-save
-
-  # The live tests against the real ghcr.io. They need the GHCR_LIVE_PAT
-  # repository secret, so they run only on pushes to master and nightly, and
-  # only when the secret exists. Not needed by `checks`: ghcr.io being slow or
-  # down must not block merges.
-  live:
-    if: >-
-      github.event_name == 'schedule' ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/master')
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      HAS_LIVE_PAT: ${{ secrets.GHCR_LIVE_PAT != '' }}
-    steps:
-      - name: No GHCR_LIVE_PAT
-        if: env.HAS_LIVE_PAT != 'true'
-        run: echo "GHCR_LIVE_PAT is not set; the live tests are skipped"
-      - if: env.HAS_LIVE_PAT == 'true'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - if: env.HAS_LIVE_PAT == 'true'
-        uses: ./.github/actions/nix-dev-shell
-      - name: Live tests
-        if: env.HAS_LIVE_PAT == 'true'
-        env:
-          GHCR_LIVE_PAT: ${{ secrets.GHCR_LIVE_PAT }}
-          GO_TEST_JSON: build/acceptance/results/go-live.json
-        run: nix develop -c make test-live
 
   # A checklist edit alone: only the scoreboard's tests read the checklist.
   scoreboard-tests:

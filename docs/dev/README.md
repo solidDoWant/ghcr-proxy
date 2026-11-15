@@ -15,7 +15,7 @@ ghcr-proxy is in early development. The pages on the architecture are not writte
 - `make test` runs the unit tests.
 - `make test-integration` runs the `integration` tests. They need only the dev shell: envtest gets its binaries from `KUBEBUILDER_ASSETS`.
 - `make test-e2e` runs the `e2e` tests on the kind cluster `E2E_CLUSTER` (default `ghcr-proxy-e2e`). The script `test/e2e/up.sh` creates the cluster with the `ImageVolume` feature gate, loads both images and installs the chart. The cluster is deleted afterwards, unless you set `KEEP_CLUSTER=1`. Without Docker the tests skip.
-- `make test-live` runs the `live` tests against the real `ghcr.io`. They use the PAT in `GHCR_LIVE_PAT` and skip when it is not set.
+- `make test-live` runs the `live` tests against the real `ghcr.io`. Only the operator runs them, by hand and never in CI, with the PAT in the file `GHCR_LIVE_PAT_FILE` and the owner in `GHCR_LIVE_OWNER`; they skip without them.
 
 ## Getting started
 

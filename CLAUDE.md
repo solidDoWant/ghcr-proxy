@@ -54,7 +54,7 @@ Run `make help` for the full list, and keep it and this section current as targe
 - `make generate` / `make check-generate`: regenerate CRDs, RBAC, deepcopy and the generated docs references, or fail on drift.
 - `make test-integration`: `integration`-tagged tests: envtest with the proxy and the fake GHCR in-process.
 - `make test-e2e`: `e2e`-tagged tests on the kind cluster `E2E_CLUSTER` (`ImageVolume` on) with the fake GHCR and the chart (`KEEP_CLUSTER=1` keeps it). Agents set `E2E_CLUSTER=ghcr-proxy-<issue>`.
-- `make test-live`: `live`-tagged tests against the real `ghcr.io` with the PAT in `GHCR_LIVE_PAT`; they skip without it. CI runs them on `master` and nightly when the repository secret exists.
+- `make test-live`: `live`-tagged tests against the real `ghcr.io`. **Operator only, by hand, never in CI.** The PAT is the owner's main account's: agents never run these tests, never ask for the token, and never add a workflow, secret or variable for them. Workers check the tests skip cleanly without `GHCR_LIVE_PAT_FILE` (`docs/design/phase-2.md`, section 1).
 - `make acceptance`: run every test named on a checklist `Tests:` line and print the scoreboard for `PHASE` (default 1).
 - `make chart-lint`, `make docs-check`, `make release VERSION=x.y.z` (dry run only; releasing is the release-manager's job).
 
