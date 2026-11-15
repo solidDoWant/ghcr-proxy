@@ -1,17 +1,17 @@
 package main
 
 import (
-	"bytes"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/solidDoWant/ghcr-proxy/internal/credhelper"
 )
 
-func TestRunPrintsUsageAndFails(t *testing.T) {
-	var stderr bytes.Buffer
+func TestTokenFileDefaultsAndOverrides(t *testing.T) {
+	t.Setenv(credhelper.TokenFileEnv, "")
+	assert.Equal(t, credhelper.DefaultTokenFile, tokenFile())
 
-	code := run(&stderr)
-
-	assert.Equal(t, 1, code)
-	assert.Contains(t, stderr.String(), "Usage: docker-credential-ghcr-proxy get|store|erase|list")
+	t.Setenv(credhelper.TokenFileEnv, "/tmp/other")
+	assert.Equal(t, "/tmp/other", tokenFile())
 }

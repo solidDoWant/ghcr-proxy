@@ -5,6 +5,7 @@ go 1.27.0
 require (
 	github.com/bmatcuk/doublestar/v4 v4.10.4
 	github.com/distribution/reference v0.6.0
+	github.com/docker/docker-credential-helpers v0.9.3
 	github.com/google/go-containerregistry v0.22.1
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/stretchr/testify v1.12.1
@@ -15,7 +16,6 @@ require (
 
 require (
 	github.com/docker/cli v29.7.2+incompatible // indirect
-	github.com/docker/docker-credential-helpers v0.9.3 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.1 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
