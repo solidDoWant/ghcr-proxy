@@ -30,7 +30,7 @@ Approved for the owner by the operator on 2026-11-15. Only the owner adds scenar
 - **AC-1-11 API server down.** With token review failing, authenticated requests get `503` and the upstream sees nothing PAT-backed.
   Tests:
 - **AC-1-12 Token rotation.** The credential helper returns the new token after the token file is replaced, without restarting anything.
-  Tests:
+  Tests: `internal/credhelper: TestGetReadsReplacedTokenFile`
 
 ## Policies and grants
 
@@ -73,4 +73,4 @@ Approved for the owner by the operator on 2026-11-15. Only the owner adds scenar
 - **AC-1-28 Install from the chart.** The chart installs on kind with only the PAT and TLS Secrets created beforehand, every pod runs as non-root with a read-only root filesystem, and the e2e Docker scenarios above run against that install.
   Tests:
 - **AC-1-29 Credential helper protocol.** `docker-credential-ghcr-proxy get` answers for `ghcr.io` (with or without `https://`) and says "credentials not found" for other servers; `store`, `erase` and `list` behave as `SPEC.md` says; the helper image contains only the static binary and runs on amd64 and arm64.
-  Tests:
+  Tests: `internal/credhelper: TestGetAnswersOnlyForGHCR`, `internal/credhelper: TestGetFailsOnMissingOrEmptyTokenFile`, `internal/credhelper: TestStoreEraseAndListDoNothing`
