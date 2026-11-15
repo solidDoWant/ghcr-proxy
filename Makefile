@@ -106,6 +106,10 @@ build: ## Build bin/ghcr-proxy and bin/docker-credential-ghcr-proxy.
 build-images: ## Build the images ghcr.io/soliddowant/ghcr-proxy and ghcr.io/soliddowant/ghcr-proxy-credential-helper (tag $(VERSION)) for linux/amd64 and arm64; PUSH_ALL=true also pushes (releases only).
 	VERSION="$(VERSION)" PUSH_ALL="$(or $(PUSH_ALL),false)" ./scripts/build-images.sh
 
+.PHONY: build-fakeghcr-image
+build-fakeghcr-image: ## Build the GHCR test double image ghcr.io/soliddowant/ghcr-proxy-fakeghcr:dev for the host architecture (e2e only, never pushed).
+	./scripts/build-fakeghcr-image.sh
+
 .PHONY: clean
 clean: ## Remove build artifacts.
 	rm -rf "$(BIN_DIR)" build
