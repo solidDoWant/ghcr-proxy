@@ -35,11 +35,14 @@ docs/README.md             This page.
 
 docs/user/
   README.md                The pages for chart authors.
+  policies.md              How to write a policy and why a push is denied.
   policy-status.md         What the status of a policy means.
   crd-reference.md         Every resource field (generated).
 
 docs/admin/
   README.md                The pages for admins.
+  install.md               PAT, certificate and CA, grants, chart install and the audit log.
+  ci-pods.md               How to set up a CI pod, with a Tekton Task example.
   chart-values.md          Every Helm chart value (generated).
 
 docs/dev/
