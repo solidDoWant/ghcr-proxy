@@ -61,6 +61,11 @@ spec:
             - name: tls
               mountPath: /var/run/ghcr-proxy/tls
               readOnly: true
+            {{- if .Values.upstream.ca.existingSecret }}
+            - name: upstream-ca
+              mountPath: /var/run/ghcr-proxy/upstream-ca
+              readOnly: true
+            {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           securityContext:
@@ -78,6 +83,14 @@ spec:
         - name: tls
           secret:
             secretName: {{ required "tls.existingSecret is required" .Values.tls.existingSecret }}
+        {{- if .Values.upstream.ca.existingSecret }}
+        - name: upstream-ca
+          secret:
+            secretName: {{ .Values.upstream.ca.existingSecret }}
+            items:
+              - key: {{ .Values.upstream.ca.key }}
+                path: ca.crt
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

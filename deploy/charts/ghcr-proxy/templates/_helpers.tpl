@@ -41,6 +41,9 @@ upstream:
   url: {{ .Values.upstream.url | quote }}
   tokenHosts: {{ .Values.upstream.tokenHosts | toJson }}
   patFile: /var/run/ghcr-proxy/pat/token
+  {{- if .Values.upstream.ca.existingSecret }}
+  caFile: /var/run/ghcr-proxy/upstream-ca/ca.crt
+  {{- end }}
   timeout: {{ .Values.upstream.timeout | quote }}
   tokenTimeout: {{ .Values.upstream.tokenTimeout | quote }}
 authentication:
