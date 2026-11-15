@@ -88,19 +88,24 @@ func NewReviewer(client TokenReviewCreator, options Options) (*Reviewer, error) 
 	if client == nil {
 		return nil, errors.New("authn: nil TokenReview client")
 	}
+
 	if options.Audience == "" {
 		return nil, errors.New("authn: empty audience")
 	}
+
 	if options.CacheTTL <= 0 || options.ReviewTimeout <= 0 {
 		return nil, errors.New("authn: cache TTL and review timeout must be positive")
 	}
+
 	if options.Now == nil {
 		options.Now = time.Now
 	}
+
 	cache, err := lru.New[[sha256.Size]byte, cacheEntry](MaxCacheEntries)
 	if err != nil {
 		return nil, fmt.Errorf("authn: creating cache: %w", err)
 	}
+
 	return &Reviewer{client: client, options: options, cache: cache}, nil
 }
 
@@ -110,10 +115,12 @@ func NewReviewerForConfig(config *rest.Config, options Options) (*Reviewer, erro
 	config = rest.CopyConfig(config)
 	config.QPS = clientQPS
 	config.Burst = clientBurst
+
 	client, err := authenticationv1client.NewForConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("authn: creating TokenReview client: %w", err)
 	}
+
 	return NewReviewer(client.TokenReviews(), options)
 }
 
@@ -127,22 +134,23 @@ type reviewResult struct {
 // ErrUnavailable when the review could not be made.
 func (r *Reviewer) Review(ctx context.Context, token string) (Identity, error) {
 	key := sha256.Sum256([]byte(token))
-	if entry, ok := r.cache.Get(key); ok {
-		if r.options.Now().Before(entry.expiresAt) {
-			if entry.rejected {
-				return Identity{}, ErrRejected
-			}
-			return entry.identity, nil
-		}
-		r.cache.Remove(key)
+	if identity, err, ok := r.cached(key); ok {
+		return identity, err
 	}
 
 	// Concurrent reviews of one token share a single call. It runs on a
 	// context detached from the client request, so one client giving up
 	// does not fail the others.
 	resultChannel := r.group.DoChan(hex.EncodeToString(key[:]), func() (any, error) {
+		// A shared call that finished between this caller's cache lookup and
+		// here has stored its answer already.
+		if identity, err, ok := r.cached(key); ok {
+			return reviewResult{identity: identity, err: err}, nil
+		}
+
 		identity, err := r.review(token)
 		r.store(key, token, identity, err)
+
 		return reviewResult{identity: identity, err: err}, nil
 	})
 	select {
@@ -154,9 +162,29 @@ func (r *Reviewer) Review(ctx context.Context, token string) (Identity, error) {
 	}
 }
 
+// cached returns the unexpired cached answer for key, if there is one.
+func (r *Reviewer) cached(key [sha256.Size]byte) (Identity, error, bool) {
+	entry, ok := r.cache.Get(key)
+	if !ok {
+		return Identity{}, nil, false
+	}
+
+	if !r.options.Now().Before(entry.expiresAt) {
+		r.cache.Remove(key)
+		return Identity{}, nil, false
+	}
+
+	if entry.rejected {
+		return Identity{}, ErrRejected, true
+	}
+
+	return entry.identity, nil, true
+}
+
 func (r *Reviewer) review(token string) (Identity, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), r.options.ReviewTimeout)
 	defer cancel()
+
 	response, err := r.client.Create(ctx, &authenticationv1.TokenReview{
 		Spec: authenticationv1.TokenReviewSpec{
 			Token:     token,
@@ -167,18 +195,22 @@ func (r *Reviewer) review(token string) (Identity, error) {
 		// The error comes from the API client and never contains the token.
 		return Identity{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
+
 	status := response.Status
 	if !status.Authenticated || !slices.Contains(status.Audiences, r.options.Audience) {
 		return Identity{}, ErrRejected
 	}
+
 	namespace, name, err := serviceaccount.SplitUsername(status.User.Username)
 	if err != nil {
 		return Identity{}, ErrRejected
 	}
+
 	identity := Identity{Namespace: namespace, ServiceAccount: name}
 	if pods := status.User.Extra[serviceaccount.PodNameKey]; len(pods) == 1 {
 		identity.Pod = pods[0]
 	}
+
 	return identity, nil
 }
 
@@ -189,14 +221,18 @@ func (r *Reviewer) store(key [sha256.Size]byte, token string, identity Identity,
 	if err != nil && !rejected {
 		return
 	}
+
 	now := r.options.Now()
+
 	expiresAt := now.Add(r.options.CacheTTL)
 	if tokenExpiry, ok := tokenExpiry(token); ok && tokenExpiry.Before(expiresAt) {
 		expiresAt = tokenExpiry
 	}
+
 	if !now.Before(expiresAt) {
 		return
 	}
+
 	r.cache.Add(key, cacheEntry{identity: identity, rejected: rejected, expiresAt: expiresAt})
 }
 
@@ -208,8 +244,10 @@ func tokenExpiry(token string) (time.Time, bool) {
 	if _, _, err := jwt.NewParser().ParseUnverified(token, &claims); err != nil {
 		return time.Time{}, false
 	}
+
 	if claims.ExpiresAt == nil {
 		return time.Time{}, false
 	}
+
 	return claims.ExpiresAt.Time, true
 }

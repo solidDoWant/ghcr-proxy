@@ -39,6 +39,7 @@ func authenticated(username string, audiences []string, extra map[string]authent
 			Audiences:     audiences,
 			User:          authenticationv1.UserInfo{Username: username, Extra: extra},
 		}
+
 		return answer, nil
 	}
 }
@@ -55,17 +56,20 @@ func newFakeClock() *fakeClock {
 func (c *fakeClock) Now() time.Time {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
+
 	return c.now
 }
 
 func (c *fakeClock) Advance(duration time.Duration) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
+
 	c.now = c.now.Add(duration)
 }
 
 func newTestReviewer(t *testing.T, client TokenReviewCreator, clock *fakeClock) *Reviewer {
 	t.Helper()
+
 	reviewer, err := NewReviewer(client, Options{
 		Audience:      testAudience,
 		CacheTTL:      30 * time.Second,
@@ -73,6 +77,7 @@ func newTestReviewer(t *testing.T, client TokenReviewCreator, clock *fakeClock) 
 		Now:           clock.Now,
 	})
 	require.NoError(t, err)
+
 	return reviewer
 }
 
@@ -85,11 +90,13 @@ func signedToken(t *testing.T, expiresAt time.Time) string {
 		Subject:   t.Name(),
 	}).SignedString([]byte("test signing key"))
 	require.NoError(t, err)
+
 	return token
 }
 
 func TestReviewReturnsServiceAccountIdentity(t *testing.T) {
 	var sentSpec authenticationv1.TokenReviewSpec
+
 	answer := authenticated("system:serviceaccount:ci-app:builder", []string{testAudience},
 		map[string]authenticationv1.ExtraValue{"authentication.kubernetes.io/pod-name": {"build-1"}})
 	client := &fakeTokenReviews{answer: func(ctx context.Context, review *authenticationv1.TokenReview) (*authenticationv1.TokenReview, error) {
@@ -115,6 +122,7 @@ func TestReviewRejectsTokensThatAreNotServiceAccountTokensForTheAudience(t *test
 			answer: func(_ context.Context, review *authenticationv1.TokenReview) (*authenticationv1.TokenReview, error) {
 				answer := review.DeepCopy()
 				answer.Status = authenticationv1.TokenReviewStatus{Authenticated: false, Error: "invalid bearer token"}
+
 				return answer, nil
 			},
 		},
@@ -191,6 +199,7 @@ func TestReviewIsUnavailableWhenTheAPIServerFails(t *testing.T) {
 
 func TestConcurrentReviewsOfOneTokenMakeOneReview(t *testing.T) {
 	const callers = 100
+
 	release := make(chan struct{})
 	answer := authenticated("system:serviceaccount:ci-app:builder", []string{testAudience}, nil)
 	client := &fakeTokenReviews{answer: func(ctx context.Context, review *authenticationv1.TokenReview) (*authenticationv1.TokenReview, error) {
@@ -203,14 +212,18 @@ func TestConcurrentReviewsOfOneTokenMakeOneReview(t *testing.T) {
 	started.Add(callers)
 	finished.Add(callers)
 	identities := make([]Identity, callers)
+
 	errs := make([]error, callers)
 	for caller := range callers {
 		go func() {
 			defer finished.Done()
+
 			started.Done()
+
 			identities[caller], errs[caller] = reviewer.Review(t.Context(), "the-token")
 		}()
 	}
+
 	started.Wait()
 	close(release)
 	finished.Wait()
@@ -219,6 +232,7 @@ func TestConcurrentReviewsOfOneTokenMakeOneReview(t *testing.T) {
 		require.NoError(t, errs[caller])
 		assert.Equal(t, Identity{Namespace: "ci-app", ServiceAccount: "builder"}, identities[caller])
 	}
+
 	assert.Equal(t, int32(1), client.calls.Load())
 }
 
@@ -229,25 +243,32 @@ func TestCallerGivingUpDoesNotFailOtherCallersOfTheSameReview(t *testing.T) {
 	client := &fakeTokenReviews{answer: func(ctx context.Context, review *authenticationv1.TokenReview) (*authenticationv1.TokenReview, error) {
 		close(entered)
 		<-release
+
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+
 		return answer(ctx, review)
 	}}
 	reviewer := newTestReviewer(t, client, newFakeClock())
 
 	impatient, cancel := context.WithCancel(t.Context())
 	impatientResult := make(chan error, 1)
+
 	go func() {
 		_, err := reviewer.Review(impatient, "the-token")
 		impatientResult <- err
 	}()
+
 	<-entered
+
 	patientResult := make(chan error, 1)
+
 	go func() {
 		_, err := reviewer.Review(t.Context(), "the-token")
 		patientResult <- err
 	}()
+
 	cancel()
 	require.ErrorIs(t, <-impatientResult, ErrUnavailable)
 	close(release)
@@ -283,11 +304,13 @@ func TestDefiniteAnswersAreCachedForTheTTL(t *testing.T) {
 			_, err := reviewer.Review(t.Context(), "the-token")
 			test.assertErr(t, err)
 			clock.Advance(30*time.Second - time.Nanosecond)
+
 			_, err = reviewer.Review(t.Context(), "the-token")
 			test.assertErr(t, err)
 			assert.Equal(t, int32(1), client.calls.Load(), "a cached answer within the TTL")
 
 			clock.Advance(time.Nanosecond)
+
 			_, err = reviewer.Review(t.Context(), "the-token")
 			test.assertErr(t, err)
 			assert.Equal(t, int32(2), client.calls.Load(), "a new review once the TTL has passed")
@@ -304,11 +327,13 @@ func TestCacheEntryNeverOutlivesTheTokenExpiry(t *testing.T) {
 	_, err := reviewer.Review(t.Context(), token)
 	require.NoError(t, err)
 	clock.Advance(4 * time.Second)
+
 	_, err = reviewer.Review(t.Context(), token)
 	require.NoError(t, err)
 	assert.Equal(t, int32(1), client.calls.Load(), "a cached answer before the token expires")
 
 	clock.Advance(time.Second)
+
 	_, err = reviewer.Review(t.Context(), token)
 	require.NoError(t, err)
 	assert.Equal(t, int32(2), client.calls.Load(), "a new review once the token has expired")
@@ -324,6 +349,7 @@ func TestAnswerForAnExpiredTokenIsNotCached(t *testing.T) {
 		_, err := reviewer.Review(t.Context(), token)
 		require.NoError(t, err)
 	}
+
 	assert.Equal(t, int32(2), client.calls.Load())
 }
 
@@ -338,9 +364,11 @@ func TestCacheNeverStoresTheToken(t *testing.T) {
 
 	require.Equal(t, 1, reviewer.cache.Len())
 	assert.Equal(t, [][sha256.Size]byte{sha256.Sum256([]byte(token))}, reviewer.cache.Keys())
+
 	for _, value := range reviewer.cache.Values() {
 		dump := fmt.Sprintf("%#v", value)
 		assert.NotContains(t, dump, token)
+
 		for _, part := range strings.Split(token, ".") {
 			assert.NotContains(t, dump, part)
 		}

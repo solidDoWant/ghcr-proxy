@@ -35,15 +35,19 @@ func (c *mutableClock) Now() time.Time { return c.now }
 // TokenReview with real signed ServiceAccount tokens.
 func startAPIServer(t *testing.T) kubernetes.Interface {
 	t.Helper()
+
 	if os.Getenv("KUBEBUILDER_ASSETS") == "" {
 		t.Skip("KUBEBUILDER_ASSETS is not set; run inside the dev shell")
 	}
+
 	environment := &envtest.Environment{}
 	config, err := environment.Start()
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, environment.Stop()) })
+
 	client, err := kubernetes.NewForConfig(config)
 	require.NoError(t, err)
+
 	return client
 }
 
@@ -72,11 +76,13 @@ func podToken(t *testing.T, client kubernetes.Interface, namespace, audience str
 		},
 	}, metav1.CreateOptions{})
 	require.NoError(t, err)
+
 	return request.Status.Token
 }
 
 func newReviewer(t *testing.T, client kubernetes.Interface, clock *mutableClock) *authn.Reviewer {
 	t.Helper()
+
 	reviewer, err := authn.NewReviewer(client.AuthenticationV1().TokenReviews(), authn.Options{
 		Audience:      proxyAudience,
 		CacheTTL:      30 * time.Second,
@@ -84,6 +90,7 @@ func newReviewer(t *testing.T, client kubernetes.Interface, clock *mutableClock)
 		Now:           clock.Now,
 	})
 	require.NoError(t, err)
+
 	return reviewer
 }
 
@@ -136,6 +143,7 @@ func TestReviewAgainstTheAPIServer(t *testing.T) {
 		require.Eventually(t, func() bool {
 			clock.now = clock.now.Add(30 * time.Second)
 			_, err := reviewer.Review(t.Context(), token)
+
 			return errors.Is(err, authn.ErrRejected)
 		}, time.Minute, 500*time.Millisecond)
 	})
