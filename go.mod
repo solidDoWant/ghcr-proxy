@@ -4,8 +4,10 @@ go 1.27.0
 
 require (
 	github.com/bmatcuk/doublestar/v4 v4.10.4
+	github.com/distribution/reference v0.6.0
 	github.com/docker/docker-credential-helpers v0.9.3
 	github.com/google/go-containerregistry v0.22.1
+	github.com/opencontainers/go-digest v1.0.0
 	github.com/stretchr/testify v1.12.1
 	k8s.io/apiextensions-apiserver v0.37.2
 	k8s.io/apimachinery v0.37.2
@@ -20,7 +22,6 @@ require (
 	github.com/klauspost/compress v1.19.2 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
-	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
