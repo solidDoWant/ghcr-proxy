@@ -1,7 +1,6 @@
 package upstream
 
 import (
-	"container/list"
 	"context"
 	"errors"
 	"log/slog"
@@ -15,6 +14,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
+	lru "github.com/hashicorp/golang-lru/v2"
 )
 
 // Kind is the credential a token was fetched with.
@@ -89,8 +89,7 @@ type Tokens struct {
 	mu             sync.Mutex
 	challenge      *transport.Challenge
 	challengeGen   uint64
-	cache          map[cacheKey]*list.Element
-	recent         *list.List
+	cache          *lru.Cache[cacheKey, cacheEntry]
 	timeNow        func() time.Time
 	allowedRealmTo []string
 }
@@ -136,9 +135,13 @@ func NewTokens(cfg TokensConfig) (*Tokens, error) {
 		allowed = append(allowed, CanonicalHost(cfg.URL.Scheme, host))
 	}
 
+	cache, err := lru.New[cacheKey, cacheEntry](maxCachedTokens)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Tokens{
-		cfg: cfg, registry: registry,
-		cache: map[cacheKey]*list.Element{}, recent: list.New(),
+		cfg: cfg, registry: registry, cache: cache,
 		timeNow: time.Now, allowedRealmTo: allowed,
 	}, nil
 }
@@ -201,58 +204,28 @@ func (t *Tokens) Token(ctx context.Context, kind Kind, scopes []string) (Token, 
 
 // Invalidate drops token from the cache, so the next request fetches a new one.
 func (t *Tokens) Invalidate(token Token) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	if element, ok := t.cache[token.key]; ok && element.Value.(*cacheEntry).value == token.Value {
-		t.recent.Remove(element)
-		delete(t.cache, token.key)
+	if entry, ok := t.cache.Peek(token.key); ok && entry.value == token.Value {
+		t.cache.Remove(token.key)
 	}
 }
 
 func (t *Tokens) cached(key cacheKey) (string, bool) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	element, ok := t.cache[key]
+	entry, ok := t.cache.Get(key)
 	if !ok {
 		return "", false
 	}
 
-	entry := element.Value.(*cacheEntry)
 	if !t.timeNow().Before(entry.validUntil) {
-		t.recent.Remove(element)
-		delete(t.cache, key)
-
+		t.cache.Remove(key)
 		return "", false
 	}
-
-	t.recent.MoveToFront(element)
 
 	return entry.value, true
 }
 
 func (t *Tokens) store(entry cacheEntry) {
-	if !t.timeNow().Before(entry.validUntil) {
-		return
-	}
-
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	if element, ok := t.cache[entry.key]; ok {
-		element.Value = &entry
-		t.recent.MoveToFront(element)
-
-		return
-	}
-
-	t.cache[entry.key] = t.recent.PushFront(&entry)
-
-	for t.recent.Len() > maxCachedTokens {
-		oldest := t.recent.Back()
-		t.recent.Remove(oldest)
-		delete(t.cache, oldest.Value.(*cacheEntry).key)
+	if t.timeNow().Before(entry.validUntil) {
+		t.cache.Add(entry.key, entry)
 	}
 }
 
