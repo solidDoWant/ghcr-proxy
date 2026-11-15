@@ -48,6 +48,7 @@ See the layout section of `SPEC.md`: `cmd/ghcr-proxy` (proxy main), `cmd/docker-
 Run `make help` for the full list, and keep it and this section current as targets are added:
 
 - `make build`: build `bin/ghcr-proxy` and `bin/docker-credential-ghcr-proxy`.
+- `make build-fakeghcr-image`: build the e2e-only GHCR double image `ghcr.io/soliddowant/ghcr-proxy-fakeghcr:dev` (host arch, never pushed).
 - `make build-images`: build the images `ghcr.io/soliddowant/ghcr-proxy` and `ghcr.io/soliddowant/ghcr-proxy-credential-helper` for amd64 and arm64; `PUSH_ALL=true` also pushes (releases only).
 - `make fmt` / `make lint` (`lint-fix`): format; run every linter and check, reporting all failures before exiting non-zero.
 - `make test`: unit tests with `-race`, plus the tests of the agent and CI scripts.
