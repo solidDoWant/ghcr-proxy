@@ -35,6 +35,7 @@ docs/README.md             This page.
 
 docs/user/
   README.md                The pages for chart authors.
+  policy-status.md         What the status of a policy means.
   crd-reference.md         Every resource field (generated).
 
 docs/admin/
