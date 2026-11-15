@@ -1,0 +1,4 @@
+# The CRDs controller-gen writes to bases/ (`make generate`). List each new
+# bases/ghcr-proxy.soliddowant.dev_<kind>.yaml file here.
+resources:
+  - bases/ghcr-proxy.soliddowant.dev_ghcraccesspolicies.yaml

@@ -1,0 +1,43 @@
+version: "2"
+
+run:
+  timeout: 5m
+  build-tags:
+    - integration
+    - e2e
+    - live
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - forbidigo
+    - govet
+    - staticcheck
+    - wsl_v5
+  settings:
+    forbidigo:
+      analyze-types: true
+      forbid:
+        # The upstream registry is reached only through go-containerregistry's
+        # transport and httputil.ReverseProxy (CLAUDE.md: no hand-written
+        # registry protocol code). Tests may use
+        # net/http directly, for example to fake or probe the registry.
+        - pattern: ^http\.(Get|Post|PostForm|Head|NewRequest|NewRequestWithContext)$
+          pkg: ^net/http$
+          msg: reach the registry through go-containerregistry or httputil.ReverseProxy, not hand-written HTTP requests
+  exclusions:
+    rules:
+      - path: _test\.go$
+        linters: [forbidigo]
+      - path: ^test/
+        linters: [forbidigo]
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/solidDoWant/ghcr-proxy

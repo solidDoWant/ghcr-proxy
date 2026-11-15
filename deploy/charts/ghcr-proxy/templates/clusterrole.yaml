@@ -1,0 +1,28 @@
+# Generated from config/rbac/role.yaml by make generate; do not edit.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "ghcr-proxy.fullname" . }}
+  labels:
+    {{- include "ghcr-proxy.labels" . | nindent 4 }}
+rules:
+- apiGroups:
+  - authentication.k8s.io
+  resources:
+  - tokenreviews
+  verbs:
+  - create
+- apiGroups:
+  - ghcr-proxy.soliddowant.dev
+  resources:
+  - ghcraccesspolicies
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ghcr-proxy.soliddowant.dev
+  resources:
+  - ghcraccesspolicies/status
+  verbs:
+  - update

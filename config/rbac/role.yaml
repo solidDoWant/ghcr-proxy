@@ -1,0 +1,26 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+- apiGroups:
+  - authentication.k8s.io
+  resources:
+  - tokenreviews
+  verbs:
+  - create
+- apiGroups:
+  - ghcr-proxy.soliddowant.dev
+  resources:
+  - ghcraccesspolicies
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ghcr-proxy.soliddowant.dev
+  resources:
+  - ghcraccesspolicies/status
+  verbs:
+  - update
