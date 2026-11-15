@@ -2,8 +2,10 @@
 # Prepares the e2e environment on the kind cluster E2E_CLUSTER (default
 # ghcr-proxy-e2e, created with test/e2e/kind-config.yaml, ImageVolume on): the
 # proxy and credential helper images built for the host architecture and
-# loaded into kind, and the proxy installed from deploy/charts/ghcr-proxy.
-# Prints the env file path; it holds the kube context and the image names.
+# loaded into kind, together with the fake GHCR image. The tests install the
+# fake GHCR and the proxy chart themselves, because the chart needs the PAT and
+# TLS Secrets first. Prints the env file path; it holds the kube context and
+# the image names.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
@@ -12,6 +14,7 @@ node_image="mirror.gcr.io/kindest/node:v1.35.8@sha256:07b2536e30b803ed61d1677a79
 tag="e2e"
 proxy_image="ghcr.io/soliddowant/ghcr-proxy:${tag}"
 helper_image="ghcr.io/soliddowant/ghcr-proxy-credential-helper:${tag}"
+fake_image="ghcr.io/soliddowant/ghcr-proxy-fakeghcr:dev"
 arch="$(go env GOARCH)"
 env_file="build/e2e/${cluster}.env"
 mkdir -p build/e2e
@@ -30,20 +33,17 @@ CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -ldflags="-s -w -X main.version
 docker buildx build --platform "linux/${arch}" --file Dockerfile --tag "$proxy_image" --load . >&2
 docker buildx build --platform "linux/${arch}" --file Dockerfile.credential-helper --tag "$helper_image" --load . >&2
 
-log "loading the images into kind"
-kind load docker-image "$proxy_image" "$helper_image" --name "$cluster" >&2
+make build-fakeghcr-image >&2
 
-log "installing the proxy chart"
-helm upgrade --install ghcr-proxy deploy/charts/ghcr-proxy \
-	--kube-context "kind-${cluster}" --namespace ghcr-proxy-system --create-namespace \
-	--set "image.tag=${tag}" --set image.pullPolicy=Never \
-	--wait --timeout 5m >&2
+log "loading the images into kind"
+kind load docker-image "$proxy_image" "$helper_image" "$fake_image" --name "$cluster" >&2
 
 cat >"$env_file" <<ENV
 E2E_CLUSTER=${cluster}
 E2E_KUBE_CONTEXT=kind-${cluster}
 E2E_PROXY_IMAGE=${proxy_image}
 E2E_HELPER_IMAGE=${helper_image}
+E2E_FAKE_IMAGE=${fake_image}
 ENV
 log "ready: ${env_file}"
 echo "$env_file"

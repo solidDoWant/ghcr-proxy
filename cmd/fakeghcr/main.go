@@ -4,9 +4,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -29,6 +31,7 @@ func run() error {
 		public   string
 		caFile   string
 		patFile  string
+		admin    string
 	)
 	flag.StringVar(&opts.RegistryAddr, "registry-addr", ":8443", "listen address of the registry")
 	flag.StringVar(&opts.StorageAddr, "storage-addr", ":8444", "listen address of the blob storage")
@@ -38,8 +41,9 @@ func run() error {
 	flag.StringVar(&opts.BlobDir, "blob-dir", "", "directory for blob data (default: a temporary directory)")
 	flag.DurationVar(&opts.TokenTTL, "token-ttl", 0, "token lifetime (default 5m)")
 	flag.StringVar(&public, "public", "", "comma-separated repositories anonymous clients may pull")
-	flag.StringVar(&caFile, "ca-file", "", "write the CA certificate (PEM) here")
+	flag.StringVar(&caFile, "ca-file", "", "write the CA certificate (PEM) here, or to the standard output when -")
 	flag.StringVar(&patFile, "pat-file", "", "read the accepted PAT from here (default: random, written to this file if it is missing)")
+	flag.StringVar(&admin, "admin-addr", "", "serve the request log over plain HTTP here: GET /log lists the requests, DELETE /log forgets them")
 	flag.Parse()
 
 	if dnsNames != "" {
@@ -63,7 +67,10 @@ func run() error {
 		}
 	}
 
-	if caFile != "" {
+	if caFile == "-" {
+		// The e2e test reads the CA from the pod log: the image has no shell to copy a file out.
+		fmt.Printf("%s", fake.CAPEM())
+	} else if caFile != "" {
 		if err := os.WriteFile(caFile, fake.CAPEM(), 0o644); err != nil {
 			return err
 		}
@@ -73,6 +80,25 @@ func run() error {
 		if repo != "" {
 			fake.MakePublic(repo)
 		}
+	}
+
+	if admin != "" {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/log", func(resp http.ResponseWriter, req *http.Request) {
+			if req.Method == http.MethodDelete {
+				fake.ResetLog()
+				resp.WriteHeader(http.StatusNoContent)
+
+				return
+			}
+
+			resp.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(resp).Encode(fake.Log())
+		})
+
+		server := &http.Server{Addr: admin, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+
+		go func() { _ = server.ListenAndServe() }()
 	}
 
 	fmt.Println("fakeghcr: registry", fake.RegistryHost(), "storage", fake.StorageHost())

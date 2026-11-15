@@ -20,6 +20,8 @@ For: admins who install ghcr-proxy with its Helm chart.
 | `service.clusterIP` | `""` | Fixed ClusterIP of the Service. Pin it so CI pods can map `ghcr.io` to it with `hostAliases`. Empty lets Kubernetes choose. |
 | `upstream.url` | `https://ghcr.io` | Upstream registry URL. |
 | `upstream.tokenHosts` | `[]` | Extra hosts allowed as token realms. The upstream host is always allowed. |
+| `upstream.ca.existingSecret` | `""` | Name of a Secret with an extra CA certificate (PEM) to trust for the upstream, next to the system roots. Only for a private or test upstream; leave empty for `ghcr.io`. |
+| `upstream.ca.key` | `ca.crt` | Key in that Secret that holds the CA certificate. |
 | `upstream.timeout` | `30m` | Timeout of one whole upstream request. Uploads of several GB must fit. |
 | `upstream.tokenTimeout` | `10s` | Timeout of one upstream token exchange. |
 | `authentication.audience` | `ghcr-proxy` | Audience that ServiceAccount tokens must carry. |

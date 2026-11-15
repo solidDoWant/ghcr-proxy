@@ -5,17 +5,17 @@ Approved for the owner by the operator on 2026-11-15. Only the owner adds scenar
 ## Docker end to end
 
 - **AC-1-01 Build and push.** In a pod set up as `docs/admin/ci-pods.md` describes, with a policy granting push on `soliddowant/app`, `docker build -t ghcr.io/soliddowant/app:1 . && docker push ghcr.io/soliddowant/app:1` succeeds, and the image is in the upstream with that tag and digest.
-  Tests:
+  Tests: `test/e2e: TestBuildAndPushAllowedRepository`, `test/e2e: TestPodIsTheOneInTheAdminGuide`
 - **AC-1-02 Pull a private image.** In the same pod, `docker pull` of a private image the policy allows succeeds, and a `FROM` of it in a `docker build` works.
-  Tests:
+  Tests: `test/e2e: TestPullPrivateAndPublicImages`
 - **AC-1-03 Public images still work.** In the same pod, `docker pull` of a public image in a repository no policy mentions succeeds, and the upstream sees the request with no PAT-backed token.
-  Tests:
+  Tests: `test/e2e: TestPullPrivateAndPublicImages`
 - **AC-1-04 Push outside the policy is refused.** `docker push ghcr.io/soliddowant/other:1` fails, the error Docker prints names the repository and the push action, and nothing reached the upstream.
-  Tests:
+  Tests: `test/e2e: TestPushOutsidePolicyIsRefused`
 - **AC-1-05 Private image outside the policy is invisible.** `docker pull` of a private image the policy doesn't allow fails as it would on GHCR without credentials, and the upstream saw no PAT-backed request for it.
-  Tests:
+  Tests: `test/e2e: TestPullOfPrivateImageOutsidePolicyFails`
 - **AC-1-06 Large layer.** A push of an image with a 2 GiB layer succeeds through the proxy, and the proxy's memory stays under its limit.
-  Tests:
+  Tests: `test/e2e: TestPushOfTwoGiBLayerStaysUnderMemoryLimit`
 - **AC-1-07 Cross-repository mount.** Pushing an image whose layers exist in another repository the policy can pull mounts them; when the policy can't pull the other repository, the push still succeeds by uploading the layers, and no mount from that repository reached the upstream.
   Tests:
 
@@ -71,6 +71,6 @@ Approved for the owner by the operator on 2026-11-15. Only the owner adds scenar
 - **AC-1-27 Two replicas.** With two replicas, killing one during a sequence of pushes doesn't fail pushes that start after it is gone, and only one replica writes policy status.
   Tests:
 - **AC-1-28 Install from the chart.** The chart installs on kind with only the PAT and TLS Secrets created beforehand, every pod runs as non-root with a read-only root filesystem, and the e2e Docker scenarios above run against that install.
-  Tests:
+  Tests: `test/e2e: TestChartInstallRunsNonRootWithReadOnlyRootFilesystem`
 - **AC-1-29 Credential helper protocol.** `docker-credential-ghcr-proxy get` answers for `ghcr.io` (with or without `https://`) and says "credentials not found" for other servers; `store`, `erase` and `list` behave as `SPEC.md` says; the helper image contains only the static binary and runs on amd64 and arm64.
   Tests: `internal/credhelper: TestGetAnswersOnlyForGHCR`, `internal/credhelper: TestGetFailsOnMissingOrEmptyTokenFile`, `internal/credhelper: TestStoreEraseAndListDoNothing`

@@ -32,6 +32,11 @@ upstream:
   url: https://ghcr.io
   # -- Extra hosts allowed as token realms. The upstream host is always allowed.
   tokenHosts: []
+  ca:
+    # -- Name of a Secret with an extra CA certificate (PEM) to trust for the upstream, next to the system roots. Only for a private or test upstream; leave empty for `ghcr.io`.
+    existingSecret: ""
+    # -- Key in that Secret that holds the CA certificate.
+    key: ca.crt
   # -- Timeout of one whole upstream request. Uploads of several GB must fit.
   timeout: 30m
   # -- Timeout of one upstream token exchange.
