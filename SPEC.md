@@ -56,7 +56,7 @@ A leader-elected controller in the same binary writes `GHCRAccessPolicy` status 
 ### Authentication
 
 - The proxy answers unauthenticated `/v2/` requests with `401` and `WWW-Authenticate: Basic realm="ghcr-proxy"`, so Docker sends HTTP Basic credentials on every request. The username is ignored; the password is a Kubernetes ServiceAccount token.
-- Tokens are checked with the `TokenReview` API, with `audiences: [<configured audience>]` (default `ghcr-proxy`). The audience must be in the review's result. This also rejects tokens of deleted pods and ServiceAccounts. Results (success and failure) are cached for at most 30 seconds, keyed by a SHA-256 of the token; the cache never stores the token itself.
+- Tokens are checked with the `TokenReview` API, with `audiences: [<configured audience>]` (default `ghcr-proxy`). The audience must be in the review's result. This also rejects tokens of deleted pods and ServiceAccounts. Definite results (authenticated or rejected, never errors) are cached for at most 30 seconds, keyed by a SHA-256 of the token; the cache never stores the token itself.
 - The identity is the ServiceAccount's namespace and name (`system:serviceaccount:<ns>:<name>`), plus the bound pod name if the review reports one (audit only).
 - A request with no `Authorization` header is **anonymous**. A request with a Basic credential that fails review gets `401 UNAUTHORIZED`: it is never downgraded to anonymous, so a broken setup is visible.
 - A `Bearer` credential is rejected with `401`; the proxy never issues or accepts bearer tokens of its own (it needs none, see "Won't do").
@@ -122,10 +122,10 @@ A policy repository pattern is inside a grant only if every name it can match is
 
 ### Forwarding
 
-- **Allowed by policy:** forwarded to the upstream with a bearer token the proxy gets from the upstream's token endpoint using the PAT, scoped to exactly the repositories and actions this request needs. The proxy uses `github.com/google/go-containerregistry/pkg/v1/remote/transport` for the token dance and caches one transport per scope set until its token expires.
-- **Pull not allowed by policy, or anonymous pull:** forwarded with **no credential**, so public images work and private ones get GHCR's own `401`/`404`. The proxy passes GHCR's anonymous token dance through on the client's behalf (anonymous token, never the PAT).
-- **Push or delete not allowed:** `403` with registry error code `DENIED` and a message naming the namespace, ServiceAccount, repository and action. Nothing is sent upstream.
-- **Mount (`?mount=&from=`) where `from` isn't pullable by policy:** the `mount` and `from` parameters are dropped, so the registry answers with an ordinary upload session (the client then uploads the blob, as the spec allows).
+- **Allowed by policy:** forwarded to the upstream with a bearer token the proxy gets from the upstream's token endpoint using the PAT, scoped to exactly the repositories and actions this request needs. The proxy uses `github.com/google/go-containerregistry/pkg/v1/remote/transport` only for the token exchange, sends tokens with its own round tripper (never widening scopes or resending), and caches one token per credential kind and scope set until it expires.
+- **Pull not allowed by policy, or anonymous pull:** forwarded with **no credential** (an anonymous token, never the PAT), so public images work. When GHCR refuses it, the client gets the proxy's own `401` Basic challenge, so clients that try anonymously first (BuildKit, containerd) retry with their credential.
+- **Push or delete not allowed:** for a ServiceAccount, `403` with registry error code `DENIED` and a message naming the namespace, ServiceAccount, repository and action; for an anonymous request, `401` with the Basic challenge, so Docker retries with its credential. Nothing is sent upstream.
+- **Mount (`?mount=&from=`) where `from` isn't pullable by policy, or the parameters are malformed or repeated:** the `mount` and `from` parameters are dropped, so the registry answers with an ordinary upload session (the client then uploads the blob, as the spec allows).
 - Request and response bodies are streamed, never buffered whole. Client and upstream timeouts are configurable; uploads of several GB must work.
 
 ### Rewrites
@@ -133,7 +133,8 @@ A policy repository pattern is inside a grant only if every name it can match is
 - `Location` headers that point at the upstream host are rewritten to the host the client used. Upload session URLs keep their path and query.
 - `Location` headers that point anywhere else (GHCR's blob storage, signed URLs) are passed through untouched, so blob downloads go straight to storage.
 - `WWW-Authenticate` challenges from the upstream are never passed to the client; the client only ever sees the proxy's Basic challenge.
-- Upstream `401`s on a request the proxy authorized are retried once with a fresh token, then returned as `502` with a clear error: they mean the PAT is wrong or lacks a scope.
+- Upstream `401`s on a request the proxy authorized are retried once with a fresh token (when the request can be replayed), then returned as `502` with a clear error: they mean the PAT is wrong or lacks a scope.
+- The upstream path and query are rebuilt from what the proxy parsed and authorized; nothing from the client's URL is forwarded verbatim.
 
 ### Delete
 
@@ -160,7 +161,7 @@ It is a static Go binary (`CGO_ENABLED=0`) shipped alone in the image `ghcr.io/s
 
 ## 5. Security model
 
-- The proxy's Kubernetes RBAC: create `TokenReview`; get, list and watch `GHCRAccessPolicy`; update `GHCRAccessPolicy/status`; leases for leader election. Nothing else; it reads the PAT and TLS Secrets as mounted files.
+- The proxy's Kubernetes RBAC: create `TokenReview`; get, list and watch `GHCRAccessPolicy`; update `GHCRAccessPolicy/status`; leases for leader election. Nothing else (no events); it reads the PAT and TLS Secrets as mounted files.
 - A caller's reach is the intersection of its namespace's policies and its namespace's grant. A caller in a namespace with no grant gets only anonymous pulls.
 - ServiceAccount tokens for the proxy should use their own audience (`ghcr-proxy`) and a short lifetime (the docs recommend 1–6 hours; the kubelet rotates them). A token with the default API server audience is rejected unless the admin configures that audience, which the docs advise against.
 - The CA that signs the proxy's `ghcr.io` certificate is the admin's. The docs require name constraints limiting it to `ghcr.io` and trusting it only through Docker's per-registry `certs.d` directory, never the system trust store.
