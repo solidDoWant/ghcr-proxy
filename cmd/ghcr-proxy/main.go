@@ -21,6 +21,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/solidDoWant/ghcr-proxy/api/v1alpha1"
+	"github.com/solidDoWant/ghcr-proxy/internal/audit"
 	"github.com/solidDoWant/ghcr-proxy/internal/authn"
 	"github.com/solidDoWant/ghcr-proxy/internal/authz"
 	"github.com/solidDoWant/ghcr-proxy/internal/config"
@@ -174,6 +175,10 @@ func serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		Forwarder: forwarder,
 		Ready:     readiness.Ready,
 		Logger:    logger,
+	}
+
+	if cfg.Audit.Enabled {
+		handler.Audit = audit.New(os.Stdout)
 	}
 
 	serveCtx, stopServing := context.WithCancel(ctx)

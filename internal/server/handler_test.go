@@ -23,6 +23,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache/informertest"
 
 	"github.com/solidDoWant/ghcr-proxy/api/v1alpha1"
+	"github.com/solidDoWant/ghcr-proxy/internal/audit"
 	"github.com/solidDoWant/ghcr-proxy/internal/authn"
 	"github.com/solidDoWant/ghcr-proxy/internal/authz"
 	"github.com/solidDoWant/ghcr-proxy/internal/config"
@@ -59,6 +60,8 @@ type harnessOptions struct {
 	unsynced bool
 	// noPAT leaves the PAT file missing.
 	noPAT bool
+	// audit receives the audit lines.
+	audit io.Writer
 }
 
 type harness struct {
@@ -115,6 +118,10 @@ func newHarness(t *testing.T, options harnessOptions) *harness {
 	readiness := server.NewReadiness(index.Synced, pat.Loaded)
 	handler := &server.Handler{
 		Reviewer: stubReviewer{}, Decider: &authz.Authorizer{Index: index}, Forwarder: forwarder, Ready: readiness.Ready,
+	}
+
+	if options.audit != nil {
+		handler.Audit = audit.New(options.audit)
 	}
 
 	httpsServer := httptest.NewTLSServer(handler)

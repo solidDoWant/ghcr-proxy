@@ -65,7 +65,7 @@ Approved for the owner by the operator on 2026-11-15. Only the owner adds scenar
 ## Operations
 
 - **AC-1-25 Audit line.** Each request writes one JSON line with namespace, ServiceAccount, repository, action, decision and upstream status, and for a manifest push its digest; no line contains the PAT, a ServiceAccount token or an `Authorization` value.
-  Tests:
+  Tests: `internal/server: TestAuditWritesOneLineForEachKindOfDecision`, `internal/server: TestAuditManifestPushCarriesThePushedDigest`, `internal/server: TestAuditLinesNeverContainSecrets`, `internal/audit: TestLogWritesOneJSONLineWithTheDocumentedFields`
 - **AC-1-26 Certificate rotation.** Replacing the TLS Secret is picked up without a restart.
   Tests: `internal/server: TestReplacedCertificateIsServedToNewConnections`
 - **AC-1-27 Two replicas.** With two replicas, killing one during a sequence of pushes doesn't fail pushes that start after it is gone, and only one replica writes policy status.

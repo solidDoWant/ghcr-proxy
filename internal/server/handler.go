@@ -6,8 +6,13 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
+	"time"
 
+	"github.com/opencontainers/go-digest"
+
+	"github.com/solidDoWant/ghcr-proxy/internal/audit"
 	"github.com/solidDoWant/ghcr-proxy/internal/authn"
 	"github.com/solidDoWant/ghcr-proxy/internal/authz"
 	"github.com/solidDoWant/ghcr-proxy/internal/registry"
@@ -46,12 +51,43 @@ type Handler struct {
 	// Ready reports whether the replica may serve authenticated requests: policies synced and the PAT loaded.
 	Ready  func() bool
 	Logger *slog.Logger
+	// Audit receives one entry per request; nil turns the audit log off.
+	Audit *audit.Logger
 }
 
 // ServeHTTP runs one request through the pipeline: classify (unknown routes are 404 with nothing upstream),
 // authenticate, require readiness for authenticated callers, then decide. Anything the proxy can't decide is
-// refused; it never falls back to the PAT.
+// refused; it never falls back to the PAT. Every request writes one audit entry.
 func (h *Handler) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
+	started := time.Now()
+	recorder := &recordingWriter{ResponseWriter: resp}
+	entry := audit.Entry{
+		Time: started.UTC(), ClientIP: clientIP(req), Method: req.Method, Path: req.URL.EscapedPath(), Action: "unknown",
+	}
+
+	defer func() {
+		entry.Status = recorder.Status()
+		entry.Bytes = recorder.bytes
+		entry.DurationMS = time.Since(started).Milliseconds()
+
+		h.Audit.Log(entry)
+	}()
+
+	h.serve(recorder, req, &entry, recorder)
+}
+
+// Audit decision kinds.
+const (
+	decisionAllowed         = "allowed"
+	decisionAnonymous       = "anonymous"
+	decisionDenied          = "denied"
+	decisionUnauthenticated = "unauthenticated"
+	decisionUnavailable     = "unavailable"
+	decisionNotFound        = "notfound"
+	decisionInvalid         = "invalid"
+)
+
+func (h *Handler) serve(resp http.ResponseWriter, req *http.Request, entry *audit.Entry, recorder *recordingWriter) {
 	request, err := registry.Classify(req)
 	if err != nil {
 		var registryErr *registry.Error
@@ -59,19 +95,42 @@ func (h *Handler) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 			registryErr = &registry.Error{Status: http.StatusNotFound, Code: "NOT_FOUND", Message: "not found"}
 		}
 
+		entry.Decision = decisionNotFound
+		if registryErr.Status != http.StatusNotFound {
+			entry.Decision = decisionInvalid
+		}
+
 		registry.WriteError(resp, registryErr)
 
 		return
 	}
 
+	entry.Repository = request.Name
+	entry.Action = string(request.Action)
+
+	if request.Action == "" {
+		entry.Action = "none"
+	}
+
 	identity, answer := h.authenticate(req)
 	if answer != nil {
+		entry.Decision = decisionUnauthenticated
+		if answer.Status == http.StatusServiceUnavailable {
+			entry.Decision = decisionUnavailable
+		}
+
 		registry.WriteError(resp, answer)
+
 		return
 	}
 
+	entry.Namespace, entry.SA, entry.Pod = identity.Namespace, identity.ServiceAccount, identity.Pod
+
 	if identity.ServiceAccount != "" && !h.Ready() {
+		entry.Decision = decisionUnavailable
+
 		registry.WriteError(resp, notReady())
+
 		return
 	}
 
@@ -79,21 +138,100 @@ func (h *Handler) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 
 	switch decision.Outcome {
 	case authz.OutcomeVersionCheck:
+		entry.Decision = decisionAllowed
+
 		resp.Header().Set("Content-Type", "application/json")
 		resp.Header().Set(apiVersionHeader, "registry/2.0")
 		resp.WriteHeader(http.StatusOK)
 		_, _ = resp.Write([]byte("{}"))
 	case authz.OutcomeChallenge:
+		entry.Decision = decisionUnauthenticated
+
 		resp.Header().Set(apiVersionHeader, "registry/2.0")
 		registry.WriteError(resp, unauthorized())
 	case authz.OutcomeDenied:
+		entry.Decision = decisionDenied
+
 		registry.WriteError(resp, &registry.Error{Status: http.StatusForbidden, Code: "DENIED", Message: decision.Message})
 	case authz.OutcomeForward:
-		h.Forwarder.ServeForward(resp, req, decision.Forward)
+		entry.Decision, entry.Policy = decisionAnonymous, decision.Policy
+		if decision.Forward.Credential == registry.CredentialPAT {
+			entry.Decision = decisionAllowed
+		}
+
+		if mount := decision.Forward.Request.Mount; mount != nil {
+			entry.From = mount.From
+		}
+
+		entry.Upstream = h.Forwarder.ServeForward(resp, req, decision.Forward)
+
+		if isManifestWrite(request) {
+			entry.Digest = recorder.digest
+			if entry.Digest == "" && digest.Digest(request.Reference).Validate() == nil {
+				entry.Digest = request.Reference
+			}
+		}
 	default:
+		entry.Decision = decisionUnavailable
+
 		registry.WriteError(resp, notReady())
 	}
 }
+
+func isManifestWrite(request registry.Request) bool {
+	return request.Route == registry.RouteManifest && (request.Method == http.MethodPut || request.Method == http.MethodDelete)
+}
+
+// clientIP is the address of the TCP peer. Forwarding headers are the client's claim, so they are not used.
+func clientIP(req *http.Request) string {
+	host, _, err := net.SplitHostPort(req.RemoteAddr)
+	if err != nil {
+		return req.RemoteAddr
+	}
+
+	return host
+}
+
+// recordingWriter remembers what the client got: the status, the body size and the upstream's digest header.
+type recordingWriter struct {
+	http.ResponseWriter
+	status int
+	bytes  int64
+	digest string
+}
+
+// Status is the status the client got, 200 when the handler wrote only a body.
+func (w *recordingWriter) Status() int {
+	if w.status == 0 {
+		return http.StatusOK
+	}
+
+	return w.status
+}
+
+func (w *recordingWriter) WriteHeader(status int) {
+	if w.status == 0 && (status >= 200 || status == http.StatusSwitchingProtocols) {
+		w.status = status
+		w.digest = w.Header().Get("Docker-Content-Digest")
+	}
+
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *recordingWriter) Write(data []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+		w.digest = w.Header().Get("Docker-Content-Digest")
+	}
+
+	n, err := w.ResponseWriter.Write(data)
+	w.bytes += int64(n)
+
+	return n, err
+}
+
+// Unwrap lets http.ResponseController reach the real writer (flushing streamed bodies).
+func (w *recordingWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 // authenticate returns the caller's identity, the zero Identity for a caller that sent no credential, or the
 // answer to give when the credential can't be accepted.
