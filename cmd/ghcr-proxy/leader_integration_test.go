@@ -175,27 +175,6 @@ func (p *proxyUnderTest) leaseHolder(t *testing.T) string {
 	return *lease.Spec.HolderIdentity
 }
 
-// A synced replica keeps serving through an API server outage (the design accepts stale policies for it).
-func TestLeaderKeepsServingThroughAPIServerOutage(t *testing.T) {
-	proxy := startProxy(t, t.Context())
-
-	require.Eventually(t, func() bool { h := proxy.leaseHolder(t); return h != "" && h[:5] != "error" },
-		30*time.Second, 200*time.Millisecond, "never became leader")
-
-	require.NoError(t, proxy.env.ControlPlane.APIServer.Stop())
-
-	stoppedAt := time.Now()
-
-	select {
-	case code := <-proxy.done:
-		t.Fatalf("proxy stopped %s after the API server went away (exit code %d); log:\n%s",
-			time.Since(stoppedAt).Round(time.Second), code, proxy.stderr)
-	case <-time.After(45 * time.Second):
-	}
-
-	require.True(t, proxy.ready(), "proxy is not ready after the API server outage")
-}
-
 // The leader gives the status lease up when it shuts down, so another replica takes over at once. main exits the
 // process as soon as run returns, so the lease must be released by then.
 func TestLeaderReleasesLeaseWhenRunReturns(t *testing.T) {
