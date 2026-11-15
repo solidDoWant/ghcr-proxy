@@ -37,9 +37,13 @@
           if goModToolchain != null then builtins.head goModToolchain
           else if goModGo != null then builtins.head goModGo
           else throw "ghcr-proxy: go.mod has neither a `toolchain goX.Y.Z` nor a `go X.Y.Z` line";
+        # Pinned to Go 1.26 (1.26.11 or later has the net/http fix from
+        # GO-2026-6859). Return to the default `pkgs.go` once nixpkgs has
+        # go1.27.4 or later.
+        nixpkgsGo = pkgs.go_1_26;
         go =
-          if pkgs.lib.versionAtLeast pkgs.go.version minimumGoVersion then pkgs.go
-          else throw "ghcr-proxy: go.mod asks for Go ${minimumGoVersion}, but nixpkgs has Go ${pkgs.go.version}; update flake.lock (nix flake update nixpkgs) or lower go.mod.";
+          if pkgs.lib.versionAtLeast nixpkgsGo.version minimumGoVersion then nixpkgsGo
+          else throw "ghcr-proxy: go.mod asks for Go ${minimumGoVersion}, but nixpkgs has Go ${nixpkgsGo.version}; update flake.lock (nix flake update nixpkgs) or lower go.mod.";
 
         # The control plane binaries for envtest
         # (sigs.k8s.io/controller-runtime/pkg/envtest): the dev shell points
