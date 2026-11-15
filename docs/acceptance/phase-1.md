@@ -52,11 +52,11 @@ Approved for the owner by the operator on 2026-11-15. Only the owner adds scenar
 ## Upstream credential and protocol
 
 - **AC-1-20 PAT rotation.** Replacing the PAT in its Secret is picked up without a restart, and later requests use the new PAT.
-  Tests:
+  Tests: `internal/registry: TestForwarderUsesAReplacedPATWithoutRestart`
 - **AC-1-21 Bad PAT.** With a PAT the upstream rejects, an allowed push gets `502` with a message saying the proxy's credential was rejected, and the PAT appears in no log line, response or status.
-  Tests:
+  Tests: `internal/registry: TestForwarderAnswers502WhenThePATIsRejectedAndNeverLeaksIt`
 - **AC-1-22 Location rewrite.** Upload `Location` headers pointing at the upstream host come back pointing at `ghcr.io`, and blob-download redirects to the storage host come back unchanged.
-  Tests:
+  Tests: `internal/registry: TestForwarderRewritesUploadLocationToTheClientHost/upload location points at the client's host`, `internal/registry: TestForwarderRewritesUploadLocationToTheClientHost/blob redirect to storage passes unchanged`
 - **AC-1-23 Catalog and unknown paths.** `/v2/_catalog` and unknown paths get `404` and never reach the upstream.
   Tests:
 - **AC-1-24 Not ready until synced.** A replica reports not ready, and serves `503` to authenticated requests, until its policy cache has synced and the PAT and certificate are loaded.
