@@ -14,18 +14,19 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 
 	"github.com/solidDoWant/ghcr-proxy/api/v1alpha1"
 	"github.com/solidDoWant/ghcr-proxy/internal/audit"
 	"github.com/solidDoWant/ghcr-proxy/internal/authn"
 	"github.com/solidDoWant/ghcr-proxy/internal/authz"
 	"github.com/solidDoWant/ghcr-proxy/internal/config"
-	"github.com/solidDoWant/ghcr-proxy/internal/controller"
 	"github.com/solidDoWant/ghcr-proxy/internal/registry"
 	"github.com/solidDoWant/ghcr-proxy/internal/server"
 	"github.com/solidDoWant/ghcr-proxy/internal/upstream"
@@ -131,19 +132,24 @@ func serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		return err
 	}
 
-	manager, err := ctrl.NewManager(restConfig, controller.ManagerOptions(scheme, os.Getenv("POD_NAMESPACE")))
+	// The index has its own informer, apart from the status controller's manager: losing the status lease stops the
+	// manager, and serving must carry on with live policies.
+	policyCache, err := cache.New(restConfig, cache.Options{Scheme: scheme})
 	if err != nil {
-		return fmt.Errorf("controller manager: %w", err)
+		return fmt.Errorf("policy cache: %w", err)
 	}
 
 	index := authz.NewIndex(cfg.Grants)
-	if err := index.Watch(ctx, manager.GetCache()); err != nil {
+	if err := index.Watch(ctx, policyCache); err != nil {
 		return err
 	}
 
-	reconciler := &controller.GHCRAccessPolicyReconciler{Client: manager.GetClient(), Grants: cfg.Grants}
-	if err := reconciler.SetupWithManager(manager); err != nil {
-		return err
+	statusController := &statusController{
+		restConfig: restConfig,
+		scheme:     scheme,
+		namespace:  os.Getenv("POD_NAMESPACE"),
+		grants:     cfg.Grants,
+		logger:     logger,
 	}
 
 	httpsListener, err := net.Listen("tcp", cfg.Listen.HTTPS)
@@ -157,16 +163,24 @@ func serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		return err
 	}
 
-	// The manager, the informer and the file watchers outlive the listeners' drain, so requests still being served
-	// during shutdown are decided against live policies.
+	// The informer, the status controller and the file watchers outlive the listeners' drain, so requests still
+	// being served during shutdown are decided against live policies.
 	background, stopBackground := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopBackground()
 
+	var components sync.WaitGroup
+
 	backgroundErrs := make(chan error, 3)
 
-	go func() { backgroundErrs <- manager.Start(background) }()
-	go func() { backgroundErrs <- pat.Watch(background) }()
-	go func() { backgroundErrs <- certificate.Watch(background) }()
+	start := func(run func(context.Context) error) {
+		components.Go(func() { backgroundErrs <- run(background) })
+	}
+
+	start(policyCache.Start)
+	start(pat.Watch)
+	start(certificate.Watch)
+	// The status controller never fails the proxy; it retries until the proxy stops.
+	components.Go(func() { statusController.run(background) })
 
 	readiness := server.NewReadiness(index.Synced, pat.Loaded, certificate.Loaded)
 	handler := &server.Handler{
@@ -186,12 +200,21 @@ func serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 
 	// A background component that fails stops the proxy; a restart is better than serving with stale state.
 	go func() {
-		if err := <-backgroundErrs; err != nil {
-			logger.Error("background component failed", "error", err.Error())
-		}
+		select {
+		case err := <-backgroundErrs:
+			if err != nil {
+				logger.Error("background component failed", "error", err.Error())
+			}
 
-		stopServing()
+			stopServing()
+		case <-serveCtx.Done():
+		}
 	}()
+
+	// Stop the background components after the listeners drain, and wait for them: the status controller releases
+	// its lease on the way out, and the process must not exit first.
+	defer components.Wait()
+	defer stopBackground()
 
 	return server.Run(serveCtx, server.Config{
 		HTTPS:               httpsListener,
