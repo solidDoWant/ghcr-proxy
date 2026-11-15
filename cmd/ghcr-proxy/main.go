@@ -160,11 +160,21 @@ func serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	// The manager, the informer and the file watchers outlive the listeners' drain, so requests still being served
 	// during shutdown are decided against live policies.
 	background, stopBackground := context.WithCancel(context.WithoutCancel(ctx))
-	defer stopBackground()
+	managerStopped := make(chan struct{})
+
+	// Return only after the manager has stopped, so it can release the leader election lease before the process exits.
+	defer func() {
+		stopBackground()
+		<-managerStopped
+	}()
 
 	backgroundErrs := make(chan error, 3)
 
-	go func() { backgroundErrs <- manager.Start(background) }()
+	go func() {
+		defer close(managerStopped)
+
+		backgroundErrs <- manager.Start(background)
+	}()
 	go func() { backgroundErrs <- pat.Watch(background) }()
 	go func() { backgroundErrs <- certificate.Watch(background) }()
 
