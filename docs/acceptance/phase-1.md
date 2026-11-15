@@ -22,13 +22,13 @@ Approved for the owner by the operator on 2026-11-15. Only the owner adds scenar
 ## Authentication
 
 - **AC-1-08 Wrong audience.** A ServiceAccount token without the `ghcr-proxy` audience gets `401`, and nothing reached the upstream.
-  Tests:
+  Tests: `internal/server: TestRealReviewerKeepsUnauthenticatedRequestsAwayFromTheUpstream/token without the proxy audience`
 - **AC-1-09 Deleted pod.** After the pod a token is bound to is deleted, that token stops working within the cache TTL.
-  Tests:
+  Tests: `internal/authn: TestReviewAgainstTheAPIServer/token bound to a deleted pod fails once the cached answer expires`
 - **AC-1-10 Garbage credential.** A Basic credential that isn't a valid token gets `401`, never anonymous access.
-  Tests:
+  Tests: `internal/server: TestAuthenticationRefusesCredentialsItCannotAccept`, `internal/server: TestRealReviewerKeepsUnauthenticatedRequestsAwayFromTheUpstream/credential that is not a token`
 - **AC-1-11 API server down.** With token review failing, authenticated requests get `503` and the upstream sees nothing PAT-backed.
-  Tests:
+  Tests: `internal/server: TestRealReviewerKeepsUnauthenticatedRequestsAwayFromTheUpstream/token review failing`
 - **AC-1-12 Token rotation.** The credential helper returns the new token after the token file is replaced, without restarting anything.
   Tests: `internal/credhelper: TestGetReadsReplacedTokenFile`
 
