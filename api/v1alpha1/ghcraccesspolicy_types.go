@@ -51,18 +51,31 @@ type GHCRAccessPolicySpec struct {
 	Rules []AccessRule `json:"rules"`
 }
 
-// RejectedRule lists the parts of one rule that the namespace's grant doesn't allow. They are ignored.
+// RejectedReason says why a repository pattern lost actions.
+// +kubebuilder:validation:Enum=OutsideGrant;InvalidPattern;NoGrant
+type RejectedReason string
+
+const (
+	// RejectedOutsideGrant: the namespace's grant doesn't cover the pattern for these actions.
+	RejectedOutsideGrant RejectedReason = "OutsideGrant"
+	// RejectedInvalidPattern: the pattern is not a valid repository pattern.
+	RejectedInvalidPattern RejectedReason = "InvalidPattern"
+	// RejectedNoGrant: no grant applies to the namespace.
+	RejectedNoGrant RejectedReason = "NoGrant"
+)
+
+// RejectedRule is one repository pattern of one rule that lost at least one action. The lost actions are ignored;
+// the rest of the policy still applies.
 type RejectedRule struct {
 	// Rule is the index into spec.rules.
 	Rule int32 `json:"rule"`
-	// Repositories are the patterns outside the grant.
-	// +optional
+	// Repository is the pattern as written in the rule.
+	Repository string `json:"repository"`
+	// Actions are the actions dropped for this pattern, counting the pull that push and delete imply.
 	// +listType=atomic
-	Repositories []string `json:"repositories,omitempty"`
-	// Actions are the actions the grant doesn't allow at all.
-	// +optional
-	// +listType=atomic
-	Actions []Action `json:"actions,omitempty"`
+	Actions []Action `json:"actions"`
+	// Reason says why the actions were dropped.
+	Reason RejectedReason `json:"reason"`
 }
 
 // GHCRAccessPolicyStatus is the observed state of a GHCRAccessPolicy. Only the proxy writes it.
@@ -75,7 +88,7 @@ type GHCRAccessPolicyStatus struct {
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
-	// Rejected lists, per rule, the patterns and actions that are ignored because the grant doesn't cover them.
+	// Rejected lists each repository pattern that lost actions, with the actions it lost and why.
 	// +optional
 	// +listType=atomic
 	Rejected []RejectedRule `json:"rejected,omitempty"`

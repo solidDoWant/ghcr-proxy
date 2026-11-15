@@ -184,15 +184,16 @@ spec:
                 format: int64
                 type: integer
               rejected:
-                description: Rejected lists, per rule, the patterns and actions that
-                  are ignored because the grant doesn't cover them.
+                description: Rejected lists each repository pattern that lost actions,
+                  with the actions it lost and why.
                 items:
-                  description: RejectedRule lists the parts of one rule that the namespace's
-                    grant doesn't allow. They are ignored.
+                  description: |-
+                    RejectedRule is one repository pattern of one rule that lost at least one action. The lost actions are ignored;
+                    the rest of the policy still applies.
                   properties:
                     actions:
-                      description: Actions are the actions the grant doesn't allow
-                        at all.
+                      description: Actions are the actions dropped for this pattern,
+                        counting the pull that push and delete imply.
                       items:
                         description: Action is a registry action a rule allows.
                         enum:
@@ -202,17 +203,24 @@ spec:
                         type: string
                       type: array
                       x-kubernetes-list-type: atomic
-                    repositories:
-                      description: Repositories are the patterns outside the grant.
-                      items:
-                        type: string
-                      type: array
-                      x-kubernetes-list-type: atomic
+                    reason:
+                      description: Reason says why the actions were dropped.
+                      enum:
+                      - OutsideGrant
+                      - InvalidPattern
+                      - NoGrant
+                      type: string
+                    repository:
+                      description: Repository is the pattern as written in the rule.
+                      type: string
                     rule:
                       description: Rule is the index into spec.rules.
                       format: int32
                       type: integer
                   required:
+                  - actions
+                  - reason
+                  - repository
                   - rule
                   type: object
                 type: array

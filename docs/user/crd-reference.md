@@ -22,7 +22,8 @@ Every field of the `ghcr-proxy.soliddowant.dev/v1alpha1` resources. A field mark
 | `status.conditions[].status` | string | yes | status of the condition, one of True, False, Unknown. One of `True`, `False`, `Unknown`. |
 | `status.conditions[].type` | string | yes | type of condition in CamelCase or in foo.example.com/CamelCase. |
 | `status.observedGeneration` | integer |  | ObservedGeneration is the last generation the proxy computed this status for. |
-| `status.rejected` | list of object |  | Rejected lists, per rule, the patterns and actions that are ignored because the grant doesn't cover them. |
-| `status.rejected[].actions` | list of string |  | Actions are the actions the grant doesn't allow at all. |
-| `status.rejected[].repositories` | list of string |  | Repositories are the patterns outside the grant. |
+| `status.rejected` | list of object |  | Rejected lists each repository pattern that lost actions, with the actions it lost and why. |
+| `status.rejected[].actions` | list of string | yes | Actions are the actions dropped for this pattern, counting the pull that push and delete imply. |
+| `status.rejected[].reason` | string | yes | Reason says why the actions were dropped. One of `OutsideGrant`, `InvalidPattern`, `NoGrant`. |
+| `status.rejected[].repository` | string | yes | Repository is the pattern as written in the rule. |
 | `status.rejected[].rule` | integer | yes | Rule is the index into spec.rules. |
