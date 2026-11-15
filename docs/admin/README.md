@@ -5,6 +5,5 @@ For: people who install ghcr-proxy and set up CI pods to use it. You know Kubern
 - [Install ghcr-proxy](install.md): the PAT, the certificate and its CA, the grants, the chart, the security limits and the audit log.
 - [Set up a CI pod](ci-pods.md): host aliases, the CA, the credential helper, the token and a Tekton Task example.
 - [Chart values](chart-values.md): every Helm value (generated).
-- [Set up a CI pod](ci-pods.md): the pod spec that builds and pushes through the proxy.
 
 [`SPEC.md`](../../SPEC.md) has the full rules.

@@ -32,8 +32,8 @@ import (
 const (
 	proxyNamespace = "ghcr-proxy-system"
 	fakeNamespace  = "fake-ghcr"
-	ciNamespace    = "ci-e2e"
-	proxyClusterIP = "10.96.100.10" // the address in docs/admin/ci-pods.md
+	ciNamespace    = "ci-foo"
+	proxyClusterIP = "10.96.0.50" // the address in docs/admin/ci-pods.md
 	storageHost    = "pkg-containers.githubusercontent.com"
 	fakeRegistry   = "fakeghcr." + fakeNamespace + ".svc"
 	fakeStorageSvc = "fakeghcr-storage"
@@ -122,7 +122,7 @@ func (e *env) setup(ctx context.Context) error {
 		return fmt.Errorf("helm uninstall: %w\n%s", err, out)
 	}
 
-	for namespace, pod := range map[string]string{fakeNamespace: "fakeghcr", ciNamespace: "ci"} {
+	for namespace, pod := range map[string]string{fakeNamespace: "fakeghcr", ciNamespace: "build"} {
 		if _, err := e.kubectl(ctx, "", "-n", namespace, "delete", "pod", pod, "--ignore-not-found", "--wait"); err != nil {
 			return err
 		}
@@ -357,16 +357,40 @@ func (e *env) ciPod(storageIP string) (corev1.Pod, error) {
 		return pod, err
 	}
 
-	match := regexp.MustCompile("(?s)<!-- e2e:ci-pod -->\n```yaml\n(.*?)\n```").FindSubmatch(doc)
+	match := regexp.MustCompile("(?s)## Pod example.*?\n```yaml\n(.*?)\n```").FindSubmatch(doc)
 	if match == nil {
-		return pod, fmt.Errorf("docs/admin/ci-pods.md has no pod marked e2e:ci-pod")
+		return pod, fmt.Errorf("docs/admin/ci-pods.md has no pod example")
 	}
 
 	if err := yaml.UnmarshalStrict(match[1], &pod); err != nil {
 		return pod, err
 	}
 
+	// The guide leaves the images, the version and the command to the reader. The
+	// tests fill them in and run the Docker commands themselves.
 	pod.Namespace = ciNamespace
+	images := map[string]string{
+		"docker": "mirror.gcr.io/library/docker:29.9.3-cli@sha256:5a7af0dcb0e46c803efe9b45371dd21cb500e5b4453250394ac6f06d49b6e6f1",
+		"dind":   "mirror.gcr.io/library/docker:29.9.3-dind@sha256:7bf70dcb85c822e3fa6f2d332143e474b99147b9d7b39102b0cfe8b04a7dd61b",
+	}
+
+	for index := range pod.Spec.Containers {
+		container := &pod.Spec.Containers[index]
+		container.Image = images[container.Name]
+
+		if container.Name == "docker" {
+			var setup []string
+
+			for _, line := range strings.Split(container.Args[0], "\n") {
+				if !strings.HasPrefix(line, "docker ") {
+					setup = append(setup, line)
+				}
+			}
+
+			container.Args = []string{strings.Join(setup, "\n") + "\nexec sleep infinity"}
+		}
+	}
+
 	for index := range pod.Spec.Volumes {
 		if image := pod.Spec.Volumes[index].Image; image != nil {
 			image.Reference = e.helperImage
@@ -403,13 +427,13 @@ func (e *env) setupCI(ctx context.Context) error {
 	policy := fmt.Sprintf(`
 apiVersion: v1
 kind: ServiceAccount
-metadata: {name: ci, namespace: %[1]s}
+metadata: {name: builder, namespace: %[1]s}
 ---
 apiVersion: ghcr-proxy.soliddowant.dev/v1alpha1
 kind: GHCRAccessPolicy
-metadata: {name: ci, namespace: %[1]s}
+metadata: {name: builder, namespace: %[1]s}
 spec:
-  serviceAccounts: [ci]
+  serviceAccounts: [builder]
   rules:
     - repositories: [soliddowant/private, soliddowant/base]
       actions: [pull]
@@ -424,7 +448,7 @@ spec:
 		return err
 	}
 
-	if _, err := e.kubectl(ctx, "", "-n", ciNamespace, "wait", "--for=condition=Ready", "pod/ci", "--timeout=300s"); err != nil {
+	if _, err := e.kubectl(ctx, "", "-n", ciNamespace, "wait", "--for=condition=Ready", "pod/build", "--timeout=300s"); err != nil {
 		return err
 	}
 
@@ -446,5 +470,5 @@ spec:
 
 // docker runs a shell script in the Docker CLI container of the CI pod.
 func (e *env) docker(ctx context.Context, script string) (string, error) {
-	return e.kubectl(ctx, "", "-n", ciNamespace, "exec", "ci", "-c", "docker", "--", "sh", "-ec", script)
+	return e.kubectl(ctx, "", "-n", ciNamespace, "exec", "build", "-c", "docker", "--", "sh", "-ec", script)
 }

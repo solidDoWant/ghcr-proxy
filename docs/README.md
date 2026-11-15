@@ -44,7 +44,6 @@ docs/admin/
   install.md               PAT, certificate and CA, grants, chart install and the audit log.
   ci-pods.md               How to set up a CI pod, with a Tekton Task example.
   chart-values.md          Every Helm chart value (generated).
-  ci-pods.md               How to set up a CI pod.
 
 docs/dev/
   README.md                What the developer pages will cover, and the commands.

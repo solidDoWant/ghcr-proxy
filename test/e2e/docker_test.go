@@ -169,7 +169,7 @@ func TestPodIsTheOneInTheAdminGuide(t *testing.T) {
 	assert.True(t, projected, "projected token with audience ghcr-proxy")
 	assert.True(t, helper, "image volume for the credential helper")
 
-	live, err := cluster.kubectl(t.Context(), "", "-n", ciNamespace, "get", "pod", "ci", "-o", "yaml")
+	live, err := cluster.kubectl(t.Context(), "", "-n", ciNamespace, "get", "pod", "build", "-o", "yaml")
 	require.NoError(t, err)
 
 	var running corev1.Pod
