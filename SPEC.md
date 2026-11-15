@@ -148,7 +148,7 @@ Admins must configure the anonymous mirror with **no upstream credentials**; oth
 
 ### Audit
 
-One JSON log line per request to stdout: time, client IP, namespace, ServiceAccount, pod, repository, action, decision (`allowed`, `anonymous`, `denied`, `unauthenticated`), the policy that allowed it, upstream status, bytes, duration, and for manifest pushes and deletes the digest. Never any header values or tokens.
+One JSON log line per request to stdout: time, client IP, namespace, ServiceAccount, pod, repository, action, decision (`allowed`, `anonymous`, `denied`, `unauthenticated`, `unavailable`, `notfound`, `invalid`), the policy that allowed it, upstream status, bytes, duration, and for manifest pushes and deletes the digest. Never any header values or tokens.
 
 ### Credential helper
 
