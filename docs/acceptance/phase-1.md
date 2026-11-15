@@ -35,19 +35,19 @@ Approved for the owner by the operator on 2026-11-15. Only the owner adds scenar
 ## Policies and grants
 
 - **AC-1-13 Policy is per ServiceAccount.** A second ServiceAccount in the same namespace that no policy lists gets only anonymous pulls and `403` on push.
-  Tests:
+  Tests: `internal/authz: TestDecideGivesAServiceAccountNoPolicyListsOnlyAnonymousPulls`, `internal/server: TestDeniedPushAnswers403NamingTheCallerAndSendsNothingUpstream`
 - **AC-1-14 Policy is per namespace.** A policy in namespace A naming repository R gives nothing to ServiceAccounts in namespace B, even with the same ServiceAccount name.
-  Tests:
+  Tests: `internal/authz: TestDecideIgnoresPoliciesInOtherNamespaces`
 - **AC-1-15 Grant caps the policy.** With the grant `ci-(?P<repo>…)` → `soliddowant/${repo}/**`, a policy in `ci-foo` naming `soliddowant/bar` is `Ready=False, reason=OutsideGrant` with `soliddowant/bar` in `status.rejected`; pushes to `soliddowant/bar` are refused while `soliddowant/foo/x` works.
-  Tests:
+  Tests: `internal/controller: TestStatusController/a pattern outside the grant is OutsideGrant and listed in rejected`, `internal/authz: TestDecideRefusesPushesOutsideTheGrantWhileInsideOnesWork`
 - **AC-1-16 No grant.** A policy in a namespace no grant matches is `Ready=False, reason=NoGrant`, and its ServiceAccounts get only anonymous pulls.
-  Tests:
+  Tests: `internal/controller: TestStatusController/a policy in a namespace no grant matches is NoGrant`, `internal/authz: TestDecideGivesPoliciesInANamespaceWithNoGrantNoAccess`
 - **AC-1-17 Glob matching.** `soliddowant/foo/*` allows `soliddowant/foo/a` but not `soliddowant/foo/a/b` or `soliddowant/foo`; `soliddowant/foo/**` allows all three; `soliddowant/foo/**` is not inside a grant of `soliddowant/foo/*`.
-  Tests:
+  Tests: `internal/authz: TestDecideMatchesGlobsAndChecksContainmentInTheGrant`
 - **AC-1-18 Live policy changes.** Adding a rule allows the next push within a few seconds, and removing it refuses the next one, without restarting the proxy.
-  Tests:
+  Tests: `internal/authz: TestDecideFollowsLivePolicyChangesWithoutRestart`
 - **AC-1-19 Actions are separate.** A policy granting only `pull` refuses push and delete; `push` also allows pull.
-  Tests:
+  Tests: `internal/authz: TestDecideKeepsActionsSeparate`
 
 ## Upstream credential and protocol
 
