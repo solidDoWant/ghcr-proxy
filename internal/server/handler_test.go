@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -18,6 +19,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/random"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	authenticationv1 "k8s.io/api/authentication/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache/informertest"
@@ -62,6 +64,8 @@ type harnessOptions struct {
 	noPAT bool
 	// audit receives the audit lines.
 	audit io.Writer
+	// reviewer replaces the stub token reviewer.
+	reviewer server.Reviewer
 }
 
 type harness struct {
@@ -115,9 +119,14 @@ func newHarness(t *testing.T, options harnessOptions) *harness {
 		})
 	}
 
+	var reviewer server.Reviewer = stubReviewer{}
+	if options.reviewer != nil {
+		reviewer = options.reviewer
+	}
+
 	readiness := server.NewReadiness(index.Synced, pat.Loaded)
 	handler := &server.Handler{
-		Reviewer: stubReviewer{}, Decider: &authz.Authorizer{Index: index}, Forwarder: forwarder, Ready: readiness.Ready,
+		Reviewer: reviewer, Decider: &authz.Authorizer{Index: index}, Forwarder: forwarder, Ready: readiness.Ready,
 	}
 
 	if options.audit != nil {
@@ -250,6 +259,81 @@ func TestAuthenticationRefusesCredentialsItCannotAccept(t *testing.T) {
 			}
 
 			assert.Empty(t, proxy.fake.Log(), "a refused credential is never served anonymously")
+		})
+	}
+}
+
+// tokenReviews answers TokenReview calls the way an API server would for the tokens it knows.
+type tokenReviews struct {
+	down bool
+}
+
+func (r *tokenReviews) Create(_ context.Context, review *authenticationv1.TokenReview, _ metav1.CreateOptions) (*authenticationv1.TokenReview, error) {
+	if r.down {
+		return nil, errors.New("connection refused")
+	}
+
+	answer := review.DeepCopy()
+
+	switch review.Spec.Token {
+	case "token-for-proxy":
+		answer.Status = authenticationv1.TokenReviewStatus{
+			Authenticated: true, Audiences: []string{"ghcr-proxy"},
+			User: authenticationv1.UserInfo{
+				Username: "system:serviceaccount:ci-foo:builder",
+				Extra:    map[string]authenticationv1.ExtraValue{"authentication.kubernetes.io/pod-name": {"build-1"}},
+			},
+		}
+	case "token-for-api-server":
+		answer.Status = authenticationv1.TokenReviewStatus{
+			Authenticated: true, Audiences: []string{"https://kubernetes.default.svc"},
+			User: authenticationv1.UserInfo{Username: "system:serviceaccount:ci-foo:builder"},
+		}
+	default:
+		answer.Status = authenticationv1.TokenReviewStatus{Authenticated: false, Error: "invalid bearer token"}
+	}
+
+	return answer, nil
+}
+
+func TestRealReviewerKeepsUnauthenticatedRequestsAwayFromTheUpstream(t *testing.T) {
+	reviews := &tokenReviews{}
+	reviewer, err := authn.NewReviewer(reviews, authn.Options{Audience: "ghcr-proxy", CacheTTL: time.Second, ReviewTimeout: 5 * time.Second})
+	require.NoError(t, err)
+
+	proxy := newHarness(t, harnessOptions{reviewer: reviewer})
+
+	target := "/v2/soliddowant/foo/source/manifests/latest"
+
+	tests := []struct {
+		name   string
+		token  string
+		down   bool
+		status int
+	}{
+		{name: "token without the proxy audience", token: "token-for-api-server", status: http.StatusUnauthorized},
+		{name: "credential that is not a token", token: "not-a-token", status: http.StatusUnauthorized},
+		{name: "token review failing", token: "token-for-proxy", down: true, status: http.StatusServiceUnavailable},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			reviews.down = test.down
+
+			proxy.fake.ResetLog()
+
+			got := proxy.do(t, http.MethodGet, target, basic(test.token))
+			assert.Equal(t, test.status, got.status)
+
+			for _, request := range []struct{ method, target string }{
+				{http.MethodPut, "/v2/soliddowant/foo/app/manifests/1"},
+				{http.MethodGet, target},
+			} {
+				answer := proxy.do(t, request.method, request.target, basic(test.token))
+				assert.Equal(t, test.status, answer.status, request.target)
+			}
+
+			assert.Empty(t, proxy.fake.Log(), "nothing reaches the upstream, with or without the PAT")
 		})
 	}
 }
