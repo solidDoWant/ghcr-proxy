@@ -4,10 +4,12 @@ go 1.27.0
 
 require (
 	github.com/bmatcuk/doublestar/v4 v4.10.4
+	github.com/distribution/reference v0.6.0
 	github.com/docker/docker-credential-helpers v0.9.3
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/go-containerregistry v0.22.1
 	github.com/hashicorp/golang-lru/v2 v2.0.7
+	github.com/opencontainers/go-digest v1.0.0
 	github.com/stretchr/testify v1.12.1
 	golang.org/x/sync v0.25.0
 	k8s.io/api v0.37.2
@@ -50,7 +52,6 @@ require (
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
-	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_golang v1.24.0 // indirect
