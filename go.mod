@@ -4,6 +4,7 @@ go 1.27.0
 
 require (
 	github.com/bmatcuk/doublestar/v4 v4.10.4
+	github.com/docker/docker-credential-helpers v0.9.3
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/go-containerregistry v0.22.1
 	github.com/hashicorp/golang-lru/v2 v2.0.7
@@ -24,7 +25,6 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/docker/cli v29.7.2+incompatible // indirect
-	github.com/docker/docker-credential-helpers v0.9.3 // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
 	github.com/evanphx/json-patch/v5 v5.9.11 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.1 // indirect
