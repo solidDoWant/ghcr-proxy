@@ -152,7 +152,7 @@ func (f *Forwarder) ServeForward(resp http.ResponseWriter, req *http.Request, fo
 		defer cancel()
 	}
 
-	f.proxy.ServeHTTP(resp, req.WithContext(ctx))
+	f.proxy.ServeHTTP(&noInterimWriter{ResponseWriter: resp}, req.WithContext(ctx))
 
 	return state.upstreamStatus
 }
@@ -354,4 +354,24 @@ func refusedAnonymously(status int, anonymousCaller bool) bool {
 func discard(resp *http.Response) {
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
 	_ = resp.Body.Close()
+}
+
+// noInterimWriter drops interim (1xx) responses. The reverse proxy relays
+// them from the upstream with every header, bypassing modifyResponse, so an
+// upstream challenge or Location could reach the client unfiltered.
+type noInterimWriter struct {
+	http.ResponseWriter
+}
+
+func (w *noInterimWriter) WriteHeader(code int) {
+	if code >= 100 && code < 200 {
+		return
+	}
+
+	w.ResponseWriter.WriteHeader(code)
+}
+
+// Unwrap lets http.ResponseController reach the underlying writer.
+func (w *noInterimWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
 }
