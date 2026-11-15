@@ -11,6 +11,7 @@ require (
 	github.com/google/go-containerregistry v0.22.1
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/opencontainers/go-digest v1.0.0
+	github.com/prometheus/client_golang v1.24.0
 	github.com/stretchr/testify v1.12.1
 	golang.org/x/sync v0.25.0
 	k8s.io/api v0.37.2
@@ -55,7 +56,6 @@ require (
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
-	github.com/prometheus/client_golang v1.24.0 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.70.0 // indirect
 	github.com/prometheus/procfs v0.21.1 // indirect

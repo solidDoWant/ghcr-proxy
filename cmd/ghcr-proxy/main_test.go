@@ -28,6 +28,13 @@ func TestRun(t *testing.T) {
 			wantStdout: "ghcr-proxy 0.0.0-dev\n",
 		},
 		{
+			name:       "missing config file fails before serving",
+			args:       []string{"--config", "/nonexistent/config.yaml"},
+			wantCode:   1,
+			wantStdout: "ghcr-proxy 0.0.0-dev\n",
+			wantStderr: "read config",
+		},
+		{
 			name:       "unknown flag fails with usage",
 			args:       []string{"--no-such-flag"},
 			wantCode:   2,
@@ -38,7 +45,7 @@ func TestRun(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 
-			code := run(test.args, &stdout, &stderr)
+			code := run(t.Context(), test.args, &stdout, &stderr)
 
 			assert.Equal(t, test.wantCode, code)
 			assert.Equal(t, test.wantStdout, stdout.String())
