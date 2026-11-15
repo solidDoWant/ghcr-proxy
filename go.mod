@@ -4,6 +4,7 @@ go 1.27.0
 
 require (
 	github.com/bmatcuk/doublestar/v4 v4.10.4
+	github.com/docker/docker-credential-helpers v0.9.3
 	github.com/stretchr/testify v1.12.1
 	k8s.io/apiextensions-apiserver v0.37.2
 	k8s.io/apimachinery v0.37.2
