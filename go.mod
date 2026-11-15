@@ -3,6 +3,7 @@ module github.com/solidDoWant/ghcr-proxy
 go 1.27.0
 
 require (
+	github.com/bmatcuk/doublestar/v4 v4.10.4
 	github.com/distribution/reference v0.6.0
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/stretchr/testify v1.12.1
