@@ -16,6 +16,47 @@ fullnameOverride: ""
 crds:
   # -- Install the CRDs with the chart. Set to false when you manage them yourself.
   install: true
+pat:
+  # -- Name of the Secret that holds the GitHub personal access token. Required. The chart never creates it.
+  existingSecret: ""
+  # -- Key in that Secret that holds the token.
+  key: token
+tls:
+  # -- Name of the `kubernetes.io/tls` Secret with the serving certificate. Required. The chart never creates it.
+  existingSecret: ""
+service:
+  # -- Fixed ClusterIP of the Service. Pin it so CI pods can map `ghcr.io` to it with `hostAliases`. Empty lets Kubernetes choose.
+  clusterIP: ""
+upstream:
+  # -- Upstream registry URL.
+  url: https://ghcr.io
+  # -- Extra hosts allowed as token realms. The upstream host is always allowed.
+  tokenHosts: []
+  # -- Timeout of one whole upstream request. Uploads of several GB must fit.
+  timeout: 30m
+  # -- Timeout of one upstream token exchange.
+  tokenTimeout: 10s
+authentication:
+  # -- Audience that ServiceAccount tokens must carry.
+  audience: ghcr-proxy
+  # -- How long a token review result is cached (1s to 30s).
+  cacheTTL: 30s
+  # -- Timeout of one token review.
+  reviewTimeout: 5s
+# -- Grants that cap what policies in each namespace may allow. Each has a `namespaces` regular expression, `repositories` globs and `actions`.
+grants: []
+server:
+  # -- Timeout for reading request headers.
+  readHeaderTimeout: 10s
+  # -- Idle timeout of keep-alive connections.
+  idleTimeout: 120s
+  # -- Largest accepted request header size in bytes.
+  maxHeaderBytes: 65536
+  # -- How long in-flight requests may finish after SIGTERM. The pod's termination grace period is this plus 30 seconds.
+  shutdownGracePeriod: 10m
+audit:
+  # -- Write one audit log line per decision.
+  enabled: true
 serviceAccount:
   # -- Create the ServiceAccount.
   create: true
@@ -28,10 +69,10 @@ resources:
     # -- CPU request. There is no CPU limit.
     cpu: 100m
     # -- Memory request.
-    memory: 128Mi
+    memory: 256Mi
   limits:
     # -- Memory limit. Keep it equal to the memory request.
-    memory: 128Mi
+    memory: 256Mi
 podSecurityContext:
   # -- Run the pod as a non-root user.
   runAsNonRoot: true

@@ -14,12 +14,29 @@ For: admins who install ghcr-proxy with its Helm chart.
 | `nameOverride` | `""` | Override the chart name used in resource names. |
 | `fullnameOverride` | `""` | Override the full resource name. |
 | `crds.install` | `true` | Install the CRDs with the chart. Set to false when you manage them yourself. |
+| `pat.existingSecret` | `""` | Name of the Secret that holds the GitHub personal access token. Required. The chart never creates it. |
+| `pat.key` | `token` | Key in that Secret that holds the token. |
+| `tls.existingSecret` | `""` | Name of the `kubernetes.io/tls` Secret with the serving certificate. Required. The chart never creates it. |
+| `service.clusterIP` | `""` | Fixed ClusterIP of the Service. Pin it so CI pods can map `ghcr.io` to it with `hostAliases`. Empty lets Kubernetes choose. |
+| `upstream.url` | `https://ghcr.io` | Upstream registry URL. |
+| `upstream.tokenHosts` | `[]` | Extra hosts allowed as token realms. The upstream host is always allowed. |
+| `upstream.timeout` | `30m` | Timeout of one whole upstream request. Uploads of several GB must fit. |
+| `upstream.tokenTimeout` | `10s` | Timeout of one upstream token exchange. |
+| `authentication.audience` | `ghcr-proxy` | Audience that ServiceAccount tokens must carry. |
+| `authentication.cacheTTL` | `30s` | How long a token review result is cached (1s to 30s). |
+| `authentication.reviewTimeout` | `5s` | Timeout of one token review. |
+| `grants` | `[]` | Grants that cap what policies in each namespace may allow. Each has a `namespaces` regular expression, `repositories` globs and `actions`. |
+| `server.readHeaderTimeout` | `10s` | Timeout for reading request headers. |
+| `server.idleTimeout` | `120s` | Idle timeout of keep-alive connections. |
+| `server.maxHeaderBytes` | `65536` | Largest accepted request header size in bytes. |
+| `server.shutdownGracePeriod` | `10m` | How long in-flight requests may finish after SIGTERM. The pod's termination grace period is this plus 30 seconds. |
+| `audit.enabled` | `true` | Write one audit log line per decision. |
 | `serviceAccount.create` | `true` | Create the ServiceAccount. |
 | `serviceAccount.name` | `""` | ServiceAccount name. Defaults to the full name. |
 | `serviceAccount.annotations` | `{}` | Annotations for the ServiceAccount. |
 | `resources.requests.cpu` | `100m` | CPU request. There is no CPU limit. |
-| `resources.requests.memory` | `128Mi` | Memory request. |
-| `resources.limits.memory` | `128Mi` | Memory limit. Keep it equal to the memory request. |
+| `resources.requests.memory` | `256Mi` | Memory request. |
+| `resources.limits.memory` | `256Mi` | Memory limit. Keep it equal to the memory request. |
 | `podSecurityContext.runAsNonRoot` | `true` | Run the pod as a non-root user. |
 | `podSecurityContext.runAsUser` | `65532` | User ID of the pod (the distroless nonroot user). |
 | `podSecurityContext.runAsGroup` | `65532` | Group ID of the pod. |
