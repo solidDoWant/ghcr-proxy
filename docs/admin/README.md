@@ -2,8 +2,8 @@
 
 For: people who install ghcr-proxy and set up CI pods to use it. You know Kubernetes, Helm, Flux, cert-manager and Tekton.
 
-ghcr-proxy is in early development. The pages for admins are not written yet. They will describe how to install the chart, give the proxy the PAT and the TLS certificate, set the grants for each namespace, and set up a CI pod. They will also describe the security limits and how to fix problems.
-
+- [Install ghcr-proxy](install.md): the PAT, the certificate and its CA, the grants, the chart, the security limits and the audit log.
+- [Set up a CI pod](ci-pods.md): host aliases, the CA, the credential helper, the token and a Tekton Task example.
 - [Chart values](chart-values.md): every Helm value (generated).
 
 [`SPEC.md`](../../SPEC.md) has the full rules.

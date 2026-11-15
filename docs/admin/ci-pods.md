@@ -1,0 +1,187 @@
+# Set up a CI pod
+
+For: admins who set up the pods that run Docker builds. You know Kubernetes and Tekton. You already installed ghcr-proxy (see [Install ghcr-proxy](install.md)).
+
+A CI pod pushes and pulls with the normal image name `ghcr.io/<owner>/<image>`. The pod sends the requests to the proxy because of the setup on this page. Docker finds its credential through the credential helper. The helper returns the ServiceAccount token of the pod, so the pod never sees the PAT.
+
+## What each pod needs
+
+- A `hostAliases` entry that maps `ghcr.io` to the fixed ClusterIP of the proxy Service (the value of `service.clusterIP`).
+- A projected volume `ghcr-proxy-token`. It holds a ServiceAccount token with the audience `ghcr-proxy` and `expirationSeconds: 3600`, in the file `token`. Mount it at `/var/run/secrets/ghcr-proxy` in the container that runs the Docker CLI.
+- An image volume from `ghcr.io/soliddowant/ghcr-proxy-credential-helper`, mounted at `/opt/ghcr-proxy/bin` in the same container. Add that directory to `PATH` of the container.
+- The file `~/.docker/config.json` with `{"credHelpers":{"ghcr.io":"ghcr-proxy"}}`. The setup of the step writes it.
+- The CA certificate at `/etc/docker/certs.d/ghcr.io/ca.crt` in the Docker daemon container (dind). The daemon makes the registry connections, so the CA belongs there and not in the CLI container.
+- A `GHCRAccessPolicy` in the namespace of the pod that names the ServiceAccount of the pod. See [how to write a policy](../user/policies.md).
+
+Pin the image digests of the helper and dind images in your own manifests.
+
+## Pod example
+
+This pod runs the Docker CLI against a dind sidecar. The Secret `ghcr-proxy-ca` in the pod namespace holds the CA certificate in the key `ca.crt`. Copy it from the `ca.crt` of the proxy certificate Secret (see [Install ghcr-proxy](install.md#make-the-tls-certificate)).
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: build
+  namespace: ci-foo
+spec:
+  serviceAccountName: builder
+  hostAliases:
+    - ip: 10.96.0.50          # service.clusterIP of the proxy
+      hostnames: [ghcr.io]
+  containers:
+    - name: docker
+      image: quay.io/example/docker-cli@sha256:...   # an image with the Docker CLI
+      command: [sh, -c]
+      args:
+        - |
+          mkdir -p ~/.docker
+          echo '{"credHelpers":{"ghcr.io":"ghcr-proxy"}}' > ~/.docker/config.json
+          docker build -t ghcr.io/soliddowant/foo:latest . && docker push ghcr.io/soliddowant/foo:latest
+      env:
+        - name: DOCKER_HOST
+          value: tcp://localhost:2375
+        - name: PATH
+          value: /opt/ghcr-proxy/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      volumeMounts:
+        - name: ghcr-proxy-token
+          mountPath: /var/run/secrets/ghcr-proxy
+          readOnly: true
+        - name: credential-helper
+          mountPath: /opt/ghcr-proxy/bin
+          readOnly: true
+    - name: dind
+      image: quay.io/example/docker-dind@sha256:...   # an image with the Docker daemon
+      env:
+        - name: DOCKER_TLS_CERTDIR
+          value: ""
+      securityContext:
+        privileged: true
+      volumeMounts:
+        - name: ghcr-proxy-ca
+          mountPath: /etc/docker/certs.d/ghcr.io
+          readOnly: true
+  volumes:
+    - name: ghcr-proxy-token
+      projected:
+        sources:
+          - serviceAccountToken:
+              audience: ghcr-proxy
+              expirationSeconds: 3600
+              path: token
+    - name: credential-helper
+      image:
+        reference: ghcr.io/soliddowant/ghcr-proxy-credential-helper:<version>
+        pullPolicy: IfNotPresent
+    - name: ghcr-proxy-ca
+      secret:
+        secretName: ghcr-proxy-ca
+```
+
+Replace `<version>` with a release of the proxy. The helper image holds one file, `/docker-credential-ghcr-proxy`. Docker finds the helper by the name `docker-credential-ghcr-proxy` on `PATH`, and the config entry `ghcr-proxy` selects it.
+
+The helper reads the token file on every call, so token rotation by the kubelet needs no action. To use another path, set `GHCR_PROXY_TOKEN_FILE`.
+
+The Docker daemon runs in a privileged container here. Run it in a sandbox, for example a kata VM, as your own setup requires.
+
+## Tekton Task example
+
+A Tekton Task can use the same parts. The `serviceAccountName` of the TaskRun is the ServiceAccount that the policy names. The `podTemplate` of the TaskRun sets `hostAliases`.
+
+```yaml
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: build-push
+  namespace: ci-foo
+spec:
+  params:
+    - name: image
+      type: string
+  workspaces:
+    - name: source
+  volumes:
+    - name: ghcr-proxy-token
+      projected:
+        sources:
+          - serviceAccountToken:
+              audience: ghcr-proxy
+              expirationSeconds: 3600
+              path: token
+    - name: credential-helper
+      image:
+        reference: ghcr.io/soliddowant/ghcr-proxy-credential-helper:<version>
+        pullPolicy: IfNotPresent
+    - name: ghcr-proxy-ca
+      secret:
+        secretName: ghcr-proxy-ca
+  sidecars:
+    - name: dind
+      image: quay.io/example/docker-dind@sha256:...
+      env:
+        - name: DOCKER_TLS_CERTDIR
+          value: ""
+      securityContext:
+        privileged: true
+      volumeMounts:
+        - name: ghcr-proxy-ca
+          mountPath: /etc/docker/certs.d/ghcr.io
+          readOnly: true
+  steps:
+    - name: build-push
+      image: quay.io/example/docker-cli@sha256:...
+      workingDir: $(workspaces.source.path)
+      env:
+        - name: DOCKER_HOST
+          value: tcp://localhost:2375
+        - name: PATH
+          value: /opt/ghcr-proxy/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      volumeMounts:
+        - name: ghcr-proxy-token
+          mountPath: /var/run/secrets/ghcr-proxy
+          readOnly: true
+        - name: credential-helper
+          mountPath: /opt/ghcr-proxy/bin
+          readOnly: true
+      script: |
+        mkdir -p ~/.docker
+        echo '{"credHelpers":{"ghcr.io":"ghcr-proxy"}}' > ~/.docker/config.json
+        docker build -t $(params.image) .
+        docker push $(params.image)
+---
+apiVersion: tekton.dev/v1
+kind: TaskRun
+metadata:
+  generateName: build-push-
+  namespace: ci-foo
+spec:
+  taskRef:
+    name: build-push
+  serviceAccountName: builder
+  params:
+    - name: image
+      value: ghcr.io/soliddowant/foo:latest
+  podTemplate:
+    hostAliases:
+      - ip: 10.96.0.50
+        hostnames: [ghcr.io]
+  workspaces:
+    - name: source
+      emptyDir: {}
+```
+
+Check your Tekton version for support of `volumes` with image sources and of `podTemplate.hostAliases`.
+
+## Check the setup
+
+1. Make sure that a `GHCRAccessPolicy` for the ServiceAccount exists and has `Ready` set to `True`. See [what the status means](../user/policy-status.md).
+2. Run `docker push` in the pod.
+3. If the push fails, find the request in the [audit log](install.md#audit-log) and read its `decision`.
+
+Common causes:
+
+- `x509: certificate signed by unknown authority`: The CA is not at `/etc/docker/certs.d/ghcr.io/ca.crt` in the dind container.
+- `401` from the proxy: The token file is missing, or the audience is not `ghcr-proxy`.
+- `403 DENIED`: No policy and grant allow the push. See [why a push is denied](../user/policies.md#why-a-push-is-denied).
+- `503`: The proxy is not ready or cannot review tokens. Try again.
