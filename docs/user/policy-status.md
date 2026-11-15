@@ -48,3 +48,20 @@ status:
 ```
 
 To fix the policy, remove the pattern or ask your admin to change the grant. The [field reference](crd-reference.md) lists every field.
+
+## When the proxy refuses a request
+
+If no policy allows a push or a delete, the proxy answers `403` with the code `DENIED`. Docker shows the message, for example:
+
+```
+ServiceAccount ci-foo/builder may not push repository soliddowant/bar: the namespace's grant does not cover it
+```
+
+The message names your namespace, your ServiceAccount, the repository and the action. The end of the message gives one of two causes:
+
+- `no GHCRAccessPolicy in the namespace allows it`: No policy in your namespace lists your ServiceAccount with this action on this repository. Add a rule to a policy.
+- `the namespace's grant does not cover it`: A policy asks for the action, but the grant of the namespace does not cover it. The status of that policy shows `OutsideGrant`. Remove the pattern or ask your admin to change the grant.
+
+Only policies in the namespace of the pod apply. A policy in another namespace never gives access, even to a ServiceAccount with the same name. If no policy allows a pull, the proxy sends the pull to GHCR without a credential, so only public images work.
+
+A change to a policy applies to the next request. You do not have to restart anything.
