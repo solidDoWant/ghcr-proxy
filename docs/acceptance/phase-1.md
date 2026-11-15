@@ -17,7 +17,7 @@ Approved for the owner by the operator on 2026-11-15. Only the owner adds scenar
 - **AC-1-06 Large layer.** A push of an image with a 2 GiB layer succeeds through the proxy, and the proxy's memory stays under its limit.
   Tests: `test/e2e: TestPushOfTwoGiBLayerStaysUnderMemoryLimit`
 - **AC-1-07 Cross-repository mount.** Pushing an image whose layers exist in another repository the policy can pull mounts them; when the policy can't pull the other repository, the push still succeeds by uploading the layers, and no mount from that repository reached the upstream.
-  Tests:
+  Tests: `internal/server: TestMountFromRepositoryTheCallerCannotPullIsStripped/source the caller may pull`, `internal/server: TestMountFromRepositoryTheCallerCannotPullIsStripped/source the caller may not pull`
 
 ## Authentication
 
@@ -69,7 +69,7 @@ Approved for the owner by the operator on 2026-11-15. Only the owner adds scenar
 - **AC-1-26 Certificate rotation.** Replacing the TLS Secret is picked up without a restart.
   Tests: `internal/server: TestReplacedCertificateIsServedToNewConnections`
 - **AC-1-27 Two replicas.** With two replicas, killing one during a sequence of pushes doesn't fail pushes that start after it is gone, and only one replica writes policy status.
-  Tests:
+  Tests: `test/e2e: TestPushesSucceedAfterAReplicaIsKilled`, `internal/controller: TestOnlyTheLeaderWritesStatus`
 - **AC-1-28 Install from the chart.** The chart installs on kind with only the PAT and TLS Secrets created beforehand, every pod runs as non-root with a read-only root filesystem, and the e2e Docker scenarios above run against that install.
   Tests: `test/e2e: TestChartInstallRunsNonRootWithReadOnlyRootFilesystem`
 - **AC-1-29 Credential helper protocol.** `docker-credential-ghcr-proxy get` answers for `ghcr.io` (with or without `https://`) and says "credentials not found" for other servers; `store`, `erase` and `list` behave as `SPEC.md` says; the helper image contains only the static binary and runs on amd64 and arm64.
