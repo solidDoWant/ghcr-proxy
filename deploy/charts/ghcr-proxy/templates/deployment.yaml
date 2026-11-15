@@ -11,10 +11,11 @@ spec:
       {{- include "ghcr-proxy.selectorLabels" . | nindent 6 }}
   template:
     metadata:
-      {{- with .Values.podAnnotations }}
       annotations:
+        checksum/config: {{ include "ghcr-proxy.config" . | sha256sum }}
+        {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- end }}
       labels:
         {{- include "ghcr-proxy.selectorLabels" . | nindent 8 }}
     spec:
@@ -23,7 +24,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "ghcr-proxy.serviceAccountName" . }}
-      terminationGracePeriodSeconds: 30
+      terminationGracePeriodSeconds: {{ include "ghcr-proxy.terminationGracePeriodSeconds" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
@@ -32,10 +33,51 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             - --config=/etc/ghcr-proxy/config.yaml
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          ports:
+            - name: https
+              containerPort: 8443
+            - name: health
+              containerPort: 8080
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+          volumeMounts:
+            - name: config
+              mountPath: /etc/ghcr-proxy
+              readOnly: true
+            - name: pat
+              mountPath: /var/run/ghcr-proxy/pat
+              readOnly: true
+            - name: tls
+              mountPath: /var/run/ghcr-proxy/tls
+              readOnly: true
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "ghcr-proxy.fullname" . }}
+        - name: pat
+          secret:
+            secretName: {{ required "pat.existingSecret is required" .Values.pat.existingSecret }}
+            items:
+              - key: {{ .Values.pat.key }}
+                path: token
+        - name: tls
+          secret:
+            secretName: {{ required "tls.existingSecret is required" .Values.tls.existingSecret }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

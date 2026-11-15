@@ -47,8 +47,8 @@ if [[ "$chart_version" != "$version" || "$app_version" != "$version" ]]; then
 	exit 1
 fi
 image="ghcr.io/soliddowant/ghcr-proxy:$version"
-if ! helm template ghcr-proxy "$package" --namespace ghcr-proxy | grep -Fq "image: \"$image\"" &&
-	! helm template ghcr-proxy "$package" --namespace ghcr-proxy | grep -Fq "image: $image"; then
+if ! helm template ghcr-proxy "$package" --namespace ghcr-proxy --set pat.existingSecret=pat --set tls.existingSecret=tls | grep -Fq "image: \"$image\"" &&
+	! helm template ghcr-proxy "$package" --namespace ghcr-proxy --set pat.existingSecret=pat --set tls.existingSecret=tls | grep -Fq "image: $image"; then
 	echo "release: the chart does not deploy the image $image by default" >&2
 	exit 1
 fi

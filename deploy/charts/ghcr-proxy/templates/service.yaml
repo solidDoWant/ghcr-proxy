@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ghcr-proxy.fullname" . }}
+  labels:
+    {{- include "ghcr-proxy.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  {{- with .Values.service.clusterIP }}
+  clusterIP: {{ . | quote }}
+  {{- end }}
+  selector:
+    {{- include "ghcr-proxy.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: https
+      port: 443
+      targetPort: https
+    - name: metrics
+      port: 8080
+      targetPort: health
