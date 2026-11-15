@@ -255,6 +255,7 @@ func TestForwarderAnonymousPullNeverUsesThePAT(t *testing.T) {
 	t.Run("private image gets the proxy's challenge", func(t *testing.T) {
 		resp, err := harness.client().Get(harness.server.URL + "/v2/owner/private/manifests/v1")
 		require.NoError(t, err)
+
 		defer func() { _ = resp.Body.Close() }()
 
 		assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
@@ -283,6 +284,7 @@ func TestForwarderRewritesUploadLocationToTheClientHost(t *testing.T) {
 	t.Run("upload location points at the client's host", func(t *testing.T) {
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, harness.server.URL+"/v2/owner/app/blobs/uploads/", nil)
 		require.NoError(t, err)
+
 		req.Host = "ghcr.io"
 		req.Header.Set("Authorization", "Basic Y2xpZW50OnNlY3JldA==")
 		req.Header.Set("Cookie", "session=client")
@@ -290,6 +292,7 @@ func TestForwarderRewritesUploadLocationToTheClientHost(t *testing.T) {
 
 		resp, err := harness.client().Do(req)
 		require.NoError(t, err)
+
 		defer func() { _ = resp.Body.Close() }()
 
 		require.Equal(t, http.StatusAccepted, resp.StatusCode)
@@ -311,10 +314,12 @@ func TestForwarderRewritesUploadLocationToTheClientHost(t *testing.T) {
 	t.Run("blob redirect to storage passes unchanged", func(t *testing.T) {
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, harness.server.URL+"/v2/owner/app/blobs/"+layerDigest.String(), nil)
 		require.NoError(t, err)
+
 		req.Host = "ghcr.io"
 
 		resp, err := harness.client().Do(req)
 		require.NoError(t, err)
+
 		defer func() { _ = resp.Body.Close() }()
 
 		require.Equal(t, http.StatusTemporaryRedirect, resp.StatusCode)
@@ -343,6 +348,7 @@ func TestForwarderUsesAReplacedPATWithoutRestart(t *testing.T) {
 
 	go func() {
 		defer close(watchDone)
+
 		assert.NoError(t, harness.pat.Watch(ctx))
 	}()
 
@@ -352,21 +358,33 @@ func TestForwarderUsesAReplacedPATWithoutRestart(t *testing.T) {
 	require.NoError(t, os.WriteFile(staged, []byte(fake.PAT()), 0o600))
 	require.NoError(t, os.Rename(staged, harness.patPath))
 
-	require.Eventually(t, func() bool {
-		resp, err := harness.client().Get(manifestURL)
-		if err != nil {
-			return false
+	statusIs := func(want int) func() bool {
+		return func() bool {
+			resp, err := harness.client().Get(manifestURL)
+			if err != nil {
+				return false
+			}
+
+			_ = resp.Body.Close()
+
+			return resp.StatusCode == want
 		}
+	}
 
-		_ = resp.Body.Close()
+	require.Eventually(t, statusIs(http.StatusOK), 10*time.Second, 50*time.Millisecond)
 
-		return resp.StatusCode == http.StatusOK
-	}, 10*time.Second, 50*time.Millisecond)
+	// The watch is running now, so this change is seen through file events.
+	require.NoError(t, os.WriteFile(staged, []byte("ghp_rotated_away"), 0o600))
+	require.NoError(t, os.Rename(staged, harness.patPath))
+
+	require.Eventually(t, statusIs(http.StatusBadGateway), 10*time.Second, 50*time.Millisecond)
 }
 
 func TestForwarderAnswers502WhenThePATIsRejectedAndNeverLeaksIt(t *testing.T) {
 	fake := fakeghcr.New(t, fakeghcr.Options{})
+
 	const rejectedPAT = "ghp_rejected_token_value"
+
 	harness := newProxyHarness(t, fake, rejectedPAT, withPAT)
 
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, harness.server.URL+"/v2/owner/app/blobs/uploads/", nil)
@@ -374,6 +392,7 @@ func TestForwarderAnswers502WhenThePATIsRejectedAndNeverLeaksIt(t *testing.T) {
 
 	resp, err := harness.client().Do(req)
 	require.NoError(t, err)
+
 	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)

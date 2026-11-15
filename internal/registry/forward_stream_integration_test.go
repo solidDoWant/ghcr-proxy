@@ -118,6 +118,7 @@ func TestForwarderStreamsA2GiBUploadInBoundedMemory(t *testing.T) {
 	require.NoError(t, err)
 
 	uploadResp, err := harness.client().Do(upload)
+
 	close(stop)
 	<-sampled
 

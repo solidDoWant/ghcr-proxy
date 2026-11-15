@@ -39,6 +39,7 @@ func TestPATFileLoading(t *testing.T) {
 			}
 
 			var logs bytes.Buffer
+
 			holder := upstream.NewPATFile(path, slog.New(slog.NewTextHandler(&logs, nil)))
 
 			if test.replacement != nil {

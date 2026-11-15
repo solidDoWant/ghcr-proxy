@@ -114,6 +114,10 @@ func (p *PATFile) Watch(ctx context.Context) error {
 		return err
 	}
 
+	// A change between the first read and the watch being set up raised no
+	// event, so read once more now that changes are watched.
+	p.Reload()
+
 	ticker := time.NewTicker(patRestatInterval)
 	defer ticker.Stop()
 
