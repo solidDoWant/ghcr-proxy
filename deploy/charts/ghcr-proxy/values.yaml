@@ -32,18 +32,23 @@ resources:
   limits:
     # -- Memory limit. Keep it equal to the memory request.
     memory: 128Mi
-# -- Pod security context.
 podSecurityContext:
+  # -- Run the pod as a non-root user.
   runAsNonRoot: true
+  # -- User ID of the pod (the distroless nonroot user).
   runAsUser: 65532
+  # -- Group ID of the pod.
   runAsGroup: 65532
   seccompProfile:
+    # -- Seccomp profile of the pod.
     type: RuntimeDefault
-# -- Container security context.
 securityContext:
+  # -- Allow privilege escalation in the container.
   allowPrivilegeEscalation: false
+  # -- Mount the container's root filesystem read-only.
   readOnlyRootFilesystem: true
   capabilities:
+    # -- Linux capabilities dropped from the container.
     drop: ["ALL"]
 # -- Pod annotations.
 podAnnotations: {}

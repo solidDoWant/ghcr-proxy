@@ -20,8 +20,13 @@ For: admins who install ghcr-proxy with its Helm chart.
 | `resources.requests.cpu` | `100m` | CPU request. There is no CPU limit. |
 | `resources.requests.memory` | `128Mi` | Memory request. |
 | `resources.limits.memory` | `128Mi` | Memory limit. Keep it equal to the memory request. |
-| `podSecurityContext` | `""` | Pod security context. |
-| `securityContext` | `""` | Container security context. |
+| `podSecurityContext.runAsNonRoot` | `true` | Run the pod as a non-root user. |
+| `podSecurityContext.runAsUser` | `65532` | User ID of the pod (the distroless nonroot user). |
+| `podSecurityContext.runAsGroup` | `65532` | Group ID of the pod. |
+| `podSecurityContext.seccompProfile.type` | `RuntimeDefault` | Seccomp profile of the pod. |
+| `securityContext.allowPrivilegeEscalation` | `false` | Allow privilege escalation in the container. |
+| `securityContext.readOnlyRootFilesystem` | `true` | Mount the container's root filesystem read-only. |
+| `securityContext.capabilities.drop` | `["ALL"]` | Linux capabilities dropped from the container. |
 | `podAnnotations` | `{}` | Pod annotations. |
 | `nodeSelector` | `{}` | Node selector. |
 | `tolerations` | `[]` | Tolerations. |
