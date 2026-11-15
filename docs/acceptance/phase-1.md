@@ -58,16 +58,16 @@ Approved for the owner by the operator on 2026-11-15. Only the owner adds scenar
 - **AC-1-22 Location rewrite.** Upload `Location` headers pointing at the upstream host come back pointing at `ghcr.io`, and blob-download redirects to the storage host come back unchanged.
   Tests: `internal/registry: TestForwarderRewritesUploadLocationToTheClientHost/upload location points at the client's host`, `internal/registry: TestForwarderRewritesUploadLocationToTheClientHost/blob redirect to storage passes unchanged`
 - **AC-1-23 Catalog and unknown paths.** `/v2/_catalog` and unknown paths get `404` and never reach the upstream.
-  Tests:
+  Tests: `internal/server: TestCatalogAndUnknownPathsAre404AndNeverReachTheUpstream`
 - **AC-1-24 Not ready until synced.** A replica reports not ready, and serves `503` to authenticated requests, until its policy cache has synced and the PAT and certificate are loaded.
-  Tests:
+  Tests: `internal/server: TestNotReadyReplicaAnswers503ToAuthenticatedRequests/policies not synced`, `internal/server: TestNotReadyReplicaAnswers503ToAuthenticatedRequests/PAT not loaded`, `internal/server: TestReadyzFollowsReadiness`, `internal/server: TestMissingCertificateIsNotLoaded`
 
 ## Operations
 
 - **AC-1-25 Audit line.** Each request writes one JSON line with namespace, ServiceAccount, repository, action, decision and upstream status, and for a manifest push its digest; no line contains the PAT, a ServiceAccount token or an `Authorization` value.
   Tests:
 - **AC-1-26 Certificate rotation.** Replacing the TLS Secret is picked up without a restart.
-  Tests:
+  Tests: `internal/server: TestReplacedCertificateIsServedToNewConnections`
 - **AC-1-27 Two replicas.** With two replicas, killing one during a sequence of pushes doesn't fail pushes that start after it is gone, and only one replica writes policy status.
   Tests:
 - **AC-1-28 Install from the chart.** The chart installs on kind with only the PAT and TLS Secrets created beforehand, every pod runs as non-root with a read-only root filesystem, and the e2e Docker scenarios above run against that install.
