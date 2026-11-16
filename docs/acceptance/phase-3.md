@@ -14,9 +14,9 @@ In the e2e scenarios, "a CI pod" is a pod with a dind sidecar set up exactly as 
 - **AC-3-02 Two upstreams.** With `UpstreamRegistry` objects for upstreams A and B, a CI pod pulls a public image from each through the proxy.
   Tests:
 - **AC-3-03 Certificate by server name.** Each host is served with its own `UpstreamRegistry`'s certificate. A TLS handshake for a server name no ready `UpstreamRegistry` claims fails. A certificate whose SANs don't cover a host makes the object `Ready=False, reason=CertificateMismatch`.
-  Tests:
+  Tests: `internal/server: TestSNICertificatesPickByServerName`, `internal/model: TestBuildServesReadyUpstreamHostsWithTheirCertificate`
 - **AC-3-04 Host conflict.** Two `UpstreamRegistry` objects claiming the same host are both `Ready=False, reason=HostConflict` for it, and the host isn't served.
-  Tests:
+  Tests: `internal/server: TestSNICertificatesRefuseHostsInConflict`, `internal/model: TestBuildHostConflictMarksBothAndServesNeither`
 - **AC-3-05 Admin namespaces only.** An `UpstreamRegistry` outside the admin namespaces is ignored by the proxy and, with the webhook on, rejected.
   Tests:
 - **AC-3-06 Registry API only.** A request outside `/v2` gets `404`. A non-canonical path (`..`, `//`, encoded `/`, `/V2/`, `/%76%32/`) gets `400`. Neither sends anything upstream.
