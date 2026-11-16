@@ -403,6 +403,30 @@ func TestCatalogAndUnknownPathsAre404AndNeverReachTheUpstream(t *testing.T) {
 	assert.Empty(t, proxy.fake.Log())
 }
 
+func TestNonCanonicalPathsAre400AndNeverReachTheUpstream(t *testing.T) {
+	proxy := newHarness(t, harnessOptions{})
+
+	targets := []string{
+		"/v2/soliddowant/foo/../foo/app/manifests/latest",
+		"/v2/soliddowant/foo/./app/manifests/latest",
+		"/v2/soliddowant//foo/app/manifests/latest",
+		"/v2/soliddowant%2Ffoo/app/manifests/latest",
+		"/%76%32/soliddowant/foo/app/manifests/latest",
+		"/V2/soliddowant/foo/app/manifests/latest",
+	}
+
+	for _, target := range targets {
+		for _, authorization := range [][]string{nil, {basic(builderToken)}} {
+			got := proxy.do(t, http.MethodGet, target, authorization...)
+
+			assert.Equal(t, http.StatusBadRequest, got.status, target)
+			assert.Contains(t, []string{"NAME_INVALID", "UNSUPPORTED"}, got.code, target)
+		}
+	}
+
+	assert.Empty(t, proxy.fake.Log())
+}
+
 func TestNotReadyReplicaAnswers503ToAuthenticatedRequests(t *testing.T) {
 	tests := []struct {
 		name    string
