@@ -51,9 +51,11 @@ docs/dev/
   ghcr-behaviour.md        What ghcr.io answers to delete requests, from the live tests.
 
 docs/acceptance/
-  phase-1.md               The owner's checklist for phase 1: push and pull through the proxy.
-  phase-2.md               The owner's checklist for phase 2: delete, mirrors and operations.
   phase-3.md               The owner's checklist for phase 3: registrygate.
+
+docs/acceptance/archive/   Superseded checklists, kept for history and not enforced.
+  phase-1.md               Phase 1 (ghcr-proxy 0.1): push and pull through the proxy.
+  phase-2.md               Phase 2 (ghcr-proxy 0.2): delete, mirrors and operations.
 
 docs/design/
   phase-1.md               The design for phase 1: types, config, request classification and the decision table.
