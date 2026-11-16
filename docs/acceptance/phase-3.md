@@ -88,7 +88,7 @@ In the e2e scenarios, "a CI pod" is a pod with a dind sidecar set up exactly as 
 ## Operations
 
 - **AC-3-31 Status.** Every kind reports `observedGeneration` and `Ready` with the reasons in the spec; `RegistryAccessPolicy` reports `status.rules[]` by name.
-  Tests:
+  Tests: `internal/controller: TestStatusShowsEachReadinessOutcome`, `internal/controller: TestStatusIsNotRewrittenWhenNothingChanged`, `internal/controller: TestStatusFollowsASecretChange`
 - **AC-3-32 Admission webhook.** With the webhook on, it rejects an `UpstreamRegistry` outside the admin namespaces, a rule with both or neither of `credentialRef` and `mirrorRef`, a mirror rule with a non-pull action, and a credential rule outside its ceiling (naming the patterns). A valid policy applies.
   Tests: `internal/webhook: TestValidateCreate`, `internal/webhook: TestValidateUpdate`, `internal/webhook: TestAdmissionRejectsPoliciesOutsideTheGrant`
 - **AC-3-33 Metrics and audit.** `/metrics` has the series in the spec with `upstream` as the only object-name label. Each request writes one audit line with the upstream, rule, and credential or mirror used, and never a credential, token or header value.
