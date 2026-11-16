@@ -1,12 +1,12 @@
-# Phase 3 acceptance checklist: registryproxy
+# Phase 3 acceptance checklist: registrygate
 
 Draft for the owner's approval. Only the owner adds scenarios. Each scenario lists its tests on a `Tests:` line (`` `package/dir: TestName/subtest` ``); a scenario passes when every listed test passes on `master`. Workers add their tests to the line; that is not a new scenario. `make acceptance` prints the scoreboard.
 
-In the e2e scenarios, "a CI pod" is a pod with a dind sidecar set up exactly as `docs/admin/` says: `hostAliases` for each intercepted host, `certs.d/<host>/ca.crt`, the helper image volume, `docker-credential-registryproxy configure`, and a projected token. "Upstream A" is the fake GHCR and "upstream B" is a second fake registry with plural upload paths and Basic-credential token auth.
+In the e2e scenarios, "a CI pod" is a pod with a dind sidecar set up exactly as `docs/admin/` says: `hostAliases` for each intercepted host, `certs.d/<host>/ca.crt`, the helper image volume, `docker-credential-registrygate configure`, and a projected token. "Upstream A" is the fake GHCR and "upstream B" is a second fake registry with plural upload paths and Basic-credential token auth.
 
 ## Rename
 
-- **AC-3-01 New names.** The binaries, images (`ghcr.io/soliddowant/registryproxy`, `ghcr.io/soliddowant/registryproxy-credential-helper`), chart (`oci://ghcr.io/soliddowant/charts/registryproxy`), Go module, API group (`registryproxy.soliddowant.dev`), audience default and metric names use `registryproxy`. `GHCRAccessPolicy` and the 0.2.x config file are gone.
+- **AC-3-01 New names.** The binaries, images (`ghcr.io/soliddowant/registrygate`, `ghcr.io/soliddowant/registrygate-credential-helper`), chart (`oci://ghcr.io/soliddowant/charts/registrygate`), Go module, API group (`registrygate.soliddowant.dev`), audience default and metric names use `registrygate`. `GHCRAccessPolicy` and the 0.2.x config file are gone.
   Tests:
 
 ## Upstreams and interception
@@ -26,7 +26,7 @@ In the e2e scenarios, "a CI pod" is a pod with a dind sidecar set up exactly as 
 
 ## Authentication
 
-- **AC-3-08 ServiceAccount tokens.** A valid token with the `registryproxy` audience authenticates; a bad or wrong-audience token gets `401` and is never treated as anonymous; a request with no credential is anonymous; a `Bearer` credential gets `401`.
+- **AC-3-08 ServiceAccount tokens.** A valid token with the `registrygate` audience authenticates; a bad or wrong-audience token gets `401` and is never treated as anonymous; a request with no credential is anonymous; a `Bearer` credential gets `401`.
   Tests:
 
 ## Credentials and policies
@@ -80,9 +80,9 @@ In the e2e scenarios, "a CI pod" is a pod with a dind sidecar set up exactly as 
 
 ## Client side
 
-- **AC-3-29 Credential helper hosts.** The helper answers `get` only for hosts in `REGISTRYPROXY_HOSTS`, and answers "credentials not found" for any other.
+- **AC-3-29 Credential helper hosts.** The helper answers `get` only for hosts in `REGISTRYGATE_HOSTS`, and answers "credentials not found" for any other.
   Tests:
-- **AC-3-30 `configure`.** `docker-credential-registryproxy configure` adds `credHelpers` entries for every listed host to an existing `config.json`, keeping its other keys, or creates it; `docker buildx build` works afterwards.
+- **AC-3-30 `configure`.** `docker-credential-registrygate configure` adds `credHelpers` entries for every listed host to an existing `config.json`, keeping its other keys, or creates it; `docker buildx build` works afterwards.
   Tests:
 
 ## Operations

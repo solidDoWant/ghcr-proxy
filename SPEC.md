@@ -1,6 +1,6 @@
-# registryproxy specification
+# registrygate specification
 
-registryproxy is an authenticating, transparent reverse proxy for container registries. It runs in a Kubernetes cluster and stands in for registries such as `ghcr.io` and `quay.io` inside CI pods. Pods authenticate with their own Kubernetes ServiceAccount token. Namespaced custom resources declare which upstream registries the proxy stands in for, which credentials a namespace may push with, which pull-through mirror (for example a Harbor proxy-cache project) serves its pulls, and what each ServiceAccount may do. Pods never see an upstream or mirror credential.
+registrygate is an authenticating, transparent reverse proxy for container registries. It runs in a Kubernetes cluster and stands in for registries such as `ghcr.io` and `quay.io` inside CI pods. Pods authenticate with their own Kubernetes ServiceAccount token. Namespaced custom resources declare which upstream registries the proxy stands in for, which credentials a namespace may push with, which pull-through mirror (for example a Harbor proxy-cache project) serves its pulls, and what each ServiceAccount may do. Pods never see an upstream or mirror credential.
 
 The project was called ghcr-proxy up to 0.2.x and served only `ghcr.io`. Phases 1 and 2 below were built under that name. Phase 3 generalizes it (issue #98) and renames it.
 
@@ -15,7 +15,7 @@ This file is the authoritative reference. Each phase is done when its checklist 
 
 `dockerd` can't do this by itself: its `registry-mirrors` covers Docker Hub only and can't add Harbor's project path, and with the containerd image store it ignores `hosts.toml` mirrors. BuildKit mirrors cover only builds and hold one credential per host. A proxy that intercepts the registry hosts and holds the credentials itself covers both (issue #98 has the proof of concept).
 
-**How it is used.** CI pods resolve each intercepted registry host (`ghcr.io`, `quay.io`, …) to the proxy's Service (pod `hostAliases`). `dockerd` trusts the proxy's certificate for each host through `/etc/docker/certs.d/<host>/ca.crt`. The Docker CLI gets its credential from `docker-credential-registryproxy`, a static credential helper shipped as its own image and mounted as an image volume. The helper returns the pod's projected ServiceAccount token. Builds keep using plain `ghcr.io/<owner>/<image>` and `quay.io/<org>/<image>` references.
+**How it is used.** CI pods resolve each intercepted registry host (`ghcr.io`, `quay.io`, …) to the proxy's Service (pod `hostAliases`). `dockerd` trusts the proxy's certificate for each host through `/etc/docker/certs.d/<host>/ca.crt`. The Docker CLI gets its credential from `docker-credential-registrygate`, a static credential helper shipped as its own image and mounted as an image volume. The helper returns the pod's projected ServiceAccount token. Builds keep using plain `ghcr.io/<owner>/<image>` and `quay.io/<org>/<image>` references.
 
 A project that needs a registry's own API (for example Harbor's `/api/v2.0/` in harbor-operator's e2e tests) doesn't intercept that host: its pods reach the registry directly with their own credentials, and network policy decides who may. The proxy serves only the registry API.
 
@@ -50,7 +50,7 @@ Non-negotiable. Tests enforce them, and only the owner can change them.
 
 ## 4. Architecture
 
-One Go binary, `registryproxy`, plus the credential helper binary `docker-credential-registryproxy`.
+One Go binary, `registrygate`, plus the credential helper binary `docker-credential-registrygate`.
 
 The proxy runs several stateless replicas behind a Service. Each replica:
 
@@ -64,7 +64,7 @@ A leader-elected controller in the same binary writes status for all four kinds.
 
 ### Custom resources
 
-API group `registryproxy.soliddowant.dev`, version `v1alpha1`. All kinds are namespaced and in the category `registryproxy` (`kubectl get registryproxy -A`).
+API group `registrygate.soliddowant.dev`, version `v1alpha1`. All kinds are namespaced and in the category `registrygate` (`kubectl get registrygate -A`).
 
 **References and admission** follow harbor-operator's pattern. Every reference is `{namespace, name}`, with `namespace` defaulting to the referring object's own. Every object that others point at has `allowedNamespaces`:
 
@@ -74,7 +74,7 @@ allowedNamespaces:
     - ci-foo
   selector:              # metav1.LabelSelector on Namespace labels
     matchLabels:
-      registryproxy.soliddowant.dev/tenant: "true"
+      registrygate.soliddowant.dev/tenant: "true"
 ```
 
 A namespace is admitted when it is the object's own namespace, is in `names`, or matches `selector`. A reference that isn't admitted is treated as absent and reported as `NotAllowed`. Every Secret reference is to a Secret in the referring object's own namespace.
@@ -107,8 +107,8 @@ Repository patterns are globs: `*` matches within one path segment, `**` across 
 
 ### Authentication
 
-- The proxy answers unauthenticated `/v2/` requests with `401` and `WWW-Authenticate: Basic realm="registryproxy"`, so Docker sends HTTP Basic credentials. The username is ignored; the password is a Kubernetes ServiceAccount token.
-- Tokens are checked with the `TokenReview` API, with `audiences: [<configured audience>]` (default `registryproxy`). The audience must be in the result. Definite results are cached for at most 30 seconds, keyed by a SHA-256 of the token; the cache never stores the token.
+- The proxy answers unauthenticated `/v2/` requests with `401` and `WWW-Authenticate: Basic realm="registrygate"`, so Docker sends HTTP Basic credentials. The username is ignored; the password is a Kubernetes ServiceAccount token.
+- Tokens are checked with the `TokenReview` API, with `audiences: [<configured audience>]` (default `registrygate`). The audience must be in the result. Definite results are cached for at most 30 seconds, keyed by a SHA-256 of the token; the cache never stores the token.
 - The identity is the ServiceAccount's namespace and name, plus the bound pod name if the review reports one (audit only).
 - A request with no `Authorization` header is **anonymous**. A Basic credential that fails review gets `401 UNAUTHORIZED`; it is never downgraded to anonymous. A `Bearer` credential is rejected with `401`.
 
@@ -191,19 +191,19 @@ References that don't exist yet are allowed (they may be created later) and show
 
 ### Credential helper
 
-`docker-credential-registryproxy` implements the Docker credential helper protocol, plus one subcommand:
-- `get`: for a server whose host is in `REGISTRYPROXY_HOSTS` (comma-separated; with or without scheme or path), reads the token file (`REGISTRYPROXY_TOKEN_FILE`, default `/var/run/secrets/registryproxy/token`) fresh on every call and prints `{"ServerURL":…,"Username":"registryproxy","Secret":<token>}`. Any other server: the protocol's "credentials not found" answer.
+`docker-credential-registrygate` implements the Docker credential helper protocol, plus one subcommand:
+- `get`: for a server whose host is in `REGISTRYGATE_HOSTS` (comma-separated; with or without scheme or path), reads the token file (`REGISTRYGATE_TOKEN_FILE`, default `/var/run/secrets/registrygate/token`) fresh on every call and prints `{"ServerURL":…,"Username":"registrygate","Secret":<token>}`. Any other server: the protocol's "credentials not found" answer.
 - `store`, `erase`: succeed and do nothing. `list`: `{}`.
-- `configure`: merges `"credHelpers": {"<host>": "registryproxy"}` for each host in `REGISTRYPROXY_HOSTS` into `$DOCKER_CONFIG/config.json` (default `~/.docker`), creating it if needed and keeping every other key. `DOCKER_CONFIG` must be writable (buildx keeps state there), so it is never a ConfigMap mount.
+- `configure`: merges `"credHelpers": {"<host>": "registrygate"}` for each host in `REGISTRYGATE_HOSTS` into `$DOCKER_CONFIG/config.json` (default `~/.docker`), creating it if needed and keeping every other key. `DOCKER_CONFIG` must be writable (buildx keeps state there), so it is never a ConfigMap mount.
 
-It is a static Go binary (`CGO_ENABLED=0`) shipped alone in the image `ghcr.io/soliddowant/registryproxy-credential-helper` (`FROM scratch`, binary at `/docker-credential-registryproxy`), for amd64 and arm64.
+It is a static Go binary (`CGO_ENABLED=0`) shipped alone in the image `ghcr.io/soliddowant/registrygate-credential-helper` (`FROM scratch`, binary at `/docker-credential-registrygate`), for amd64 and arm64.
 
 ## 5. Security model
 
 - **RBAC:** create `TokenReview`; get, list and watch the four kinds cluster-wide; update their status; Secrets as in "Secrets"; leases for leader election. Nothing else: no pods, no cluster-wide Secrets.
 - **Mirrors are public-content only.** A Harbor proxy-cache project fetches from its upstream with its registry endpoint's credential. If that credential can read private images, anyone holding the project's robot can read them through Harbor directly, bypassing the proxy's policy. So a mirror's Harbor registry endpoint must have **no upstream credential**. The proxy can't check this; the admin docs say so prominently. Private content is pulled with an `UpstreamCredential`, which never uses a mirror.
 - **Tenant-written objects** can only affect their own namespace's requests: a tenant's credential or mirror is used only by policies in namespaces it admits, and its Secret goes only to its own endpoint. A tenant mirror's URL is limited by the upstream's `allowedMirrorURLs`. The proxy's NetworkPolicy should also limit its egress to the upstreams and mirrors.
-- **ServiceAccount tokens** for the proxy use their own audience (`registryproxy`) and a short lifetime (the docs recommend 1–6 hours).
+- **ServiceAccount tokens** for the proxy use their own audience (`registrygate`) and a short lifetime (the docs recommend 1–6 hours).
 - **Serving CAs** are the admin's. The docs require one CA per `UpstreamRegistry`, name-constrained to exactly its hosts, trusted only through Docker's per-registry `certs.d` directory, never the system trust store.
 - **Shared credentials** (for example one GHCR PAT behind many `UpstreamCredential` objects, each with its own ceiling) share one upstream identity and its rate limits. The audit log is how the owner tells who did what.
 
@@ -228,7 +228,7 @@ Each phase ends with a release an admin can deploy. The owner deploys it in thei
 
 1. **Done (0.1.x, as ghcr-proxy).** Push and pull through the proxy for `ghcr.io`.
 2. **Done (0.2.0, as ghcr-proxy).** Delete, mirrors and operations.
-3. **registryproxy** (`docs/acceptance/phase-3.md`). The rename, the four custom resources, several upstreams by SNI, upstream auth by challenge, credentials with ceilings, per-namespace mirrors with tenant-owned Secrets, Secret watching, generic upload sessions and delete, path canonicalization, the credential helper's host list and `configure`, status, webhook, metrics, audit, chart and docs. Release 0.3.0: images `ghcr.io/soliddowant/registryproxy:<version>` and `ghcr.io/soliddowant/registryproxy-credential-helper:<version>`, chart `oci://ghcr.io/soliddowant/charts/registryproxy`.
+3. **registrygate** (`docs/acceptance/phase-3.md`). The rename, the four custom resources, several upstreams by SNI, upstream auth by challenge, credentials with ceilings, per-namespace mirrors with tenant-owned Secrets, Secret watching, generic upload sessions and delete, path canonicalization, the credential helper's host list and `configure`, status, webhook, metrics, audit, chart and docs. Release 0.3.0: images `ghcr.io/soliddowant/registrygate:<version>` and `ghcr.io/soliddowant/registrygate-credential-helper:<version>`, chart `oci://ghcr.io/soliddowant/charts/registrygate`.
 
 Each phase's design (`docs/design/phase-N.md`) is reviewed before its issues are scheduled.
 
@@ -245,8 +245,8 @@ Each phase's design (`docs/design/phase-N.md`) is reviewed before its issues are
 ## 9. Repository layout
 
 ```
-cmd/registryproxy/                     proxy main
-cmd/docker-credential-registryproxy/   credential helper main
+cmd/registrygate/                     proxy main
+cmd/docker-credential-registrygate/   credential helper main
 api/v1alpha1/                          the four kinds (controller-gen)
 internal/server/                       TLS listener and SNI, path canonicalization, health and metrics endpoints
 internal/authn/                        TokenReview with cache
@@ -259,7 +259,7 @@ internal/webhook/                      admission webhook
 internal/audit/, internal/metrics/
 internal/credhelper/                   credential helper logic
 config/crd/bases/, config/rbac/        generated
-deploy/charts/registryproxy            Helm chart
+deploy/charts/registrygate            Helm chart
 test/fakeregistry/, test/e2e/,         fake registries, e2e harness and fixtures,
 test/live/                             live tests against ghcr.io
 docs/                                  user/ admin/ dev/ agents/ design/ acceptance/
