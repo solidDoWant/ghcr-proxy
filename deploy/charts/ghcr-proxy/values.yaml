@@ -24,6 +24,21 @@ pat:
 tls:
   # -- Name of the `kubernetes.io/tls` Secret with the serving certificate. Required. The chart never creates it.
   existingSecret: ""
+webhook:
+  # -- Serve the validating admission webhook that rejects policies outside the namespace's grant at apply time. The proxy still enforces the grant either way.
+  enabled: false
+  # -- Name of the `kubernetes.io/tls` Secret with the webhook's serving certificate. Required when the webhook is on and `webhook.certManager.issuerRef.name` is empty. The chart never creates it.
+  existingSecret: ""
+  # -- Base64 CA bundle that signed the webhook certificate. Required when you provide `webhook.existingSecret`.
+  caBundle: ""
+  certManager:
+    issuerRef:
+      # -- Name of a cert-manager Issuer or ClusterIssuer. When set, the chart makes the certificate and cainjector adds the CA bundle (cainjector must run).
+      name: ""
+      # -- Kind of the issuer.
+      kind: Issuer
+      # -- API group of the issuer.
+      group: cert-manager.io
 service:
   # -- Fixed ClusterIP of the Service. Pin it so CI pods can map `ghcr.io` to it with `hostAliases`. Empty lets Kubernetes choose.
   clusterIP: ""

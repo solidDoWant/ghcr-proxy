@@ -43,6 +43,10 @@ spec:
               containerPort: 8443
             - name: health
               containerPort: 8080
+            {{- if .Values.webhook.enabled }}
+            - name: webhook
+              containerPort: 9443
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /healthz
@@ -61,6 +65,11 @@ spec:
             - name: tls
               mountPath: /var/run/ghcr-proxy/tls
               readOnly: true
+            {{- if .Values.webhook.enabled }}
+            - name: webhook-tls
+              mountPath: /var/run/ghcr-proxy/webhook-tls
+              readOnly: true
+            {{- end }}
             {{- if .Values.upstream.ca.existingSecret }}
             - name: upstream-ca
               mountPath: /var/run/ghcr-proxy/upstream-ca
@@ -83,6 +92,11 @@ spec:
         - name: tls
           secret:
             secretName: {{ required "tls.existingSecret is required" .Values.tls.existingSecret }}
+        {{- if .Values.webhook.enabled }}
+        - name: webhook-tls
+          secret:
+            secretName: {{ include "ghcr-proxy.webhookSecretName" . }}
+        {{- end }}
         {{- if .Values.upstream.ca.existingSecret }}
         - name: upstream-ca
           secret:
