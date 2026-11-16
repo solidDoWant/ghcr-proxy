@@ -30,6 +30,7 @@ import (
 	"github.com/solidDoWant/ghcr-proxy/internal/registry"
 	"github.com/solidDoWant/ghcr-proxy/internal/server"
 	"github.com/solidDoWant/ghcr-proxy/internal/upstream"
+	"github.com/solidDoWant/ghcr-proxy/internal/webhook"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
@@ -170,13 +171,23 @@ func serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 
 	var components sync.WaitGroup
 
-	backgroundErrs := make(chan error, 3)
+	backgroundErrs := make(chan error, 4)
 
 	start := func(run func(context.Context) error) {
 		components.Go(func() { backgroundErrs <- run(background) })
 	}
 
 	start(policyCache.Start)
+
+	if cfg.Webhook.Enabled {
+		webhookServer, err := webhook.NewServer(cfg.Webhook, scheme, cfg.Grants)
+		if err != nil {
+			return err
+		}
+
+		start(webhookServer.Start)
+	}
+
 	start(pat.Watch)
 	start(certificate.Watch)
 	// The status controller never fails the proxy; it retries until the proxy stops.

@@ -64,6 +64,22 @@ server:
   shutdownGracePeriod: {{ .Values.server.shutdownGracePeriod | quote }}
 audit:
   enabled: {{ .Values.audit.enabled }}
+{{- if .Values.webhook.enabled }}
+webhook:
+  enabled: true
+  listen: ":9443"
+  certFile: /var/run/ghcr-proxy/webhook-tls/tls.crt
+  keyFile: /var/run/ghcr-proxy/webhook-tls/tls.key
+{{- end }}
+{{- end }}
+
+{{/* Name of the Secret with the webhook certificate. */}}
+{{- define "ghcr-proxy.webhookSecretName" -}}
+{{- if .Values.webhook.certManager.issuerRef.name -}}
+{{- printf "%s-webhook-tls" (include "ghcr-proxy.fullname" .) -}}
+{{- else -}}
+{{- required "webhook.existingSecret (or webhook.certManager.issuerRef.name) is required when webhook.enabled" .Values.webhook.existingSecret -}}
+{{- end -}}
 {{- end }}
 
 {{/* Grace period: shutdownGracePeriod plus 30 seconds. Accepts one number and a unit: 90s, 10m or 1h. */}}

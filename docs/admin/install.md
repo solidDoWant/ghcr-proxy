@@ -158,6 +158,30 @@ Three objects are off by default. [Chart values](chart-values.md) lists their va
   NetworkPolicy ports match the port of the destination pod, after the Service has translated the address. A Service on port `443` that points to pod port `8443` needs a rule for `8443`. Set `apiServerCIDRs` to the addresses from `kubectl get endpoints kubernetes`, not to the Service address. GHCR has no fixed addresses, so the chart allows port `443` to anywhere. With Cilium, you can replace this with a policy on the name `ghcr.io`. Use `extraEgress` for an in-cluster upstream or mirror.
 - **ServiceMonitor** (`serviceMonitor.enabled`): scrapes the metrics port. It needs the Prometheus Operator CRDs.
 
+## Turn on the admission webhook
+
+The proxy enforces grants whether or not you use the webhook. The webhook only gives fast feedback: `kubectl apply` fails at once when a policy is outside the grants of its namespace. The webhook is off by default.
+
+The webhook rejects a new policy, and a change to the `spec` of a policy, when any repository pattern or action is outside the grants of the namespace. The message lists each rejected pattern. The webhook admits an update that does not change the `spec`, and an update of an object that is being deleted. So labels and finalizers still change after you narrow a grant.
+
+The webhook has its own Service and its own certificate. Every proxy replica serves it, also a replica that is not ready. A missing PAT or an unsynced policy cache never blocks a policy write. If no replica runs, the webhook rejects all writes of `GHCRAccessPolicy` objects, because it fails closed (`failurePolicy: Fail`).
+
+Choose one way to give the webhook a certificate:
+
+1. With cert-manager, set `webhook.certManager.issuerRef.name` to an Issuer in the namespace of the proxy. The chart makes the certificate, and cainjector adds the CA bundle to the webhook. Make sure that cainjector runs.
+2. Without cert-manager, make a `kubernetes.io/tls` Secret for the name `ghcr-proxy-webhook.ghcr-proxy.svc` (use the name of your Service and namespace). Set `webhook.existingSecret` to the Secret and `webhook.caBundle` to the base64 text of the CA certificate.
+
+Then set `webhook.enabled=true`. For example:
+
+```
+helm upgrade ghcr-proxy oci://ghcr.io/soliddowant/charts/ghcr-proxy \
+  --namespace ghcr-proxy --reuse-values \
+  --set webhook.enabled=true \
+  --set webhook.certManager.issuerRef.name=webhook-issuer
+```
+
+The API server must reach port `9443` of the proxy pods. If you use a NetworkPolicy, allow that port from the API server.
+
 ## Security limits
 
 - A synced replica keeps the last policies it saw. During an outage of the Kubernetes API server, a revoked policy keeps working until the watch recovers.
