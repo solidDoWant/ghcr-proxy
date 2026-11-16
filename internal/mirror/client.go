@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/authn"
@@ -63,6 +64,7 @@ type Client struct {
 	challenge     *transport.Challenge
 	challengeGen  uint64
 	challengeCAs  *x509.CertPool
+	open          bool
 	tokens        *lru.Cache[tokenKey, tokenEntry]
 	responseLimit time.Duration
 }
@@ -129,7 +131,10 @@ func (c *Client) Send(req *http.Request, scope string) (*http.Response, error) {
 		}
 
 		out := req.Clone(req.Context())
-		out.Header.Set("Authorization", "Bearer "+token)
+		// An empty token means the mirror needs no authentication: send no credential.
+		if token != "" {
+			out.Header.Set("Authorization", "Bearer "+token)
+		}
 
 		resp, err := roundTripper.RoundTrip(out)
 		if err != nil {
@@ -189,6 +194,11 @@ func (c *Client) token(ctx context.Context, roundTripper http.RoundTripper, stat
 		return "", key, err
 	}
 
+	if challenge == nil {
+		// The mirror answered the ping with 200: no authentication, no token request.
+		return "", key, nil
+	}
+
 	auth := authn.Anonymous
 	if state.Credentials != nil {
 		auth = authn.FromConfig(authn.AuthConfig{Username: state.Credentials.Username, Password: state.Credentials.Password})
@@ -233,28 +243,40 @@ func (c *Client) token(ctx context.Context, roundTripper http.RoundTripper, stat
 }
 
 // ping returns the mirror's challenge, pinging again after a credentials or
-// CA change.
+// CA change. It returns a nil challenge and no error when the mirror answers
+// the ping with 200 and so needs no authentication.
 func (c *Client) ping(ctx context.Context, roundTripper http.RoundTripper, state State) (*transport.Challenge, error) {
 	c.mu.Lock()
-	challenge := c.challenge
-	fresh := challenge != nil && c.challengeGen == state.Generation && c.challengeCAs == state.RootCAs
+	challenge, open := c.challenge, c.open
+	fresh := (challenge != nil || open) && c.challengeGen == state.Generation && c.challengeCAs == state.RootCAs
 	c.mu.Unlock()
 
 	if !fresh {
 		pingCtx, cancel := context.WithTimeout(ctx, c.cfg.TokenTimeout)
 		defer cancel()
 
-		pinged, err := transport.Ping(pingCtx, c.registry, roundTripper)
+		recorder := &statusRecorder{inner: roundTripper}
+
+		pinged, err := transport.Ping(pingCtx, c.registry, recorder)
 		if err != nil {
 			c.cfg.Logger.Error("mirror ping failed", "url", c.cfg.Mirror.URL.String(), "error", err.Error())
 			return nil, ErrUnavailable
 		}
 
+		open = recorder.ok.Load()
+		if open {
+			pinged = nil
+		}
+
 		c.mu.Lock()
-		c.challenge, c.challengeGen, c.challengeCAs = pinged, state.Generation, state.RootCAs
+		c.challenge, c.open, c.challengeGen, c.challengeCAs = pinged, open, state.Generation, state.RootCAs
 		c.mu.Unlock()
 
 		challenge = pinged
+	}
+
+	if open {
+		return nil, nil //nolint:nilnil // nil challenge means no authentication
 	}
 
 	if !strings.EqualFold(challenge.Scheme, "bearer") {
@@ -270,6 +292,22 @@ func (c *Client) ping(ctx context.Context, roundTripper http.RoundTripper, state
 	}
 
 	return challenge, nil
+}
+
+// statusRecorder notes whether any response was a 200, which the ping result
+// alone cannot tell from a 401 without a challenge.
+type statusRecorder struct {
+	inner http.RoundTripper
+	ok    atomic.Bool
+}
+
+func (r *statusRecorder) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := r.inner.RoundTrip(req)
+	if err == nil && resp.StatusCode == http.StatusOK {
+		r.ok.Store(true)
+	}
+
+	return resp, err
 }
 
 func (c *Client) realmAllowed(realm string) bool {
