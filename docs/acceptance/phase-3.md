@@ -20,7 +20,7 @@ In the e2e scenarios, "a CI pod" is a pod with a dind sidecar set up exactly as 
 - **AC-3-05 Admin namespaces only.** An `UpstreamRegistry` outside the admin namespaces is ignored by the proxy and, with the webhook on, rejected.
   Tests:
 - **AC-3-06 Registry API only.** A request outside `/v2` gets `404`. A non-canonical path (`..`, `//`, encoded `/`, `/V2/`, `/%76%32/`) gets `400`. Neither sends anything upstream.
-  Tests:
+  Tests: `internal/server: TestNonCanonicalPathsAre400AndNeverReachTheUpstream`, `internal/server: TestCatalogAndUnknownPathsAre404AndNeverReachTheUpstream`, `internal/registry: TestClassifyRefusesNonCanonicalPaths`
 - **AC-3-07 Upstream auth by challenge.** The proxy works with an upstream that allows anonymous access, one that challenges with Basic, and one that challenges with Bearer. A token endpoint on a host other than the `url` host or `tokenRealmHosts` is refused with `502`.
   Tests:
 

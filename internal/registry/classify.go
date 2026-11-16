@@ -147,7 +147,8 @@ func errDigestInvalid() *Error {
 }
 
 // Classify maps a request to its route, action and repository. It reads only
-// the escaped path, the raw query and the method, and rejects anything that
+// the raw path, the raw query and the method, refuses a non-canonical path
+// with 400 or 404, and rejects anything that
 // isn't exactly one route of the registry API, so that a request can never be
 // matched to a repository other than the one the upstream would serve.
 func Classify(r *http.Request) (Request, error) {
@@ -155,10 +156,12 @@ func Classify(r *http.Request) (Request, error) {
 		return Request{}, errNotFound()
 	}
 
-	path := r.URL.EscapedPath()
-	// Percent-encoding is rejected outright: no valid route needs it, and
-	// decoding it would let one path name two different repositories.
-	if len(path) > maxPathLength || strings.Contains(path, "%") || !strings.HasPrefix(path, basePath) {
+	path := requestPath(r)
+	if err := checkCanonical(path); err != nil {
+		return Request{}, err
+	}
+
+	if len(path) > maxPathLength || !strings.HasPrefix(path, basePath) {
 		return Request{}, errNotFound()
 	}
 
