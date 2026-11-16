@@ -16,6 +16,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -140,13 +141,16 @@ func keyPair(t *testing.T, host string) map[string][]byte {
 
 // startStatus runs a manager with the status controller, and a model and Secret store feeding it, the way the
 // proxy wires them. Everything stops on cleanup.
-func startStatus(t *testing.T, admin string, leaseNamespace string) {
+func startStatus(t *testing.T, userAgent, admin, leaseNamespace string) (ctrl.Manager, func()) {
 	t.Helper()
 
 	options := controller.ManagerOptions(scheme, leaseNamespace)
 	options.Controller.SkipNameValidation = ptr.To(true)
 
-	mgr, err := ctrl.NewManager(restConfig, options)
+	config := rest.CopyConfig(restConfig)
+	config.UserAgent = userAgent
+
+	mgr, err := ctrl.NewManager(config, options)
 	require.NoError(t, err)
 
 	status := &controller.Status{}
@@ -183,13 +187,20 @@ func startStatus(t *testing.T, admin string, leaseNamespace string) {
 		}()
 	}
 
-	t.Cleanup(func() {
-		cancel()
+	var stopOnce sync.Once
 
-		for range 3 {
-			<-done
-		}
-	})
+	stop := func() {
+		stopOnce.Do(func() {
+			cancel()
+
+			for range 3 {
+				<-done
+			}
+		})
+	}
+	t.Cleanup(stop)
+
+	return mgr, stop
 }
 
 func getReady(t *testing.T, c client.Client, object client.Object, conditions func() []metav1.Condition,
@@ -216,6 +227,8 @@ type world struct {
 	credential *v1alpha1.UpstreamCredential
 	mirror     *v1alpha1.RegistryMirror
 	policy     *v1alpha1.RegistryAccessPolicy
+	lease      string
+	stop       func()
 }
 
 func newWorld(t *testing.T) *world {
@@ -302,7 +315,8 @@ func newWorld(t *testing.T) *world {
 		create(t, c, object)
 	}
 
-	startStatus(t, w.admin, "lease-"+suffix)
+	w.lease = "lease-" + suffix
+	_, w.stop = startStatus(t, "replica-leader", w.admin, w.lease)
 
 	return w
 }
@@ -372,14 +386,17 @@ func TestStatusIsNotRewrittenWhenNothingChanged(t *testing.T) {
 		}})
 	}
 
+	policyKey, upstreamKey := client.ObjectKeyFromObject(w.policy), client.ObjectKeyFromObject(w.upstream)
+
 	require.Never(t, func() bool {
-		var policy v1alpha1.RegistryAccessPolicy
+		var (
+			policy   v1alpha1.RegistryAccessPolicy
+			upstream v1alpha1.UpstreamRegistry
+		)
 
-		require.NoError(t, w.c.Get(t.Context(), client.ObjectKeyFromObject(w.policy), &policy))
-
-		var upstream v1alpha1.UpstreamRegistry
-
-		require.NoError(t, w.c.Get(t.Context(), client.ObjectKeyFromObject(w.upstream), &upstream))
+		if w.c.Get(t.Context(), policyKey, &policy) != nil || w.c.Get(t.Context(), upstreamKey, &upstream) != nil {
+			return false
+		}
 
 		return policy.ResourceVersion != policyVersion || upstream.ResourceVersion != upstreamVersion
 	}, 3*time.Second, tick)
@@ -418,4 +435,47 @@ func TestStatusFollowsASecretChange(t *testing.T) {
 
 	getReady(t, w.c, w.credential, func() []metav1.Condition { return w.credential.Status.Conditions },
 		metav1.ConditionTrue, v1alpha1.ReasonReady)
+}
+
+// statusWriters returns the field managers that have written the credential's status.
+func statusWriters(credential *v1alpha1.UpstreamCredential) []string {
+	var writers []string
+
+	for _, entry := range credential.ManagedFields {
+		if entry.Subresource == "status" {
+			writers = append(writers, entry.Manager)
+		}
+	}
+
+	return writers
+}
+
+func TestOnlyTheLeaderWritesStatus(t *testing.T) {
+	w := newWorld(t)
+
+	getReady(t, w.c, w.credential, func() []metav1.Condition { return w.credential.Status.Conditions },
+		metav1.ConditionTrue, v1alpha1.ReasonReady)
+
+	// A standby replica sees the same objects but must not write.
+	startStatus(t, "replica-standby", w.admin, w.lease)
+
+	var secret corev1.Secret
+
+	require.NoError(t, w.c.Get(t.Context(), client.ObjectKey{Namespace: w.admin, Name: "creds"}, &secret))
+	secret.Data = map[string][]byte{"username": []byte("robot")}
+	require.NoError(t, w.c.Update(t.Context(), &secret))
+
+	getReady(t, w.c, w.credential, func() []metav1.Condition { return w.credential.Status.Conditions },
+		metav1.ConditionFalse, v1alpha1.ReasonSecretInvalid)
+	assert.Equal(t, []string{"replica-leader"}, statusWriters(w.credential))
+
+	// When the leader stops it releases the lease and the standby takes over.
+	w.stop()
+
+	secret.Data = map[string][]byte{"username": []byte("robot"), "password": []byte("hunter3")}
+	require.NoError(t, w.c.Update(t.Context(), &secret))
+
+	getReady(t, w.c, w.credential, func() []metav1.Condition { return w.credential.Status.Conditions },
+		metav1.ConditionTrue, v1alpha1.ReasonReady)
+	assert.Contains(t, statusWriters(w.credential), "replica-standby")
 }
