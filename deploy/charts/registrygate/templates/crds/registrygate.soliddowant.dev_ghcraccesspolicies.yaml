@@ -5,9 +5,9 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.23.0
-  name: ghcraccesspolicies.ghcr-proxy.soliddowant.dev
+  name: ghcraccesspolicies.registrygate.soliddowant.dev
 spec:
-  group: ghcr-proxy.soliddowant.dev
+  group: registrygate.soliddowant.dev
   names:
     kind: GHCRAccessPolicy
     listKind: GHCRAccessPolicyList
