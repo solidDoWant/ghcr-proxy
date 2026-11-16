@@ -200,7 +200,7 @@ It is a static Go binary (`CGO_ENABLED=0`) shipped alone in the image `ghcr.io/s
 
 ## 5. Security model
 
-- **RBAC:** create `TokenReview`; get, list and watch the four kinds cluster-wide; update their status; Secrets as in "Secrets"; leases for leader election. Nothing else: no pods, no cluster-wide Secrets.
+- **RBAC:** create `TokenReview`; get, list and watch the four kinds and Namespaces (for `allowedNamespaces.selector`) cluster-wide; update their status; Secrets as in "Secrets"; leases for leader election. Nothing else: no pods, no cluster-wide Secrets.
 - **Mirrors are public-content only.** A Harbor proxy-cache project fetches from its upstream with its registry endpoint's credential. If that credential can read private images, anyone holding the project's robot can read them through Harbor directly, bypassing the proxy's policy. So a mirror's Harbor registry endpoint must have **no upstream credential**. The proxy can't check this; the admin docs say so prominently. Private content is pulled with an `UpstreamCredential`, which never uses a mirror.
 - **Tenant-written objects** can only affect their own namespace's requests: a tenant's credential or mirror is used only by policies in namespaces it admits, and its Secret goes only to its own endpoint. A tenant mirror's URL is limited by the upstream's `allowedMirrorURLs`. The proxy's NetworkPolicy should also limit its egress to the upstreams and mirrors.
 - **ServiceAccount tokens** for the proxy use their own audience (`registrygate`) and a short lifetime (the docs recommend 1–6 hours).
