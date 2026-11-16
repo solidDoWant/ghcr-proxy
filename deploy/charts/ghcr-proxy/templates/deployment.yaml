@@ -66,6 +66,19 @@ spec:
               mountPath: /var/run/ghcr-proxy/upstream-ca
               readOnly: true
             {{- end }}
+            {{- range $name := list "policy" "anonymous" }}
+            {{- $mirror := index $.Values.mirrors $name }}
+            {{- if and $mirror.url $mirror.credentials.existingSecret }}
+            - name: mirror-{{ $name }}
+              mountPath: /var/run/ghcr-proxy/mirror-{{ $name }}
+              readOnly: true
+            {{- end }}
+            {{- if and $mirror.url $mirror.ca.existingSecret }}
+            - name: mirror-{{ $name }}-ca
+              mountPath: /var/run/ghcr-proxy/mirror-{{ $name }}-ca
+              readOnly: true
+            {{- end }}
+            {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           securityContext:
@@ -90,6 +103,25 @@ spec:
             items:
               - key: {{ .Values.upstream.ca.key }}
                 path: ca.crt
+        {{- end }}
+        {{- range $name := list "policy" "anonymous" }}
+        {{- $mirror := index $.Values.mirrors $name }}
+        {{- if and $mirror.url $mirror.credentials.existingSecret }}
+        - name: mirror-{{ $name }}
+          secret:
+            secretName: {{ $mirror.credentials.existingSecret }}
+            items:
+              - key: {{ $mirror.credentials.key }}
+                path: credentials
+        {{- end }}
+        {{- if and $mirror.url $mirror.ca.existingSecret }}
+        - name: mirror-{{ $name }}-ca
+          secret:
+            secretName: {{ $mirror.ca.existingSecret }}
+            items:
+              - key: {{ $mirror.ca.key }}
+                path: ca.crt
+        {{- end }}
         {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

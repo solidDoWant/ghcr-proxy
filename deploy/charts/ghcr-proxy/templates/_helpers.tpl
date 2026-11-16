@@ -64,6 +64,25 @@ server:
   shutdownGracePeriod: {{ .Values.server.shutdownGracePeriod | quote }}
 audit:
   enabled: {{ .Values.audit.enabled }}
+{{- if or .Values.mirrors.policy.url .Values.mirrors.anonymous.url }}
+mirrors:
+{{- range $name := list "policy" "anonymous" }}
+{{- $mirror := index $.Values.mirrors $name }}
+{{- if $mirror.url }}
+  {{ $name }}:
+    url: {{ $mirror.url | quote }}
+    pathPrefix: {{ $mirror.pathPrefix | quote }}
+    {{- if $mirror.credentials.existingSecret }}
+    credentialsFile: /var/run/ghcr-proxy/mirror-{{ $name }}/credentials
+    {{- end }}
+    {{- if $mirror.ca.existingSecret }}
+    caFile: /var/run/ghcr-proxy/mirror-{{ $name }}-ca/ca.crt
+    {{- end }}
+    fallbackToUpstream: {{ $mirror.fallbackToUpstream }}
+    responseHeaderTimeout: {{ $mirror.responseHeaderTimeout | quote }}
+{{- end }}
+{{- end }}
+{{- end }}
 {{- end }}
 
 {{/* Grace period: shutdownGracePeriod plus 30 seconds. Accepts one number and a unit: 90s, 10m or 1h. */}}

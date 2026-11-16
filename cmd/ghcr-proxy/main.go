@@ -27,6 +27,7 @@ import (
 	"github.com/solidDoWant/ghcr-proxy/internal/authn"
 	"github.com/solidDoWant/ghcr-proxy/internal/authz"
 	"github.com/solidDoWant/ghcr-proxy/internal/config"
+	"github.com/solidDoWant/ghcr-proxy/internal/mirror"
 	"github.com/solidDoWant/ghcr-proxy/internal/registry"
 	"github.com/solidDoWant/ghcr-proxy/internal/server"
 	"github.com/solidDoWant/ghcr-proxy/internal/upstream"
@@ -88,6 +89,16 @@ func serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 
 	pat := upstream.NewPATFile(cfg.Upstream.PATFile, logger)
 	certificate := server.NewCertificate(cfg.TLS.CertFile, cfg.TLS.KeyFile, logger)
+
+	// A mirror whose files are missing or invalid is unavailable, not fatal: its pulls take the fallback rule.
+	var mirrorFiles []*mirror.Files
+	if cfg.Mirrors.Policy != nil {
+		mirrorFiles = append(mirrorFiles, mirror.NewFiles("policy", cfg.Mirrors.Policy, logger))
+	}
+
+	if cfg.Mirrors.Anonymous != nil {
+		mirrorFiles = append(mirrorFiles, mirror.NewFiles("anonymous", cfg.Mirrors.Anonymous, logger))
+	}
 
 	tokens, err := upstream.NewTokens(upstream.TokensConfig{
 		URL:          cfg.Upstream.URL,
@@ -170,7 +181,7 @@ func serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 
 	var components sync.WaitGroup
 
-	backgroundErrs := make(chan error, 3)
+	backgroundErrs := make(chan error, 3+len(mirrorFiles))
 
 	start := func(run func(context.Context) error) {
 		components.Go(func() { backgroundErrs <- run(background) })
@@ -179,6 +190,10 @@ func serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	start(policyCache.Start)
 	start(pat.Watch)
 	start(certificate.Watch)
+
+	for _, files := range mirrorFiles {
+		start(files.Watch)
+	}
 	// The status controller never fails the proxy; it retries until the proxy stops.
 	components.Go(func() { statusController.run(background) })
 

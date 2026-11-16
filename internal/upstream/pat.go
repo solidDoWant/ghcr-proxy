@@ -8,16 +8,11 @@ import (
 	"errors"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
-	"github.com/fsnotify/fsnotify"
+	"github.com/solidDoWant/ghcr-proxy/internal/filewatch"
 )
-
-// patRestatInterval is the backstop for missed file events.
-const patRestatInterval = 60 * time.Second
 
 // errPATEmpty is a PAT file holding only whitespace.
 var errPATEmpty = errors.New("PAT file is empty")
@@ -100,45 +95,8 @@ func readPAT(path string) (string, error) {
 	return pat, nil
 }
 
-// Watch reloads the PAT whenever the file's directory changes, which catches
-// the symlink swap Kubernetes uses to update Secret volumes, and re-reads it
-// every minute in case an event is missed. It returns when ctx ends.
+// Watch reloads the PAT whenever the file changes, with the watcher shared by
+// every reloaded file. It returns when ctx ends.
 func (p *PATFile) Watch(ctx context.Context) error {
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		return err
-	}
-	defer func() { _ = watcher.Close() }()
-
-	if err := watcher.Add(filepath.Dir(p.path)); err != nil {
-		return err
-	}
-
-	// A change between the first read and the watch being set up raised no
-	// event, so read once more now that changes are watched.
-	p.Reload()
-
-	ticker := time.NewTicker(patRestatInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case _, open := <-watcher.Events:
-			if !open {
-				return nil
-			}
-
-			p.Reload()
-		case watchErr, open := <-watcher.Errors:
-			if !open {
-				return nil
-			}
-
-			p.logger.Error("PAT file watch error", "path", p.path, "error", watchErr.Error())
-		case <-ticker.C:
-			p.Reload()
-		}
-	}
+	return filewatch.Watch(ctx, p.logger, []string{p.path}, p.Reload)
 }
