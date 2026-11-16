@@ -144,6 +144,20 @@ Make sure that the install works:
 
 If the proxy cannot decide, it fails closed. It denies the request or forwards it with no credential. It never uses the PAT as a fallback.
 
+## Optional chart objects
+
+Three objects are off by default. [Chart values](chart-values.md) lists their values.
+
+- **PodDisruptionBudget** (`podDisruptionBudget.enabled`): allows `maxUnavailable: 1` pod down during a drain. If you set `replicas: 1`, this allows full disruption, so a drain can stop the only replica.
+- **NetworkPolicy** (`networkPolicy.enabled`): your CNI (the cluster network plugin) must enforce NetworkPolicy. The policy allows:
+  - port `8443` from the namespaces in `clientNamespaceSelector`;
+  - port `8080` from the namespaces in `metricsNamespaceSelector`;
+  - port `9443` from `apiServerCIDRs`;
+  - for egress: DNS, `apiServerCIDRs` on `apiServerPorts` (default `443` and `6443`), port `443` to any address, and your `extraEgress` rules.
+
+  NetworkPolicy ports match the port of the destination pod, after the Service has translated the address. A Service on port `443` that points to pod port `8443` needs a rule for `8443`. Set `apiServerCIDRs` to the addresses from `kubectl get endpoints kubernetes`, not to the Service address. GHCR has no fixed addresses, so the chart allows port `443` to anywhere. With Cilium, you can replace this with a policy on the name `ghcr.io`. Use `extraEgress` for an in-cluster upstream or mirror.
+- **ServiceMonitor** (`serviceMonitor.enabled`): scrapes the metrics port. It needs the Prometheus Operator CRDs.
+
 ## Configure pull mirrors
 
 A pull mirror is a registry that keeps copies of GHCR images, for example a Harbor proxy-cache project for `ghcr.io`. The proxy can use two mirrors. Both are optional. Set them under `mirrors` in the chart values:

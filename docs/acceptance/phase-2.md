@@ -35,6 +35,6 @@ Scenarios marked **(live)** run against the real `ghcr.io` through `make test-li
 - **AC-2-11 Admission check.** With the chart's admission webhook enabled, applying a policy whose repositories are outside the namespace's grant is rejected with a message naming the patterns; a policy inside the grant applies.
   Tests: `internal/webhook: TestAdmissionRejectsPoliciesOutsideTheGrant`, `internal/webhook: TestValidateCreate`, `internal/webhook: TestValidateUpdate`
 - **AC-2-12 Chart options.** Enabling the PodDisruptionBudget, NetworkPolicy and ServiceMonitor values renders working objects, and the e2e scenarios still pass with the NetworkPolicy on.
-  Tests:
+  Tests: `test/e2e: TestNetworkPolicyBlocksNamespacesOutsideTheClientSelector`
 - **AC-2-13 Docs walk-through.** Following `docs/admin/` from an empty kind cluster (cert-manager, a name-constrained CA, the chart, a CI pod) gets to a working `docker push`, scripted as an e2e test that uses only commands from the docs.
   Tests:

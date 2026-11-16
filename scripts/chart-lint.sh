@@ -29,6 +29,17 @@ sum() { render "$@" --show-only templates/deployment.yaml | grep 'checksum/confi
 render --set service.clusterIP=10.96.0.50 --show-only templates/service.yaml | grep -qF 'clusterIP: "10.96.0.50"' ||
 	fail "service.clusterIP is not used"
 
+opts=(--set podDisruptionBudget.enabled=true --set networkPolicy.enabled=true --set serviceMonitor.enabled=true
+	--set 'networkPolicy.apiServerCIDRs={10.0.0.5/32}' --set networkPolicy.clientNamespaceSelector.matchLabels.team=ci)
+for kind in PodDisruptionBudget NetworkPolicy ServiceMonitor; do
+	grep -qF "kind: $kind" <<<"$(render)" && fail "$kind rendered by default"
+	grep -qF "kind: $kind" <<<"$(render "${opts[@]}")" || fail "$kind not rendered when enabled"
+done
+np=$(render "${opts[@]}" --show-only templates/networkpolicy.yaml)
+for want in 'port: 8443' 'port: 8080' 'port: 9443' 'port: 6443' 'team: ci' '10.0.0.5/32'; do
+	grep -qF -- "$want" <<<"$np" || fail "network policy lacks: $want"
+done
+
 if helm template ghcr-proxy "$chart" >/dev/null 2>&1; then
 	fail "render without the Secret names must fail"
 fi
