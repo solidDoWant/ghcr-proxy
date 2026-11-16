@@ -53,6 +53,7 @@ docs/dev/
 docs/acceptance/
   phase-1.md               The owner's checklist for phase 1: push and pull through the proxy.
   phase-2.md               The owner's checklist for phase 2: delete, mirrors and operations.
+  phase-3.md               The owner's checklist for phase 3: registrygate.
 
 docs/design/
   phase-1.md               The design for phase 1: types, config, request classification and the decision table.
