@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/solidDoWant/ghcr-proxy/api/v1alpha1"
+	"github.com/solidDoWant/ghcr-proxy/internal/metrics"
 	"github.com/solidDoWant/ghcr-proxy/internal/mirror"
 	"github.com/solidDoWant/ghcr-proxy/internal/upstream"
 )
@@ -81,6 +82,8 @@ type ForwarderConfig struct {
 	// anonymous and not-allowed pulls. Nil when not configured.
 	PolicyMirror    MirrorClient
 	AnonymousMirror MirrorClient
+	// Metrics counts upstream requests and mirror fallbacks; nil turns it off.
+	Metrics *metrics.Metrics
 }
 
 // MirrorClient sends pulls to one mirror with the mirror's own credential.
@@ -337,7 +340,10 @@ func (t *tokenTransport) send(req *http.Request, kind upstream.Kind, scopes []st
 
 	req.Header.Set("Authorization", "Bearer "+token.Value)
 
+	started := time.Now()
 	resp, err := t.forwarder.cfg.Transport.RoundTrip(req)
+	t.forwarder.cfg.Metrics.UpstreamRequest(metrics.TargetUpstream, statusOf(resp), time.Since(started))
+
 	if err != nil {
 		return nil, token, err
 	}
@@ -376,6 +382,11 @@ func (t *tokenTransport) tryMirror(req *http.Request, state *exchange, target Mi
 	viaPolicy := forward.Credential == CredentialPAT
 	prefix := target.PathPrefix()
 
+	mirrorName, mirrorTarget := metrics.MirrorAnonymous, metrics.TargetAnonymousMirror
+	if viaPolicy {
+		mirrorName, mirrorTarget = metrics.MirrorPolicy, metrics.TargetPolicyMirror
+	}
+
 	out := req.Clone(req.Context())
 	out.URL = &url.URL{
 		Scheme:   target.URL().Scheme,
@@ -389,6 +400,7 @@ func (t *tokenTransport) tryMirror(req *http.Request, state *exchange, target Mi
 	// failed applies the fallback rule to a mirror failure.
 	failed := func(reason string) (*http.Response, bool, error) {
 		if target.FallbackToUpstream() {
+			t.forwarder.cfg.Metrics.MirrorFallback(mirrorName)
 			t.forwarder.cfg.Logger.Warn("mirror failed; falling back to the upstream",
 				"mirror", target.URL().String(), "path", out.URL.Path, "reason", reason)
 
@@ -400,7 +412,9 @@ func (t *tokenTransport) tryMirror(req *http.Request, state *exchange, target Mi
 		return nil, true, errMirrorUnavailable
 	}
 
+	started := time.Now()
 	resp, err = target.Send(out, "repository:"+prefix+"/"+forward.Request.Name+":pull")
+	t.forwarder.cfg.Metrics.UpstreamRequest(mirrorTarget, statusOf(resp), time.Since(started))
 
 	switch {
 	case err != nil && req.Context().Err() != nil:
@@ -508,6 +522,15 @@ func refusedAnonymously(status int, anonymousCaller bool) bool {
 	}
 
 	return false
+}
+
+// statusOf is the status of resp, or 0 when there is no response.
+func statusOf(resp *http.Response) int {
+	if resp == nil {
+		return 0
+	}
+
+	return resp.StatusCode
 }
 
 func discard(resp *http.Response) {

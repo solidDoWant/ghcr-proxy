@@ -43,6 +43,7 @@ docs/admin/
   README.md                The pages for admins.
   install.md               PAT, certificate and CA, grants, chart install and the audit log.
   ci-pods.md               How to set up a CI pod, with a Tekton Task example.
+  metrics.md               The Prometheus metrics and their labels.
   chart-values.md          Every Helm chart value (generated).
 
 docs/dev/

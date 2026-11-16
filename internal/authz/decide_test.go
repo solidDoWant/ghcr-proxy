@@ -315,3 +315,24 @@ func TestDecideIsUnavailableUntilTheInformerSyncs(t *testing.T) {
 		assert.Equal(t, authz.OutcomeForward, authorizer.Decide(anonymous, pull).Outcome)
 	})
 }
+
+func TestCountsSplitPoliciesByWhetherTheyAreInsideTheirGrants(t *testing.T) {
+	index, informer := watchedIndex(t, loadGrants(t, chartGrant))
+
+	ready, notReady := index.Counts()
+	assert.Zero(t, ready+notReady)
+
+	informer.Add(namedPolicy("ci-foo", "inside", []string{"builder"}, accessRule([]string{"soliddowant/foo/app"}, v1alpha1.ActionPush)))
+	informer.Add(namedPolicy("ci-foo", "outside", []string{"builder"}, accessRule([]string{"soliddowant/bar/app"}, v1alpha1.ActionPush)))
+	informer.Add(namedPolicy("other", "no-grant", []string{"builder"}, accessRule([]string{"soliddowant/foo/app"}, v1alpha1.ActionPush)))
+
+	ready, notReady = index.Counts()
+	assert.Equal(t, 1, ready)
+	assert.Equal(t, 2, notReady)
+
+	informer.Delete(namedPolicy("ci-foo", "outside", nil))
+
+	ready, notReady = index.Counts()
+	assert.Equal(t, 1, ready)
+	assert.Equal(t, 1, notReady)
+}

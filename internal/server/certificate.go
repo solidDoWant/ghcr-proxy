@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+
+	"github.com/solidDoWant/ghcr-proxy/internal/metrics"
 )
 
 // certRestatInterval is how often the certificate files are re-read in case a change event is missed.
@@ -23,6 +25,8 @@ type Certificate struct {
 	certFile string
 	keyFile  string
 	logger   *slog.Logger
+	// Metrics counts reloads after construction; nil turns it off. Set it before Watch starts.
+	Metrics *metrics.Metrics
 
 	current atomic.Pointer[tls.Certificate]
 }
@@ -63,6 +67,8 @@ func (c *Certificate) TLSConfig() *tls.Config {
 // Reload reads the key pair again; on failure the previous pair stays and an error is logged.
 func (c *Certificate) Reload() {
 	pair, err := tls.LoadX509KeyPair(c.certFile, c.keyFile)
+	c.Metrics.CredentialReload(metrics.KindTLS, err)
+
 	if err != nil {
 		c.logger.Error("TLS key pair could not be loaded; keeping the previous one",
 			"certFile", c.certFile, "keyFile", c.keyFile, "error", err.Error())

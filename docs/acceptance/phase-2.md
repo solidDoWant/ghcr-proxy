@@ -31,7 +31,7 @@ Scenarios marked **(live)** run against the real `ghcr.io` through `make test-li
 ## Operations
 
 - **AC-2-10 Metrics.** `/metrics` exposes request counts by action, decision and status class, upstream and mirror latency histograms, token review results and cache hits, with only fixed-value labels (no repository, namespace or ServiceAccount labels).
-  Tests:
+  Tests: `internal/metrics: TestRecordedEventsAppearWithFixedLabels`, `internal/server: TestRequestsAreCountedByActionDecisionAndStatusClass`, `internal/registry: TestForwarderCountsUpstreamRequestsAndMirrorFallbacks`, `internal/registry: TestMetricsSeriesCountStaysSmallWithBothMirrors`, `internal/authn: TestReviewsCountResultAndCacheUse`
 - **AC-2-11 Admission check.** With the chart's admission webhook enabled, applying a policy whose repositories are outside the namespace's grant is rejected with a message naming the patterns; a policy inside the grant applies.
   Tests: `internal/webhook: TestAdmissionRejectsPoliciesOutsideTheGrant`, `internal/webhook: TestValidateCreate`, `internal/webhook: TestValidateUpdate`
 - **AC-2-12 Chart options.** Enabling the PodDisruptionBudget, NetworkPolicy and ServiceMonitor values renders working objects, and the e2e scenarios still pass with the NetworkPolicy on.

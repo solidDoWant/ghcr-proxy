@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/v1/random"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	authenticationv1 "k8s.io/api/authentication/v1"
@@ -29,6 +30,7 @@ import (
 	"github.com/solidDoWant/ghcr-proxy/internal/authn"
 	"github.com/solidDoWant/ghcr-proxy/internal/authz"
 	"github.com/solidDoWant/ghcr-proxy/internal/config"
+	"github.com/solidDoWant/ghcr-proxy/internal/metrics"
 	"github.com/solidDoWant/ghcr-proxy/internal/registry"
 	"github.com/solidDoWant/ghcr-proxy/internal/server"
 	"github.com/solidDoWant/ghcr-proxy/internal/upstream"
@@ -66,6 +68,8 @@ type harnessOptions struct {
 	audit io.Writer
 	// reviewer replaces the stub token reviewer.
 	reviewer server.Reviewer
+	// metrics counts what the pipeline does.
+	metrics *metrics.Metrics
 }
 
 type harness struct {
@@ -85,15 +89,18 @@ func newHarness(t *testing.T, options harnessOptions) *harness {
 	}
 
 	pat := upstream.NewPATFile(patPath, nil)
+	pat.Metrics = options.metrics
 	upstreamURL := &url.URL{Scheme: "https", Host: fake.RegistryHost()}
 
 	tokens, err := upstream.NewTokens(upstream.TokensConfig{
 		URL: upstreamURL, Transport: fake.Transport(), TokenTimeout: 10 * time.Second, PAT: pat,
+		Metrics: options.metrics,
 	})
 	require.NoError(t, err)
 
 	forwarder := registry.NewForwarder(registry.ForwarderConfig{
 		Upstream: upstreamURL, Transport: fake.Transport(), Tokens: tokens, Timeout: time.Minute,
+		Metrics: options.metrics,
 	})
 
 	index := authz.NewIndex(chartGrants(t))
@@ -127,6 +134,7 @@ func newHarness(t *testing.T, options harnessOptions) *harness {
 	readiness := server.NewReadiness(index.Synced, pat.Loaded)
 	handler := &server.Handler{
 		Reviewer: reviewer, Decider: &authz.Authorizer{Index: index}, Forwarder: forwarder, Ready: readiness.Ready,
+		Metrics: options.metrics,
 	}
 
 	if options.audit != nil {
@@ -484,7 +492,7 @@ func TestReadyzFollowsReadiness(t *testing.T) {
 	var notReady atomic.Bool
 
 	readiness := server.NewReadiness(func() bool { return !notReady.Load() })
-	health := httptest.NewServer(server.NewHealthHandler(readiness.Ready))
+	health := httptest.NewServer(server.NewHealthHandler(readiness.Ready, nil))
 	t.Cleanup(health.Close)
 
 	status := func(path string) int {
@@ -512,7 +520,7 @@ func TestReadyzFollowsReadiness(t *testing.T) {
 }
 
 func TestMetricsServeGoAndProcessCollectors(t *testing.T) {
-	health := httptest.NewServer(server.NewHealthHandler(func() bool { return true }))
+	health := httptest.NewServer(server.NewHealthHandler(func() bool { return true }, nil))
 	t.Cleanup(health.Close)
 
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, health.URL+"/metrics", nil)
@@ -533,4 +541,40 @@ func TestMetricsServeGoAndProcessCollectors(t *testing.T) {
 	}
 
 	assert.False(t, strings.Contains(string(body), "ghcr"), "no proxy metrics beyond the Go and process collectors")
+}
+
+func TestRequestsAreCountedByActionDecisionAndStatusClass(t *testing.T) {
+	proxyMetrics := metrics.New()
+	proxy := newHarness(t, harnessOptions{metrics: proxyMetrics})
+	proxyMetrics.SetPolicyCounts(func() (int, int) { return 1, 0 })
+
+	image, err := random.Image(64, 1)
+	require.NoError(t, err)
+	require.NoError(t, proxy.fake.Push("soliddowant/foo/source:latest", image))
+
+	proxy.do(t, http.MethodGet, "/v2/")
+	proxy.do(t, http.MethodGet, "/v2/soliddowant/foo/source/manifests/latest", basic(rejectedToken))
+	proxy.do(t, http.MethodGet, "/v2/soliddowant/foo/source/manifests/latest", basic(unavailableToken))
+	proxy.do(t, http.MethodPut, "/v2/soliddowant/foo/other/manifests/1", basic(builderToken))
+	proxy.do(t, http.MethodGet, "/v2/_catalog", basic(builderToken))
+	proxy.do(t, http.MethodGet, "/v2/soliddowant/foo/source/manifests/latest", basic(builderToken))
+
+	// The count is recorded after the response is written, so the last one can land just after the client returns.
+	expected := `
+# HELP ghcr_proxy_requests_total Requests served, by action, decision and status class.
+# TYPE ghcr_proxy_requests_total counter
+ghcr_proxy_requests_total{action="none",code="4xx",decision="unauthenticated"} 1
+ghcr_proxy_requests_total{action="pull",code="4xx",decision="unauthenticated"} 1
+ghcr_proxy_requests_total{action="pull",code="5xx",decision="unavailable"} 1
+ghcr_proxy_requests_total{action="push",code="4xx",decision="denied"} 1
+ghcr_proxy_requests_total{action="pull",code="2xx",decision="allowed"} 1
+ghcr_proxy_requests_total{action="unknown",code="4xx",decision="notfound"} 1
+`
+
+	var compareErr error
+
+	require.Eventually(t, func() bool {
+		compareErr = testutil.GatherAndCompare(proxyMetrics.Gatherer(), strings.NewReader(expected), "ghcr_proxy_requests_total")
+		return compareErr == nil
+	}, 10*time.Second, 10*time.Millisecond, "%v", compareErr)
 }
