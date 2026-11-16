@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.2.0
+
+ghcr-proxy is a proxy for the GitHub container registry, `ghcr.io`. It runs in a Kubernetes cluster and holds one GitHub personal access token (PAT). CI pods push, pull and delete images through the proxy with the token of their own ServiceAccount, and they never see the PAT. This release completes the second phase of work: deleting images, pull mirrors and operations. The mirrors, the admission webhook, the metrics and the new chart objects that 0.1.1 marked as in progress are now complete. Install it with the Helm chart `oci://ghcr.io/soliddowant/charts/ghcr-proxy`, version `0.2.0`. [Install ghcr-proxy](https://github.com/solidDoWant/ghcr-proxy/blob/v0.2.0/docs/admin/install.md) tells you how.
+
+### Upgrade notes for admins
+
+- Give the PAT the `delete:packages` scope if you want CI pods to delete images. The proxy now deletes an image through the GitHub REST API, and the API needs this scope. The PAT needs `read:packages`, `write:packages` and `delete:packages` ([#91](https://github.com/solidDoWant/ghcr-proxy/pull/91)).
+- If you use a NetworkPolicy that is not the one from the chart, let the proxy connect to `api.github.com` on port 443. The proxy sends deletes there. The NetworkPolicy of the chart already allows port 443 to any address ([#91](https://github.com/solidDoWant/ghcr-proxy/pull/91)).
+- You do not have to change your chart values. All new chart values have defaults that keep the behaviour of 0.1.1.
+
+### Pushing and pulling
+
+- You can delete an image by digest through the proxy, for example with `crane delete` or `regctl manifest rm`. The policy of the ServiceAccount must allow the `delete` action. `ghcr.io` does not accept the registry delete request, so the proxy deletes the package version through the GitHub REST API with the PAT. The new chart value `upstream.apiURL` sets the URL of that API. The default is `https://api.github.com/` ([#89](https://github.com/solidDoWant/ghcr-proxy/pull/89), [#91](https://github.com/solidDoWant/ghcr-proxy/pull/91)).
+- A delete by tag and a delete of a blob get the `405` answer of `ghcr.io`, because `ghcr.io` does not support them. Delete by digest instead ([#89](https://github.com/solidDoWant/ghcr-proxy/pull/89), [#91](https://github.com/solidDoWant/ghcr-proxy/pull/91)).
+- A delete that the policy does not allow fails with `403`, and the proxy sends nothing to `ghcr.io` ([#91](https://github.com/solidDoWant/ghcr-proxy/pull/91)).
+
+### Mirrors
+
+- The proxy can send pulls to two pull mirrors. A pull mirror is a registry that keeps copies of GHCR images, for example a Harbor proxy-cache project. Allowed pulls go to the policy mirror. Anonymous pulls and pulls that no policy allows go to the anonymous mirror. If a mirror fails, the pull goes to `ghcr.io`, unless you set `fallbackToUpstream: false`. Set the chart values `mirrors.policy` and `mirrors.anonymous`. The proxy never sends the PAT to a mirror. [Configure pull mirrors](https://github.com/solidDoWant/ghcr-proxy/blob/v0.2.0/docs/admin/install.md#configure-pull-mirrors) tells you how ([#71](https://github.com/solidDoWant/ghcr-proxy/pull/71), [#75](https://github.com/solidDoWant/ghcr-proxy/pull/75), [#84](https://github.com/solidDoWant/ghcr-proxy/pull/84)).
+- Tests now use Harbor as the policy mirror ([#84](https://github.com/solidDoWant/ghcr-proxy/pull/84)).
+
+### Access policies and grants
+
+- An optional admission webhook rejects a `GHCRAccessPolicy` at `kubectl apply` when a repository pattern or an action is outside the grants of its namespace. The proxy enforces the grants with or without the webhook. Set `webhook.enabled=true` and give the webhook a certificate, from cert-manager or from your own Secret. [Turn on the admission webhook](https://github.com/solidDoWant/ghcr-proxy/blob/v0.2.0/docs/admin/install.md#turn-on-the-admission-webhook) tells you how ([#70](https://github.com/solidDoWant/ghcr-proxy/pull/70)).
+
+### Deployment
+
+- The proxy serves Prometheus metrics at `/metrics` on the health port (`8080`). They count requests, requests to `ghcr.io`, to the GitHub REST API and to the mirrors, mirror fallbacks, token reviews, policies and credential reloads. No metric has a label for a repository, namespace or ServiceAccount. [Metrics](https://github.com/solidDoWant/ghcr-proxy/blob/v0.2.0/docs/admin/metrics.md) lists them ([#81](https://github.com/solidDoWant/ghcr-proxy/pull/81), [#91](https://github.com/solidDoWant/ghcr-proxy/pull/91)).
+- The chart can create a PodDisruptionBudget, a NetworkPolicy and a Prometheus Operator ServiceMonitor. Each one is off by default. [Optional chart objects](https://github.com/solidDoWant/ghcr-proxy/blob/v0.2.0/docs/admin/install.md#optional-chart-objects) tells you about them ([#72](https://github.com/solidDoWant/ghcr-proxy/pull/72)).
+- The admin guides have full commands that you can copy and run, from an empty cluster to a CI pod that pushes an image. Tests run these commands ([#74](https://github.com/solidDoWant/ghcr-proxy/pull/74)).
+
+### Fixes
+
+- A pull mirror that needs no authentication now works. In 0.1.1, the proxy treated such a mirror as unavailable. Pulls then went to `ghcr.io`, or failed with `502` when `fallbackToUpstream` was `false` ([#95](https://github.com/solidDoWant/ghcr-proxy/pull/95)).
+
+Internal work: the record of how `ghcr.io` answers deletes, tests against the real `ghcr.io` that the operator runs by hand, end-to-end test fixes and dependency updates ([#87](https://github.com/solidDoWant/ghcr-proxy/pull/87), [#88](https://github.com/solidDoWant/ghcr-proxy/pull/88), [#90](https://github.com/solidDoWant/ghcr-proxy/pull/90), [#93](https://github.com/solidDoWant/ghcr-proxy/pull/93)).
+
+### Known issues
+
+- Deleting an image by tag is not supported, because `ghcr.io` does not support it. Delete by digest instead.
+
 ## 0.1.1
 
 ghcr-proxy is a proxy for the GitHub container registry, `ghcr.io`. It runs in a Kubernetes cluster and holds one GitHub personal access token (PAT). CI pods push and pull images through the proxy with the token of their own ServiceAccount, and they never see the PAT. This patch release fixes pushes to `ghcr.io`, which did not work in 0.1.0. It also includes the first parts of the next phase of work. These parts are off by default. Install it with the Helm chart `oci://ghcr.io/soliddowant/charts/ghcr-proxy`, version `0.1.1`. [Install ghcr-proxy](https://github.com/solidDoWant/ghcr-proxy/blob/v0.1.1/docs/admin/install.md) tells you how.
