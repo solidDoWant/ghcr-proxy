@@ -14,6 +14,7 @@ import (
 
 func TestSecretValuesNeverPrint(t *testing.T) {
 	const value = "s3cr3t-value"
+
 	secret := secrets.Secret{
 		State:           secrets.Present,
 		Data:            secrets.Data{"password": []byte(value)},
@@ -21,8 +22,10 @@ func TestSecretValuesNeverPrint(t *testing.T) {
 	}
 
 	var logs bytes.Buffer
+
 	logger := slog.New(slog.NewJSONHandler(&logs, nil))
 	logger.Info("secret", "secret", secret, "data", secret.Data, "pointer", &secret)
+
 	textLogs := bytes.Buffer{}
 	slog.New(slog.NewTextHandler(&textLogs, nil)).Info("secret", "secret", secret, "data", secret.Data)
 
@@ -39,8 +42,9 @@ func TestSecretValuesNeverPrint(t *testing.T) {
 	for _, text := range formatted {
 		assert.NotContains(t, text, value)
 		assert.NotContains(t, text, fmt.Sprintf("%x", value))
-		assert.NotContains(t, text, fmt.Sprint([]byte(value)))
+		assert.NotContains(t, text, fmt.Sprintf("%d", []byte(value)))
 		assert.Contains(t, text, "[redacted]")
 	}
+
 	assert.Contains(t, fmt.Sprint(secret), "42", "the resource version is not secret and helps debugging")
 }

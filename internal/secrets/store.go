@@ -13,8 +13,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 )
@@ -71,10 +71,12 @@ func New(client kubernetes.Interface, options Options) *Store {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
+
 	onChange := options.OnChange
 	if onChange == nil {
 		onChange = func() {}
 	}
+
 	store := &Store{
 		client:   client,
 		onChange: onChange,
@@ -86,6 +88,7 @@ func New(client kubernetes.Interface, options Options) *Store {
 	for _, namespace := range options.AdminNamespaces {
 		store.admin[namespace] = &adminNamespace{}
 	}
+
 	return store
 }
 
@@ -93,11 +96,13 @@ func New(client kubernetes.Interface, options Options) *Store {
 // asked for, and blocks until ctx is done, when every watch stops.
 func (s *Store) Run(ctx context.Context) error {
 	s.mutex.Lock()
+
 	s.ctx = ctx
 	for namespace, admin := range s.admin {
 		admin.informer = s.newAdminInformer(namespace, admin)
 		go admin.informer.RunWithContext(ctx)
 	}
+
 	s.reconcileLocked()
 	s.mutex.Unlock()
 
@@ -109,6 +114,7 @@ func (s *Store) Run(ctx context.Context) error {
 		delete(s.watches, key)
 	}
 	s.mutex.Unlock()
+
 	return nil
 }
 
@@ -119,13 +125,16 @@ func (s *Store) Run(ctx context.Context) error {
 func (s *Store) SetReferenced(keys []Key) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
+
 	s.wanted = map[Key]struct{}{}
 	for _, key := range keys {
 		if _, isAdmin := s.admin[key.Namespace]; isAdmin {
 			continue
 		}
+
 		s.wanted[key] = struct{}{}
 	}
+
 	s.reconcileLocked()
 }
 
@@ -133,19 +142,24 @@ func (s *Store) SetReferenced(keys []Key) {
 func (s *Store) Watched() []Key {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
+
 	return slices.SortedFunc(maps.Keys(s.watches), func(a, b Key) int {
 		if a.Namespace != b.Namespace {
 			if a.Namespace < b.Namespace {
 				return -1
 			}
+
 			return 1
 		}
+
 		if a.Name < b.Name {
 			return -1
 		}
+
 		if a.Name > b.Name {
 			return 1
 		}
+
 		return 0
 	})
 }
@@ -160,14 +174,17 @@ func (s *Store) Get(key Key) (Secret, bool) {
 	if admin, isAdmin := s.admin[key.Namespace]; isAdmin {
 		return s.getAdminLocked(admin, key), true
 	}
+
 	if _, wanted := s.wanted[key]; !wanted {
 		return Secret{}, false
 	}
+
 	watch, ok := s.watches[key]
 	if !ok {
 		// Referenced before Run started the watch.
 		return Secret{State: Pending}, true
 	}
+
 	return watch.secret, true
 }
 
@@ -176,16 +193,20 @@ func (s *Store) getAdminLocked(admin *adminNamespace, key Key) Secret {
 		if admin.forbidden {
 			return Secret{State: Forbidden}
 		}
+
 		return Secret{State: Pending}
 	}
+
 	object, exists, err := admin.informer.GetIndexer().GetByKey(key.String())
 	if err != nil || !exists {
 		return Secret{State: NotFound}
 	}
+
 	secret, ok := object.(*corev1.Secret)
 	if !ok {
 		return Secret{State: NotFound}
 	}
+
 	return presentSecret(secret)
 }
 
@@ -195,18 +216,22 @@ func (s *Store) reconcileLocked() {
 	if s.ctx == nil {
 		return
 	}
+
 	for key, watch := range s.watches {
 		if _, wanted := s.wanted[key]; !wanted {
 			watch.cancel()
 			delete(s.watches, key)
 		}
 	}
+
 	for key := range s.wanted {
 		if _, running := s.watches[key]; running {
 			continue
 		}
+
 		ctx, cancel := context.WithCancel(s.ctx)
 		watch := &secretWatch{cancel: cancel, secret: Secret{State: Pending}}
+
 		s.watches[key] = watch
 		go s.runSecretWatch(ctx, key, watch)
 	}
@@ -218,6 +243,7 @@ func (s *Store) newAdminInformer(namespace string, admin *adminNamespace) cache.
 		ListWithContextFunc: func(ctx context.Context, options metav1.ListOptions) (runtime.Object, error) {
 			list, err := secrets.List(ctx, options)
 			s.setAdminForbidden(admin, err)
+
 			return list, err
 		},
 		WatchFuncWithContext: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
@@ -233,16 +259,19 @@ func (s *Store) newAdminInformer(namespace string, admin *adminNamespace) cache.
 		UpdateFunc: func(any, any) { s.onChange() },
 		DeleteFunc: func(any) { s.onChange() },
 	})
+
 	return informer
 }
 
 // setAdminForbidden records whether listing an admin namespace was refused.
 func (s *Store) setAdminForbidden(admin *adminNamespace, err error) {
 	forbidden := apierrors.IsForbidden(err)
+
 	s.mutex.Lock()
 	changed := admin.forbidden != forbidden
 	admin.forbidden = forbidden
 	s.mutex.Unlock()
+
 	if changed {
 		s.onChange()
 	}
@@ -259,6 +288,7 @@ func (s *Store) runSecretWatch(ctx context.Context, key Key, tracked *secretWatc
 			s.update(tracked, Secret{State: Forbidden})
 			return
 		}
+
 		if err != nil && ctx.Err() == nil {
 			s.logger.Warn("watching a Secret failed", "secret", key.String(), "error", err)
 		}
@@ -268,12 +298,14 @@ func (s *Store) runSecretWatch(ctx context.Context, key Key, tracked *secretWatc
 			options.FieldSelector = selector
 			list, err := secrets.List(ctx, options)
 			failed(err)
+
 			return list, err
 		},
 		WatchFuncWithContext: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
 			options.FieldSelector = selector
 			result, err := secrets.Watch(ctx, options)
 			failed(err)
+
 			return result, err
 		},
 	}
@@ -299,6 +331,7 @@ func (s *Store) update(watch *secretWatch, secret Secret) {
 	current := watch.secret
 	watch.secret = secret
 	s.mutex.Unlock()
+
 	if current.State != secret.State || current.ResourceVersion != secret.ResourceVersion {
 		s.onChange()
 	}
@@ -309,6 +342,7 @@ func presentSecret(secret *corev1.Secret) Secret {
 	for name, value := range secret.Data {
 		data[name] = slices.Clone(value)
 	}
+
 	return Secret{State: Present, Data: data, ResourceVersion: secret.ResourceVersion}
 }
 
@@ -331,6 +365,7 @@ func (k *secretSink) Replace(objects []any, _ string) error {
 		k.store.update(k.watch, Secret{State: NotFound})
 		return nil
 	}
+
 	return k.set(objects[len(objects)-1])
 }
 
@@ -341,6 +376,8 @@ func (k *secretSink) set(object any) error {
 	if !ok {
 		return nil
 	}
+
 	k.store.update(k.watch, presentSecret(secret))
+
 	return nil
 }

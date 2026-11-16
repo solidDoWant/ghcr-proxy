@@ -4,7 +4,10 @@ package secrets_test
 
 import (
 	"context"
+	"io"
+	"net/http"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -24,12 +27,70 @@ const proxyUser = "system:serviceaccount:registrygate:registrygate"
 // cluster is an envtest API server with RBAC on. admin may do anything;
 // proxy is the store's identity and may read only what a Role grants it.
 type cluster struct {
-	admin kubernetes.Interface
-	proxy kubernetes.Interface
+	admin   kubernetes.Interface
+	proxy   kubernetes.Interface
+	watches *openWatches
+}
+
+// openWatches counts the proxy's watch requests that are still open, by
+// field selector, so a test can see a watch end on the wire.
+type openWatches struct {
+	mutex sync.Mutex
+	open  map[string]int
+}
+
+func (o *openWatches) count(fieldSelector string) int {
+	o.mutex.Lock()
+	defer o.mutex.Unlock()
+
+	return o.open[fieldSelector]
+}
+
+func (o *openWatches) add(fieldSelector string, delta int) {
+	o.mutex.Lock()
+	defer o.mutex.Unlock()
+
+	o.open[fieldSelector] += delta
+}
+
+type countingTransport struct {
+	next    http.RoundTripper
+	watches *openWatches
+}
+
+func (c countingTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	query := request.URL.Query()
+	if query.Get("watch") != "true" && query.Get("watch") != "1" {
+		return c.next.RoundTrip(request)
+	}
+
+	response, err := c.next.RoundTrip(request)
+	if err != nil {
+		return response, err
+	}
+
+	fieldSelector := query.Get("fieldSelector")
+	c.watches.add(fieldSelector, 1)
+
+	response.Body = &countedBody{ReadCloser: response.Body, done: func() { c.watches.add(fieldSelector, -1) }}
+
+	return response, nil
+}
+
+type countedBody struct {
+	io.ReadCloser
+	once sync.Once
+	done func()
+}
+
+func (b *countedBody) Close() error {
+	b.once.Do(b.done)
+	return b.ReadCloser.Close()
 }
 
 func startCluster(t *testing.T) cluster {
 	t.Helper()
+
 	if os.Getenv("KUBEBUILDER_ASSETS") == "" {
 		t.Skip("KUBEBUILDER_ASSETS is not set; run inside the dev shell")
 	}
@@ -44,10 +105,16 @@ func startCluster(t *testing.T) cluster {
 	require.NoError(t, err)
 	user, err := environment.ControlPlane.AddUser(envtest.User{Name: proxyUser}, nil)
 	require.NoError(t, err)
-	proxy, err := kubernetes.NewForConfig(user.Config())
+
+	watches := &openWatches{open: map[string]int{}}
+	proxyConfig := user.Config()
+	proxyConfig.Wrap(func(next http.RoundTripper) http.RoundTripper {
+		return countingTransport{next: next, watches: watches}
+	})
+	proxy, err := kubernetes.NewForConfig(proxyConfig)
 	require.NoError(t, err)
 
-	return cluster{admin: admin, proxy: proxy}
+	return cluster{admin: admin, proxy: proxy, watches: watches}
 }
 
 func (c cluster) createNamespace(t *testing.T, name string) {
@@ -69,9 +136,11 @@ func (c cluster) updateSecret(t *testing.T, namespace, name, password string) st
 	t.Helper()
 	secret, err := c.admin.CoreV1().Secrets(namespace).Get(t.Context(), name, metav1.GetOptions{})
 	require.NoError(t, err)
+
 	secret.Data = map[string][]byte{"password": []byte(password)}
 	updated, err := c.admin.CoreV1().Secrets(namespace).Update(t.Context(), secret, metav1.UpdateOptions{})
 	require.NoError(t, err)
+
 	return updated.ResourceVersion
 }
 
@@ -107,17 +176,22 @@ func (c cluster) grantNamespace(t *testing.T, namespace string) {
 
 func runStore(t *testing.T, client kubernetes.Interface, options secrets.Options) *secrets.Store {
 	t.Helper()
+
 	store := secrets.New(client, options)
 	ctx, cancel := context.WithCancel(context.Background())
+
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+
 		assert.NoError(t, store.Run(ctx))
 	}()
+
 	t.Cleanup(func() {
 		cancel()
 		<-done
 	})
+
 	return store
 }
 
@@ -165,10 +239,12 @@ func TestSecretStoreFollowsTenantSecrets(t *testing.T) {
 		requireSecret(t, store, key, hasPassword("first"))
 
 		<-changes
+
 		resourceVersion := c.updateSecret(t, namespace, "robot", "second")
 		requireSecret(t, store, key, func(secret secrets.Secret) bool {
 			return hasPassword("second")(secret) && secret.ResourceVersion == resourceVersion
 		})
+
 		select {
 		case <-changes:
 		case <-time.After(30 * time.Second):
@@ -219,16 +295,22 @@ func TestSecretStoreFollowsTenantSecrets(t *testing.T) {
 		dropped := secrets.Key{Namespace: namespace, Name: "dropped"}
 		store.SetReferenced([]secrets.Key{kept, dropped})
 		requireSecret(t, store, dropped, hasPassword("dropped"))
+		requireSecret(t, store, kept, hasPassword("kept"))
 		assert.Equal(t, []secrets.Key{dropped, kept}, store.Watched())
+		require.Eventually(t, func() bool { return c.watches.count("metadata.name=dropped") == 1 }, 30*time.Second, 50*time.Millisecond)
 
 		store.SetReferenced([]secrets.Key{kept})
 		assert.Equal(t, []secrets.Key{kept}, store.Watched())
 		_, tracked := store.Get(dropped)
 		assert.False(t, tracked)
+		require.Eventually(t, func() bool { return c.watches.count("metadata.name=dropped") == 0 }, 30*time.Second, 50*time.Millisecond,
+			"the dropped Secret's watch request is still open")
+		assert.Equal(t, 1, c.watches.count("metadata.name=kept"))
 		requireSecret(t, store, kept, hasPassword("kept"))
 
 		store.SetReferenced(nil)
 		assert.Empty(t, store.Watched())
+		require.Eventually(t, func() bool { return c.watches.count("metadata.name=kept") == 0 }, 30*time.Second, 50*time.Millisecond)
 	})
 
 	t.Run("admin namespace Secrets come from the namespace informer", func(t *testing.T) {

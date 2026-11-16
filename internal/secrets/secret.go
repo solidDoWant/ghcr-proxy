@@ -65,10 +65,6 @@ func (Data) GoString() string { return redacted }
 // LogValue hides the values from slog.
 func (Data) LogValue() slog.Value { return slog.StringValue(redacted) }
 
-// Format hides the values from every fmt verb, including %x and %q, which
-// would otherwise print the map's bytes.
-func (Data) Format(state fmt.State, _ rune) { _, _ = state.Write([]byte(redacted)) }
-
 // Secret is the store's view of one Secret. Data and ResourceVersion are set
 // only when State is Present.
 type Secret struct {
@@ -92,6 +88,3 @@ func (s Secret) LogValue() slog.Value {
 		slog.String("resourceVersion", s.ResourceVersion),
 	)
 }
-
-// Format hides the data from every fmt verb.
-func (s Secret) Format(state fmt.State, _ rune) { _, _ = state.Write([]byte(s.String())) }
