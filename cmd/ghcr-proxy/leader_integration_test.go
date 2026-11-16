@@ -81,13 +81,13 @@ func writeSelfSigned(t *testing.T, dir string) (string, string) {
 }
 
 type proxyUnderTest struct {
-	env    *envtest.Environment
+	env *envtest.Environment
 	// outageDone, when set, is waited on before the environment is stopped.
 	outageDone chan struct{}
-	health string
-	stderr *syncBuffer
-	done   chan int
-	k8s    client.Client
+	health     string
+	stderr     *syncBuffer
+	done       chan int
+	k8s        client.Client
 }
 
 func startProxy(t *testing.T, ctx context.Context) *proxyUnderTest {
@@ -101,7 +101,9 @@ func startProxy(t *testing.T, ctx context.Context) *proxyUnderTest {
 	}
 	_, err := env.Start()
 	require.NoError(t, err)
+
 	proxy := &proxyUnderTest{env: env}
+
 	t.Cleanup(func() {
 		if proxy.outageDone != nil {
 			<-proxy.outageDone
