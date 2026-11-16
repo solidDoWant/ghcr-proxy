@@ -67,9 +67,6 @@ spec:
   containers:
     - name: docker
       image: ${DOCKER_CLI_IMAGE}
-      env:
-        - name: REGISTRYGATE_HOSTS
-          value: ghcr.io
       command: [sh, -c]
       args:
         - |
