@@ -5,7 +5,7 @@ For: people who change the registrygate code. You know Go, controller-runtime an
 registrygate is in early development. The pages on the architecture are not written yet. They will describe:
 
 - the architecture and the packages under `internal/`;
-- the fake GHCR in `test/fakeghcr`, and its generalization `test/fakeregistry` (bearer, basic or no auth, singular or plural upload paths, delete supported or not), which replaces it as the phase 3 work lands;
+- the fake GHCR in `test/fakeghcr`, and its generalization `test/fakeregistry` (bearer, basic or no auth, singular or plural upload paths, delete supported or not), which will replace it;
 - the test tiers: unit tests, integration tests (envtest with the proxy and the fake GHCR in one process), e2e tests (kind, the fake GHCR and the chart) and live tests (the real `ghcr.io`);
 - how acceptance tests are tied to scenarios (the `Tests:` lines of the checklist) and counted by `make acceptance`;
 - how to release.
