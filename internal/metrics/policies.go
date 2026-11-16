@@ -26,5 +26,6 @@ func (c *policyCollector) Collect(ch chan<- prometheus.Metric) {
 
 	ready, notReady := (*counts)()
 	ch <- prometheus.MustNewConstMetric(c.desc, prometheus.GaugeValue, float64(ready), "true")
+
 	ch <- prometheus.MustNewConstMetric(c.desc, prometheus.GaugeValue, float64(notReady), "false")
 }

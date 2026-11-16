@@ -187,6 +187,7 @@ func serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 
 	index := authz.NewIndex(cfg.Grants)
 	proxyMetrics.SetPolicyCounts(index.Counts)
+
 	if err := index.Watch(ctx, policyCache); err != nil {
 		return err
 	}
