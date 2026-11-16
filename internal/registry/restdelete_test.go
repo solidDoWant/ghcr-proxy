@@ -402,16 +402,16 @@ func TestDeleteByDigestTimeoutAndConnectionErrorsAre502(t *testing.T) {
 	t.Run("timeout", func(t *testing.T) {
 		release := make(chan struct{})
 
-		t.Cleanup(func() { close(release) })
-
-		stub := newStubAPI(t, func(req *http.Request) stubAnswer {
-			select {
-			case <-release:
-			case <-req.Context().Done():
-			}
+		// The stub answers only once the test ends, so no answer can race the
+		// proxy's timeout. This cleanup is registered after the stub's, so it
+		// runs first and unblocks the handler before the server closes.
+		stub := newStubAPI(t, func(*http.Request) stubAnswer {
+			<-release
 
 			return stubAnswer{status: http.StatusOK, body: "[]"}
 		})
+
+		t.Cleanup(func() { close(release) })
 		fake := fakeghcr.New(t, fakeghcr.Options{})
 		harness := newProxyHarness(t, fake, fake.PAT(), withPAT,
 			withAPI(stub.server.URL+"/", stub.server.Client().Transport, 100*time.Millisecond))
