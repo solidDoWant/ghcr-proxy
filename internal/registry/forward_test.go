@@ -102,7 +102,10 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
-func newProxyHarness(t *testing.T, fake *fakeghcr.Fake, pat string, forward func(registry.Request) registry.Forward) *proxyHarness {
+func newProxyHarness(
+	t *testing.T, fake *fakeghcr.Fake, pat string, forward func(registry.Request) registry.Forward,
+	configure ...func(*registry.ForwarderConfig),
+) *proxyHarness {
 	t.Helper()
 
 	patPath := filepath.Join(t.TempDir(), "token")
@@ -119,9 +122,14 @@ func newProxyHarness(t *testing.T, fake *fakeghcr.Fake, pat string, forward func
 	})
 	require.NoError(t, err)
 
-	forwarder := registry.NewForwarder(registry.ForwarderConfig{
+	forwarderConfig := registry.ForwarderConfig{
 		Upstream: upstreamURL, Transport: recorder, Tokens: tokens, Timeout: time.Minute, Logger: logger,
-	})
+	}
+	for _, apply := range configure {
+		apply(&forwarderConfig)
+	}
+
+	forwarder := registry.NewForwarder(forwarderConfig)
 
 	server := httptest.NewTLSServer(http.HandlerFunc(func(resp http.ResponseWriter, req *http.Request) {
 		classified, err := registry.Classify(req)

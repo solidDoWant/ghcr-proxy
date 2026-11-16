@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/solidDoWant/ghcr-proxy/api/v1alpha1"
+	"github.com/solidDoWant/ghcr-proxy/internal/mirror"
 	"github.com/solidDoWant/ghcr-proxy/internal/upstream"
 )
 
@@ -76,6 +77,22 @@ type ForwarderConfig struct {
 	// Timeout bounds one whole upstream request, body included.
 	Timeout time.Duration
 	Logger  *slog.Logger
+	// PolicyMirror serves pulls a policy allows; AnonymousMirror serves
+	// anonymous and not-allowed pulls. Nil when not configured.
+	PolicyMirror    MirrorClient
+	AnonymousMirror MirrorClient
+}
+
+// MirrorClient sends pulls to one mirror with the mirror's own credential.
+type MirrorClient interface {
+	URL() *url.URL
+	PathPrefix() string
+	FallbackToUpstream() bool
+	// SameHost reports whether u is on the mirror's scheme and host.
+	SameHost(u *url.URL) bool
+	// Send sends req, already pointed at the mirror, with a pull token for
+	// scope.
+	Send(req *http.Request, scope string) (*http.Response, error)
 }
 
 // Forwarder sends classified, authorized requests to the upstream with the
@@ -225,6 +242,7 @@ func (f *Forwarder) modifyResponse(resp *http.Response) error {
 var (
 	errAnonymousRefused   = errors.New("upstream refused the anonymous request")
 	errCredentialRejected = errors.New("upstream rejected the PAT-backed token")
+	errMirrorUnavailable  = errors.New("mirror unavailable")
 )
 
 // handleError answers every failure with a fixed message. The underlying
@@ -241,6 +259,8 @@ func (f *Forwarder) handleError(resp http.ResponseWriter, req *http.Request, err
 		answer = errBadGateway(messageRealmNotAllowed)
 	case errors.Is(err, upstream.ErrPATNotLoaded):
 		answer = errNotReady()
+	case errors.Is(err, errMirrorUnavailable):
+		answer = errBadGateway(messageMirrorUnavailable)
 	default:
 		f.cfg.Logger.Error("upstream request failed", "method", req.Method, "path", req.URL.EscapedPath(), "error", err.Error())
 
@@ -261,6 +281,13 @@ type tokenTransport struct {
 func (t *tokenTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	state := exchangeOf(req)
 	forward := state.forward
+
+	if target := t.forwarder.mirrorFor(forward); target != nil {
+		resp, served, err := t.tryMirror(req, state, target)
+		if served {
+			return resp, err
+		}
+	}
 
 	kind := upstream.KindAnonymous
 	scopes := []string{"repository:" + forward.Request.Name + ":pull"}
@@ -318,6 +345,138 @@ func (t *tokenTransport) send(req *http.Request, kind upstream.Kind, scopes []st
 	exchangeOf(req).upstreamStatus = resp.StatusCode
 
 	return resp, token, nil
+}
+
+// mirrorFor returns the mirror that serves the request first, or nil. Only
+// manifest and blob downloads and manifest checks go to a mirror: a blob check
+// always goes upstream, because a push uses it to decide what to upload and a
+// mirror can still hold a blob the upstream has dropped.
+func (f *Forwarder) mirrorFor(forward Forward) MirrorClient {
+	request := forward.Request
+
+	isPull := request.Action == v1alpha1.ActionPull &&
+		((request.Route == RouteManifest && (request.Method == http.MethodGet || request.Method == http.MethodHead)) ||
+			(request.Route == RouteBlob && request.Method == http.MethodGet))
+	if !isPull {
+		return nil
+	}
+
+	if forward.Credential == CredentialPAT {
+		return f.cfg.PolicyMirror
+	}
+
+	return f.cfg.AnonymousMirror
+}
+
+// tryMirror sends the request to target. served is false when the mirror
+// failed in a way that falls back to the upstream; otherwise resp or err is
+// the answer to give.
+func (t *tokenTransport) tryMirror(req *http.Request, state *exchange, target MirrorClient) (resp *http.Response, served bool, err error) {
+	forward := state.forward
+	viaPolicy := forward.Credential == CredentialPAT
+	prefix := target.PathPrefix()
+
+	out := req.Clone(req.Context())
+	out.URL = &url.URL{
+		Scheme:   target.URL().Scheme,
+		Host:     target.URL().Host,
+		Path:     "/v2/" + prefix + "/" + strings.TrimPrefix(req.URL.Path, "/v2/"),
+		RawQuery: req.URL.RawQuery,
+	}
+	out.Host = target.URL().Host
+	out.Header.Del("Authorization")
+
+	// failed applies the fallback rule to a mirror failure.
+	failed := func(reason string) (*http.Response, bool, error) {
+		if target.FallbackToUpstream() {
+			t.forwarder.cfg.Logger.Warn("mirror failed; falling back to the upstream",
+				"mirror", target.URL().String(), "path", out.URL.Path, "reason", reason)
+
+			return nil, false, nil
+		}
+
+		t.forwarder.cfg.Logger.Error("mirror failed", "mirror", target.URL().String(), "path", out.URL.Path, "reason", reason)
+
+		return nil, true, errMirrorUnavailable
+	}
+
+	resp, err = target.Send(out, "repository:"+prefix+"/"+forward.Request.Name+":pull")
+
+	switch {
+	case err != nil && req.Context().Err() != nil:
+		return nil, true, err
+	case errors.Is(err, mirror.ErrCredentialRejected):
+		if viaPolicy {
+			t.forwarder.cfg.Logger.Error("mirror rejected its credentials", "mirror", target.URL().String())
+			return nil, true, errMirrorUnavailable
+		}
+
+		return nil, true, errAnonymousRefused
+	case err != nil:
+		return failed(err.Error())
+	}
+
+	state.upstreamStatus = resp.StatusCode
+
+	switch status := resp.StatusCode; {
+	case status >= 500 || status == http.StatusNotFound:
+		if status == http.StatusNotFound && !target.FallbackToUpstream() {
+			break
+		}
+
+		discard(resp)
+
+		return failed(http.StatusText(status))
+	case viaPolicy && (status == http.StatusUnauthorized || status == http.StatusForbidden):
+		// A mirror credential problem: shown, never hidden by a fallback.
+		discard(resp)
+		t.forwarder.cfg.Logger.Error("mirror refused its credentials", "mirror", target.URL().String(), "status", status)
+
+		return nil, true, errMirrorUnavailable
+	}
+
+	if !mapMirrorLocation(resp, out.URL, target, state.clientHost) {
+		discard(resp)
+		return failed("Location outside the mirror's path prefix")
+	}
+
+	if !viaPolicy && refusedAnonymously(resp.StatusCode, forward.AnonymousCaller) {
+		discard(resp)
+		return nil, true, errAnonymousRefused
+	}
+
+	return resp, true, nil
+}
+
+// mapMirrorLocation points a Location on the mirror's host back at the client
+// host, removing the mirror's path prefix. It reports false for a mirror-host
+// Location outside the prefix, which must not reach the client. Locations on
+// other hosts (blob storage) are left as they are.
+func mapMirrorLocation(resp *http.Response, requestURL *url.URL, target MirrorClient, clientHost string) bool {
+	location := resp.Header.Get("Location")
+	if location == "" {
+		return true
+	}
+
+	parsed, err := url.Parse(location)
+	if err != nil {
+		return false
+	}
+
+	resolved := requestURL.ResolveReference(parsed)
+	if !target.SameHost(resolved) {
+		return true
+	}
+
+	rest, found := strings.CutPrefix(resolved.Path, "/v2/"+target.PathPrefix()+"/")
+	if !found {
+		return false
+	}
+
+	mapped := &url.URL{Scheme: "https", Host: clientHost, Path: "/v2/" + rest, RawQuery: resolved.RawQuery}
+	resp.Header.Set("Location", mapped.String())
+
+	return true
 }
 
 // replay returns a copy of req to resend, if its body can be sent again.
