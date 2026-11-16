@@ -1,5 +1,6 @@
 // Package fakeghcr is an in-process test double for ghcr.io: a registry with
-// bearer-token authentication, absolute upload Location headers and blob
+// bearer-token authentication, absolute upload Location headers in GHCR's
+// singular blobs/upload/<session> form, and blob
 // downloads redirected to a separate storage server, and the GitHub REST
 // endpoints for container package versions on a third server. It wraps
 // go-containerregistry's registry package for storage and is not a GHCR clone.
@@ -285,7 +286,7 @@ func (f *Fake) registryHandler() http.Handler {
 	f.registryStore = f.trackManifests(registry.New(registry.WithBlobHandler(f.blobs), registry.Logger(discardLogger())))
 	mux := http.NewServeMux()
 	mux.HandleFunc("/token", f.tokenEndpoint)
-	mux.Handle("/", f.authorize(f.registryStore))
+	mux.Handle("/", f.authorize(ghcrUploadPaths(f.registryStore)))
 
 	return f.record("registry", "https://"+f.registryHost, mux)
 }

@@ -304,7 +304,7 @@ func TestForwarderRewritesUploadLocationToTheClientHost(t *testing.T) {
 		defer func() { _ = resp.Body.Close() }()
 
 		require.Equal(t, http.StatusAccepted, resp.StatusCode)
-		assert.True(t, strings.HasPrefix(resp.Header.Get("Location"), "https://ghcr.io/v2/owner/app/blobs/uploads/"),
+		assert.True(t, strings.HasPrefix(resp.Header.Get("Location"), "https://ghcr.io/v2/owner/app/blobs/upload/"),
 			"Location %q", resp.Header.Get("Location"))
 		assert.Empty(t, resp.Header.Values("WWW-Authenticate"))
 

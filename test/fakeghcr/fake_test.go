@@ -149,7 +149,7 @@ func TestUploadLocationIsAbsoluteAndBlobReadRedirectsToStorage(t *testing.T) {
 
 	_ = resp.Body.Close()
 	require.Equal(t, http.StatusAccepted, resp.StatusCode)
-	assert.True(t, strings.HasPrefix(resp.Header.Get("Location"), "https://"+fake.RegistryHost()+"/v2/owner/app/blobs/uploads/"), resp.Header.Get("Location"))
+	assert.True(t, strings.HasPrefix(resp.Header.Get("Location"), "https://"+fake.RegistryHost()+"/v2/owner/app/blobs/upload/"), resp.Header.Get("Location"))
 
 	image, err := random.Image(512, 1)
 	require.NoError(t, err)
@@ -244,4 +244,39 @@ func TestExpiredTokenIsRefused(t *testing.T) {
 
 		return resp.StatusCode == http.StatusUnauthorized
 	}, 5e9, 5e6)
+}
+
+func TestPushUploadsThroughGHCRSingularSessionPath(t *testing.T) {
+	fake := fakeghcr.New(t, fakeghcr.Options{})
+
+	image, err := random.Image(512, 1)
+	require.NoError(t, err)
+	require.NoError(t, fake.Push("owner/app", image))
+
+	var sessionRequests int
+
+	for _, entry := range fake.Log() {
+		if entry.Server != "registry" || entry.Method == http.MethodPost {
+			continue
+		}
+
+		assert.NotContains(t, entry.Path, "/blobs/uploads/", "%s %s", entry.Method, entry.Path)
+
+		if strings.HasPrefix(entry.Path, "/v2/owner/app/blobs/upload/") {
+			sessionRequests++
+
+			assert.Less(t, entry.Status, 300, "%s %s", entry.Method, entry.Path)
+		}
+	}
+
+	assert.Positive(t, sessionRequests, "no request used a singular upload session path")
+
+	pushed, err := remote.Image(ref(t, fake, "owner/app"), fake.RemoteOptions(true)...)
+	require.NoError(t, err)
+
+	wantDigest, err := image.Digest()
+	require.NoError(t, err)
+	gotDigest, err := pushed.Digest()
+	require.NoError(t, err)
+	assert.Equal(t, wantDigest, gotDigest)
 }
