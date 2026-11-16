@@ -30,6 +30,7 @@ For: admins who install ghcr-proxy with its Helm chart.
 | `upstream.ca.key` | `ca.crt` | Key in that Secret that holds the CA certificate. |
 | `upstream.timeout` | `30m` | Timeout of one whole upstream request. Uploads of several GB must fit. |
 | `upstream.tokenTimeout` | `10s` | Timeout of one upstream token exchange. |
+| `upstream.apiURL` | `https://api.github.com/` | GitHub REST API URL. Deletes by digest delete the package version through this API with the PAT. Uses the upstream CA when set. |
 | `mirrors.policy.url` | `""` | URL of the policy pull mirror, with a scheme, a host and an optional port only. Empty turns this mirror off. Allowed pulls of manifests and blobs go to this mirror. |
 | `mirrors.policy.pathPrefix` | `""` | Path under which the mirror serves GHCR's repositories. The mirror name of `owner/image` is `<pathPrefix>/owner/image`. |
 | `mirrors.policy.credentials.existingSecret` | `""` | Name of a Secret with the mirror's own credentials as `user:password`. Empty means the proxy connects to the mirror with no credentials. Never put the PAT here. |

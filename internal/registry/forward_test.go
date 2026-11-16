@@ -129,6 +129,10 @@ func newProxyHarness(
 		apply(&forwarderConfig)
 	}
 
+	if forwarderConfig.API.URL != nil && forwarderConfig.API.PAT == nil {
+		forwarderConfig.API.PAT = patFile
+	}
+
 	forwarder := registry.NewForwarder(forwarderConfig)
 
 	server := httptest.NewTLSServer(http.HandlerFunc(func(resp http.ResponseWriter, req *http.Request) {

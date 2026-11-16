@@ -152,6 +152,9 @@ func serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		PolicyMirror:    policyMirror,
 		AnonymousMirror: anonymousMirror,
 		Metrics:         proxyMetrics,
+		API: registry.APIConfig{
+			URL: cfg.Upstream.APIURL, Transport: upstreamTransport, Timeout: cfg.Upstream.APITimeout, PAT: pat,
+		},
 	})
 
 	restConfig, err := ctrl.GetConfig()

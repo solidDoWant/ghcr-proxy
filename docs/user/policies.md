@@ -26,7 +26,7 @@ spec:
 - `serviceAccounts`: One to 64 names of ServiceAccounts in the same namespace. A policy cannot name a ServiceAccount in another namespace.
 - `rules`: One to 32 rules. Each rule has `repositories` and `actions`.
 - `repositories`: Patterns for repository names without the registry host. `*` matches any characters inside one path segment. `**` matches any number of whole segments. A pattern can use only the characters `a-z`, `0-9`, `.`, `_` and `-`.
-- `actions`: `pull`, `push` or `delete`. The actions `push` and `delete` include `pull`.
+- `actions`: `pull`, `push` or `delete`. The actions `push` and `delete` include `pull`. With `delete`, you can delete an image by its digest, for example with `crane delete ghcr.io/soliddowant/foo@sha256:...`. GHCR does not let you delete by tag. The proxy then answers `405` with the code `UNSUPPORTED`.
 
 The [field reference](crd-reference.md) lists every field.
 
