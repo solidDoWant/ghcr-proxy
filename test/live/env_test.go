@@ -352,7 +352,7 @@ func (e *liveEnv) setUpCaller(ctx context.Context, restConfig *rest.Config) erro
 		ObjectMeta: metav1.ObjectMeta{Namespace: ciNamespace, Name: "live"},
 		Spec: v1alpha1.GHCRAccessPolicySpec{
 			ServiceAccounts: []string{serviceAccount},
-			Rules: []v1alpha1.AccessRule{{
+			Rules: []v1alpha1.GHCRAccessRule{{
 				Repositories: []string{e.prefix, e.prefix + "/**"},
 				Actions:      []v1alpha1.Action{v1alpha1.ActionPull, v1alpha1.ActionPush, v1alpha1.ActionDelete},
 			}},

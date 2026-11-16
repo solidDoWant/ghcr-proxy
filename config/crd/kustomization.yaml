@@ -2,3 +2,7 @@
 # bases/registrygate.soliddowant.dev_<kind>.yaml file here.
 resources:
   - bases/registrygate.soliddowant.dev_ghcraccesspolicies.yaml
+  - bases/registrygate.soliddowant.dev_registryaccesspolicies.yaml
+  - bases/registrygate.soliddowant.dev_registrymirrors.yaml
+  - bases/registrygate.soliddowant.dev_upstreamcredentials.yaml
+  - bases/registrygate.soliddowant.dev_upstreamregistries.yaml

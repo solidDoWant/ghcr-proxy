@@ -67,15 +67,15 @@ func watchedIndex(t *testing.T, grants config.Grants) (*authz.Index, *controller
 	return index, informer
 }
 
-func namedPolicy(namespace, name string, serviceAccounts []string, rules ...v1alpha1.AccessRule) *v1alpha1.GHCRAccessPolicy {
+func namedPolicy(namespace, name string, serviceAccounts []string, rules ...v1alpha1.GHCRAccessRule) *v1alpha1.GHCRAccessPolicy {
 	return &v1alpha1.GHCRAccessPolicy{
 		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: name},
 		Spec:       v1alpha1.GHCRAccessPolicySpec{ServiceAccounts: serviceAccounts, Rules: rules},
 	}
 }
 
-func accessRule(repositories []string, actions ...v1alpha1.Action) v1alpha1.AccessRule {
-	return v1alpha1.AccessRule{Repositories: repositories, Actions: actions}
+func accessRule(repositories []string, actions ...v1alpha1.Action) v1alpha1.GHCRAccessRule {
+	return v1alpha1.GHCRAccessRule{Repositories: repositories, Actions: actions}
 }
 
 func classify(t *testing.T, method, target string) registry.Request {

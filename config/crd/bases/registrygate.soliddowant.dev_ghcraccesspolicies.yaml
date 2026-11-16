@@ -58,7 +58,7 @@ spec:
                 description: Rules allow actions on repositories. Policies only ever
                   add access.
                 items:
-                  description: AccessRule allows some actions on the repositories
+                  description: GHCRAccessRule allows some actions on the repositories
                     its patterns match.
                   properties:
                     actions:

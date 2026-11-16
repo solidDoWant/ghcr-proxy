@@ -27,3 +27,125 @@ Every field of the `registrygate.soliddowant.dev/v1alpha1` resources. A field ma
 | `status.rejected[].reason` | string | yes | Reason says why the actions were dropped. One of `OutsideGrant`, `InvalidPattern`, `NoGrant`. |
 | `status.rejected[].repository` | string | yes | Repository is the pattern as written in the rule. |
 | `status.rejected[].rule` | integer | yes | Rule is the index into spec.rules. |
+
+## RegistryAccessPolicy
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `spec.rules` | list of object | yes | Rules allow actions on repositories through a credential or a mirror. |
+| `spec.rules[].actions` | list of string | yes | Actions allowed on those repositories. |
+| `spec.rules[].credentialRef` | object |  | CredentialRef is the UpstreamCredential that backs the rule. |
+| `spec.rules[].credentialRef.name` | string | yes | Name of the object. |
+| `spec.rules[].credentialRef.namespace` | string |  | Namespace of the object. Defaults to the namespace of the referring object. |
+| `spec.rules[].mirrorRef` | object |  | MirrorRef is the RegistryMirror that serves the rule's pulls. |
+| `spec.rules[].mirrorRef.name` | string | yes | Name of the object. |
+| `spec.rules[].mirrorRef.namespace` | string |  | Namespace of the object. Defaults to the namespace of the referring object. |
+| `spec.rules[].name` | string | yes | Name identifies the rule in the policy and in its status. |
+| `spec.rules[].repositories` | list of string | yes | Repositories are glob patterns of repository names, without the registry host. |
+| `spec.serviceAccounts` | list of string | yes | ServiceAccounts in this namespace this policy applies to. |
+| `status.conditions` | list of object |  | Conditions: Ready. |
+| `status.conditions[].lastTransitionTime` | time | yes | lastTransitionTime is the last time the condition transitioned from one status to another. This should be when the underlying condition changed. If that is not known, then using the time when the API field changed is acceptable. |
+| `status.conditions[].message` | string | yes | message is a human readable message indicating details about the transition. This may be an empty string. |
+| `status.conditions[].observedGeneration` | integer |  | observedGeneration represents the .metadata.generation that the condition was set based upon. For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date with respect to the current state of the instance. |
+| `status.conditions[].reason` | string | yes | reason contains a programmatic identifier indicating the reason for the condition's last transition. Producers of specific condition types may define expected values and meanings for this field, and whether the values are considered a guaranteed API. The value should be a CamelCase string. This field may not be empty. |
+| `status.conditions[].status` | string | yes | status of the condition, one of True, False, Unknown. One of `True`, `False`, `Unknown`. |
+| `status.conditions[].type` | string | yes | type of condition in CamelCase or in foo.example.com/CamelCase. |
+| `status.observedGeneration` | integer |  | ObservedGeneration is the last generation the proxy computed this status for. |
+| `status.rules` | list of object |  | Rules has the status of each rule. |
+| `status.rules[].conditions` | list of object |  | Conditions: Accepted. |
+| `status.rules[].conditions[].lastTransitionTime` | time | yes | lastTransitionTime is the last time the condition transitioned from one status to another. This should be when the underlying condition changed. If that is not known, then using the time when the API field changed is acceptable. |
+| `status.rules[].conditions[].message` | string | yes | message is a human readable message indicating details about the transition. This may be an empty string. |
+| `status.rules[].conditions[].observedGeneration` | integer |  | observedGeneration represents the .metadata.generation that the condition was set based upon. For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date with respect to the current state of the instance. |
+| `status.rules[].conditions[].reason` | string | yes | reason contains a programmatic identifier indicating the reason for the condition's last transition. Producers of specific condition types may define expected values and meanings for this field, and whether the values are considered a guaranteed API. The value should be a CamelCase string. This field may not be empty. |
+| `status.rules[].conditions[].status` | string | yes | status of the condition, one of True, False, Unknown. One of `True`, `False`, `Unknown`. |
+| `status.rules[].conditions[].type` | string | yes | type of condition in CamelCase or in foo.example.com/CamelCase. |
+| `status.rules[].name` | string | yes | Name of the rule. |
+
+## RegistryMirror
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `spec.allowedNamespaces` | object |  | AllowedNamespaces may use this mirror in policy rules. |
+| `spec.allowedNamespaces.names` | list of string |  | Names of allowed namespaces. |
+| `spec.allowedNamespaces.selector` | object |  | Selector allows every namespace whose labels match. An empty selector allows every namespace. |
+| `spec.caSecretRef` | object |  | CASecretRef names the Secret (key ca.crt) with the CA that signs the mirror. |
+| `spec.caSecretRef.name` | string | yes | Name of the Secret. |
+| `spec.fallbackToUpstream` | boolean |  | FallbackToUpstream sends a failed mirror pull to the upstream. Default true. |
+| `spec.pathPrefix` | string | yes | PathPrefix is put before the repository name on the mirror. |
+| `spec.secretRef` | object |  | SecretRef is the Secret with the mirror's username and password. |
+| `spec.secretRef.name` | string | yes | Name of the Secret. |
+| `spec.secretRef.passwordKey` | string |  | PasswordKey is the Secret key of the password. Default "password". |
+| `spec.secretRef.usernameKey` | string |  | UsernameKey is the Secret key of the username. Default "username". |
+| `spec.timeouts` | object |  | Timeouts of calls to the mirror. |
+| `spec.timeouts.responseHeader` | string |  | ResponseHeader is the time from the request being sent to the response headers arriving. Default 30s. |
+| `spec.timeouts.token` | string |  | Token is the time for the ping and the token exchange together. Default 10s. |
+| `spec.upstreamRef` | object | yes | UpstreamRef is the upstream this mirror serves. |
+| `spec.upstreamRef.name` | string | yes | Name of the object. |
+| `spec.upstreamRef.namespace` | string |  | Namespace of the object. Defaults to the namespace of the referring object. |
+| `spec.url` | string | yes | URL of the mirror. |
+| `status.conditions` | list of object |  | Conditions: Ready. |
+| `status.conditions[].lastTransitionTime` | time | yes | lastTransitionTime is the last time the condition transitioned from one status to another. This should be when the underlying condition changed. If that is not known, then using the time when the API field changed is acceptable. |
+| `status.conditions[].message` | string | yes | message is a human readable message indicating details about the transition. This may be an empty string. |
+| `status.conditions[].observedGeneration` | integer |  | observedGeneration represents the .metadata.generation that the condition was set based upon. For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date with respect to the current state of the instance. |
+| `status.conditions[].reason` | string | yes | reason contains a programmatic identifier indicating the reason for the condition's last transition. Producers of specific condition types may define expected values and meanings for this field, and whether the values are considered a guaranteed API. The value should be a CamelCase string. This field may not be empty. |
+| `status.conditions[].status` | string | yes | status of the condition, one of True, False, Unknown. One of `True`, `False`, `Unknown`. |
+| `status.conditions[].type` | string | yes | type of condition in CamelCase or in foo.example.com/CamelCase. |
+| `status.observedGeneration` | integer |  | ObservedGeneration is the last generation the proxy computed this status for. |
+
+## UpstreamCredential
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `spec.allowedNamespaces` | object |  | AllowedNamespaces may use this credential in policy rules. |
+| `spec.allowedNamespaces.names` | list of string |  | Names of allowed namespaces. |
+| `spec.allowedNamespaces.selector` | object |  | Selector allows every namespace whose labels match. An empty selector allows every namespace. |
+| `spec.ceiling` | list of object | yes | Ceiling is the most any rule using this credential may allow. |
+| `spec.ceiling[].actions` | list of string | yes | Actions allowed on those repositories. |
+| `spec.ceiling[].repositories` | list of string | yes | Repositories are glob patterns of repository names, without the registry host. |
+| `spec.secretRef` | object | yes | SecretRef is the Secret with the username and password. |
+| `spec.secretRef.name` | string | yes | Name of the Secret. |
+| `spec.secretRef.passwordKey` | string |  | PasswordKey is the Secret key of the password. Default "password". |
+| `spec.secretRef.usernameKey` | string |  | UsernameKey is the Secret key of the username. Default "username". |
+| `spec.upstreamRef` | object | yes | UpstreamRef is the upstream this credential is for. |
+| `spec.upstreamRef.name` | string | yes | Name of the object. |
+| `spec.upstreamRef.namespace` | string |  | Namespace of the object. Defaults to the namespace of the referring object. |
+| `status.conditions` | list of object |  | Conditions: Ready. |
+| `status.conditions[].lastTransitionTime` | time | yes | lastTransitionTime is the last time the condition transitioned from one status to another. This should be when the underlying condition changed. If that is not known, then using the time when the API field changed is acceptable. |
+| `status.conditions[].message` | string | yes | message is a human readable message indicating details about the transition. This may be an empty string. |
+| `status.conditions[].observedGeneration` | integer |  | observedGeneration represents the .metadata.generation that the condition was set based upon. For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date with respect to the current state of the instance. |
+| `status.conditions[].reason` | string | yes | reason contains a programmatic identifier indicating the reason for the condition's last transition. Producers of specific condition types may define expected values and meanings for this field, and whether the values are considered a guaranteed API. The value should be a CamelCase string. This field may not be empty. |
+| `status.conditions[].status` | string | yes | status of the condition, one of True, False, Unknown. One of `True`, `False`, `Unknown`. |
+| `status.conditions[].type` | string | yes | type of condition in CamelCase or in foo.example.com/CamelCase. |
+| `status.observedGeneration` | integer |  | ObservedGeneration is the last generation the proxy computed this status for. |
+
+## UpstreamRegistry
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `spec.allowedMirrorURLs` | list of string |  | AllowedMirrorURLs are the URL prefixes a mirror of this upstream may use. |
+| `spec.allowedNamespaces` | object |  | AllowedNamespaces may point credentials, mirrors and policies at this upstream. |
+| `spec.allowedNamespaces.names` | list of string |  | Names of allowed namespaces. |
+| `spec.allowedNamespaces.selector` | object |  | Selector allows every namespace whose labels match. An empty selector allows every namespace. |
+| `spec.anonymousPulls` | string |  | AnonymousPulls says what happens to an unauthenticated pull. Default Challenge. One of `Challenge`, `Forward`. |
+| `spec.caSecretRef` | object |  | CASecretRef names the Secret (key ca.crt) with the CA that signs the upstream. |
+| `spec.caSecretRef.name` | string | yes | Name of the Secret. |
+| `spec.defaultMirrorRef` | object |  | DefaultMirrorRef is the mirror that serves pulls no rule decides. |
+| `spec.defaultMirrorRef.name` | string | yes | Name of the object. |
+| `spec.defaultMirrorRef.namespace` | string |  | Namespace of the object. Defaults to the namespace of the referring object. |
+| `spec.hosts` | list of string | yes | Hosts are the DNS names the proxy answers for. |
+| `spec.timeouts` | object |  | Timeouts of calls to the upstream. |
+| `spec.timeouts.responseHeader` | string |  | ResponseHeader is the time from the request being sent to the response headers arriving. Default 30s. |
+| `spec.timeouts.token` | string |  | Token is the time for the ping and the token exchange together. Default 10s. |
+| `spec.tls` | object | yes | TLS is the serving certificate. |
+| `spec.tls.secretRef` | object | yes | SecretRef is the Secret with the serving key pair. |
+| `spec.tls.secretRef.name` | string | yes | Name of the Secret. |
+| `spec.tokenRealmHosts` | list of string |  | TokenRealmHosts are hosts (host or host:port) allowed as the token endpoint besides the url host. |
+| `spec.url` | string | yes | URL is where requests go: https://host[:port]. |
+| `status.conditions` | list of object |  | Conditions: Ready. |
+| `status.conditions[].lastTransitionTime` | time | yes | lastTransitionTime is the last time the condition transitioned from one status to another. This should be when the underlying condition changed. If that is not known, then using the time when the API field changed is acceptable. |
+| `status.conditions[].message` | string | yes | message is a human readable message indicating details about the transition. This may be an empty string. |
+| `status.conditions[].observedGeneration` | integer |  | observedGeneration represents the .metadata.generation that the condition was set based upon. For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date with respect to the current state of the instance. |
+| `status.conditions[].reason` | string | yes | reason contains a programmatic identifier indicating the reason for the condition's last transition. Producers of specific condition types may define expected values and meanings for this field, and whether the values are considered a guaranteed API. The value should be a CamelCase string. This field may not be empty. |
+| `status.conditions[].status` | string | yes | status of the condition, one of True, False, Unknown. One of `True`, `False`, `Unknown`. |
+| `status.conditions[].type` | string | yes | type of condition in CamelCase or in foo.example.com/CamelCase. |
+| `status.observedGeneration` | integer |  | ObservedGeneration is the last generation the proxy computed this status for. |
