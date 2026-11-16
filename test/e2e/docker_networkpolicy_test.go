@@ -9,9 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// dockerCLIImage is the image of the CI pod's docker container; it carries a busybox nc.
-const dockerCLIImage = "mirror.gcr.io/library/docker:29.9.3-cli@sha256:5a7af0dcb0e46c803efe9b45371dd21cb500e5b4453250394ac6f06d49b6e6f1"
-
 func connect(t *testing.T, namespace string) error {
 	t.Helper()
 
@@ -22,6 +19,9 @@ func connect(t *testing.T, namespace string) error {
 	return err
 }
 
+// This file name sorts before docs_test.go on purpose: the docs walk-through
+// replaces the proxy release with one that has no NetworkPolicy, and Go runs
+// tests in file-name order.
 func TestNetworkPolicyBlocksNamespacesOutsideTheClientSelector(t *testing.T) {
 	require.NoError(t, connect(t, ciNamespace), "a client namespace must reach the proxy")
 	assert.Error(t, connect(t, fakeNamespace), "a namespace outside the selector must not reach the proxy")
