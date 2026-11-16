@@ -1,6 +1,6 @@
 # Phase 3 acceptance checklist: registrygate
 
-Draft for the owner's approval. Only the owner adds scenarios. Each scenario lists its tests on a `Tests:` line (`` `package/dir: TestName/subtest` ``); a scenario passes when every listed test passes on `master`. Workers add their tests to the line; that is not a new scenario. `make acceptance` prints the scoreboard.
+Approved by the owner on 2026-11-16. Only the owner adds scenarios. Each scenario lists its tests on a `Tests:` line (`` `package/dir: TestName/subtest` ``); a scenario passes when every listed test passes on `master`. Workers add their tests to the line; that is not a new scenario. `make acceptance` prints the scoreboard.
 
 In the e2e scenarios, "a CI pod" is a pod with a dind sidecar set up exactly as `docs/admin/` says: `hostAliases` for each intercepted host, `certs.d/<host>/ca.crt`, the helper image volume, `docker-credential-registrygate configure`, and a projected token. "Upstream A" is the fake GHCR and "upstream B" is a second fake registry with plural upload paths and Basic-credential token auth.
 
