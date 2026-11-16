@@ -33,6 +33,7 @@ type Config struct {
 	Server         Server
 	Audit          Audit
 	Mirrors        Mirrors
+	Webhook        Webhook
 }
 
 // Mirrors holds the optional pull mirrors. A nil mirror is not configured.
@@ -72,6 +73,14 @@ type Authentication struct {
 
 // TLS holds the serving certificate paths.
 type TLS struct {
+	CertFile string
+	KeyFile  string
+}
+
+// Webhook configures the validating admission webhook.
+type Webhook struct {
+	Enabled  bool
+	Listen   string
 	CertFile string
 	KeyFile  string
 }
@@ -136,6 +145,12 @@ type rawConfig struct {
 		Policy    *rawMirror `json:"policy"`
 		Anonymous *rawMirror `json:"anonymous"`
 	} `json:"mirrors"`
+	Webhook struct {
+		Enabled  bool   `json:"enabled"`
+		Listen   string `json:"listen"`
+		CertFile string `json:"certFile"`
+		KeyFile  string `json:"keyFile"`
+	} `json:"webhook"`
 }
 
 type rawMirror struct {
@@ -232,6 +247,11 @@ func Parse(data []byte) (*Config, error) {
 	cfg.TLS.KeyFile = orDefault(raw.TLS.KeyFile, "/var/run/ghcr-proxy/tls/tls.key")
 	cfg.Listen.HTTPS = orDefault(raw.Listen.HTTPS, ":8443")
 	cfg.Listen.Health = orDefault(raw.Listen.Health, ":8080")
+
+	cfg.Webhook.Enabled = raw.Webhook.Enabled
+	cfg.Webhook.Listen = orDefault(raw.Webhook.Listen, ":9443")
+	cfg.Webhook.CertFile = orDefault(raw.Webhook.CertFile, "/var/run/ghcr-proxy/webhook-tls/tls.crt")
+	cfg.Webhook.KeyFile = orDefault(raw.Webhook.KeyFile, "/var/run/ghcr-proxy/webhook-tls/tls.key")
 
 	sv := raw.Server
 	cfg.Server.ReadHeaderTimeout = duration("server.readHeaderTimeout", sv.ReadHeaderTimeout, "10s", positive, "must be positive")
