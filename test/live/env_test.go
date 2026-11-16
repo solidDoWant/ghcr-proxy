@@ -58,7 +58,7 @@ const (
 	apiURL      = "https://api.github.com/"
 	// publicImage is the one image outside the run prefix the tests touch: an
 	// already-public image, pulled anonymously and read-only, by its digest.
-	publicImage = "ghcr.io/soliddowant/ghcr-proxy:0.1.1@sha256:bcb48dfd6f3a240dd12107f3ba8b65bab1b9cb465243bed368ef57c1a5409ef7"
+	publicImage = "ghcr.io/soliddowant/ghcr-proxy:0.2.0@sha256:e3a1e8f2dd0f78b659622cb7ee4654c29e26a972f6202c4e4c70dfa68efdcb8f"
 
 	ciNamespace    = "ci-live"
 	serviceAccount = "builder"
