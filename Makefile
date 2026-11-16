@@ -10,8 +10,8 @@ LDFLAGS := -s -w -X main.version=$(VERSION)
 # The phase whose checklist `make acceptance` scores (docs/acceptance/phase-$(PHASE).md).
 PHASE ?= 1
 
-# The kind cluster `make test-e2e` and `make acceptance` use. Agents set E2E_CLUSTER=ghcr-proxy-<issue>.
-E2E_CLUSTER ?= ghcr-proxy-e2e
+# The kind cluster `make test-e2e` and `make acceptance` use. Agents set E2E_CLUSTER=registrygate-<issue>.
+E2E_CLUSTER ?= registrygate-e2e
 
 ##@ General
 
@@ -61,7 +61,7 @@ test-integration: ## Run the integration-tagged tests (envtest from the dev shel
 	./scripts/test-tagged.sh integration
 
 .PHONY: test-e2e
-test-e2e: ## Run the e2e-tagged tests against the kind cluster E2E_CLUSTER (default ghcr-proxy-e2e, ImageVolume on) with the fake GHCR and the proxy's chart. Passes with "no tests yet" until there are any.
+test-e2e: ## Run the e2e-tagged tests against the kind cluster E2E_CLUSTER (default registrygate-e2e, ImageVolume on) with the fake GHCR and the proxy's chart. Passes with "no tests yet" until there are any.
 	E2E_CLUSTER="$(E2E_CLUSTER)" ./scripts/test-tagged.sh e2e
 
 .PHONY: test-live
@@ -97,17 +97,17 @@ check-generate: ## Fail if `make generate` changes the tree (committed generated
 ##@ Build
 
 .PHONY: build
-build: ## Build bin/ghcr-proxy and bin/docker-credential-ghcr-proxy.
+build: ## Build bin/registrygate and bin/docker-credential-registrygate.
 	@mkdir -p "$(BIN_DIR)"
-	CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o "$(BIN_DIR)/ghcr-proxy" ./cmd/ghcr-proxy
-	CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o "$(BIN_DIR)/docker-credential-ghcr-proxy" ./cmd/docker-credential-ghcr-proxy
+	CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o "$(BIN_DIR)/registrygate" ./cmd/registrygate
+	CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o "$(BIN_DIR)/docker-credential-registrygate" ./cmd/docker-credential-registrygate
 
 .PHONY: build-images
-build-images: ## Build the images ghcr.io/soliddowant/ghcr-proxy and ghcr.io/soliddowant/ghcr-proxy-credential-helper (tag $(VERSION)) for linux/amd64 and arm64; PUSH_ALL=true also pushes (releases only).
+build-images: ## Build the images ghcr.io/soliddowant/registrygate and ghcr.io/soliddowant/registrygate-credential-helper (tag $(VERSION)) for linux/amd64 and arm64; PUSH_ALL=true also pushes (releases only).
 	VERSION="$(VERSION)" PUSH_ALL="$(or $(PUSH_ALL),false)" ./scripts/build-images.sh
 
 .PHONY: build-fakeghcr-image
-build-fakeghcr-image: ## Build the GHCR test double image ghcr.io/soliddowant/ghcr-proxy-fakeghcr:dev for the host architecture (e2e only, never pushed).
+build-fakeghcr-image: ## Build the GHCR test double image ghcr.io/soliddowant/registrygate-fakeghcr:dev for the host architecture (e2e only, never pushed).
 	./scripts/build-fakeghcr-image.sh
 
 .PHONY: clean
@@ -117,7 +117,7 @@ clean: ## Remove build artifacts.
 ##@ Helm
 
 .PHONY: chart-lint
-chart-lint: ## Lint the Helm chart in deploy/charts/ghcr-proxy without a cluster.
+chart-lint: ## Lint the Helm chart in deploy/charts/registrygate without a cluster.
 	./scripts/chart-lint.sh
 
 ##@ Release

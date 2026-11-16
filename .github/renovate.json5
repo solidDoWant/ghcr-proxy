@@ -9,9 +9,9 @@
     ":timezone(America/Chicago)",
     // Applied in this order, then the packageRules below. local> presets are
     // read from the default branch.
-    "local>solidDoWant/ghcr-proxy//.github/renovate/safety.json5",
-    "local>solidDoWant/ghcr-proxy//.github/renovate/groups.json5",
-    "local>solidDoWant/ghcr-proxy//.github/renovate/labels.json5",
+    "local>solidDoWant/registrygate//.github/renovate/safety.json5",
+    "local>solidDoWant/registrygate//.github/renovate/groups.json5",
+    "local>solidDoWant/registrygate//.github/renovate/labels.json5",
   ],
 
   // Hold new releases briefly (supply-chain safety, chained hotfix releases).

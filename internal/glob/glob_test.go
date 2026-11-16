@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/solidDoWant/ghcr-proxy/internal/glob"
+	"github.com/solidDoWant/registrygate/internal/glob"
 )
 
 func mustParse(t *testing.T, pattern string) glob.Glob {

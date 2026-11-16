@@ -19,10 +19,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/solidDoWant/ghcr-proxy/internal/config"
-	"github.com/solidDoWant/ghcr-proxy/internal/mirror"
-	"github.com/solidDoWant/ghcr-proxy/internal/registry"
-	"github.com/solidDoWant/ghcr-proxy/test/fakeghcr"
+	"github.com/solidDoWant/registrygate/internal/config"
+	"github.com/solidDoWant/registrygate/internal/mirror"
+	"github.com/solidDoWant/registrygate/internal/registry"
+	"github.com/solidDoWant/registrygate/test/fakeghcr"
 )
 
 func TestMirrorThatNeedsNoAuthenticationServesPulls(t *testing.T) {

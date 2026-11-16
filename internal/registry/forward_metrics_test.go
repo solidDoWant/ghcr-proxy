@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/solidDoWant/ghcr-proxy/internal/metrics"
-	"github.com/solidDoWant/ghcr-proxy/internal/registry"
-	"github.com/solidDoWant/ghcr-proxy/test/fakeghcr"
+	"github.com/solidDoWant/registrygate/internal/metrics"
+	"github.com/solidDoWant/registrygate/internal/registry"
+	"github.com/solidDoWant/registrygate/test/fakeghcr"
 )
 
 func withMetrics(proxyMetrics *metrics.Metrics) func(*registry.ForwarderConfig) {
@@ -35,17 +35,17 @@ func TestForwarderCountsUpstreamRequestsAndMirrorFallbacks(t *testing.T) {
 	require.Equal(t, http.StatusOK, status)
 
 	require.NoError(t, testutil.GatherAndCompare(proxyMetrics.Gatherer(), strings.NewReader(`
-# HELP ghcr_proxy_mirror_fallbacks_total Pulls that fell back from a mirror to the upstream.
-# TYPE ghcr_proxy_mirror_fallbacks_total counter
-ghcr_proxy_mirror_fallbacks_total{mirror="policy"} 1
-# HELP ghcr_proxy_upstream_requests_total Requests sent to the upstream or a mirror, by status class.
-# TYPE ghcr_proxy_upstream_requests_total counter
-ghcr_proxy_upstream_requests_total{code="2xx",target="policy_mirror"} 1
-ghcr_proxy_upstream_requests_total{code="2xx",target="upstream"} 1
-ghcr_proxy_upstream_requests_total{code="5xx",target="policy_mirror"} 1
-`), "ghcr_proxy_mirror_fallbacks_total", "ghcr_proxy_upstream_requests_total"))
+# HELP registrygate_mirror_fallbacks_total Pulls that fell back from a mirror to the upstream.
+# TYPE registrygate_mirror_fallbacks_total counter
+registrygate_mirror_fallbacks_total{mirror="policy"} 1
+# HELP registrygate_upstream_requests_total Requests sent to the upstream or a mirror, by status class.
+# TYPE registrygate_upstream_requests_total counter
+registrygate_upstream_requests_total{code="2xx",target="policy_mirror"} 1
+registrygate_upstream_requests_total{code="2xx",target="upstream"} 1
+registrygate_upstream_requests_total{code="5xx",target="policy_mirror"} 1
+`), "registrygate_mirror_fallbacks_total", "registrygate_upstream_requests_total"))
 
-	count, err := testutil.GatherAndCount(proxyMetrics.Gatherer(), "ghcr_proxy_upstream_request_duration_seconds")
+	count, err := testutil.GatherAndCount(proxyMetrics.Gatherer(), "registrygate_upstream_request_duration_seconds")
 	require.NoError(t, err)
 	assert.Equal(t, 2, count, "a duration histogram for the policy mirror and one for the upstream")
 }

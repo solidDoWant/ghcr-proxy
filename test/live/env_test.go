@@ -7,7 +7,7 @@
 // skips.
 //
 // Everything the tests create lives under one run prefix,
-// <owner>/ghcr-proxy-live-<run id>, with a random run id. The proxy's only
+// <owner>/registrygate-live-<run id>, with a random run id. The proxy's only
 // grant is that prefix, and cleanup deletes only packages under it that the
 // run pushed. The tests print status codes and registry error codes, never
 // the PAT or a token.
@@ -44,13 +44,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
-	"github.com/solidDoWant/ghcr-proxy/api/v1alpha1"
-	"github.com/solidDoWant/ghcr-proxy/internal/authn"
-	"github.com/solidDoWant/ghcr-proxy/internal/authz"
-	"github.com/solidDoWant/ghcr-proxy/internal/config"
-	"github.com/solidDoWant/ghcr-proxy/internal/registry"
-	"github.com/solidDoWant/ghcr-proxy/internal/server"
-	"github.com/solidDoWant/ghcr-proxy/internal/upstream"
+	"github.com/solidDoWant/registrygate/api/v1alpha1"
+	"github.com/solidDoWant/registrygate/internal/authn"
+	"github.com/solidDoWant/registrygate/internal/authz"
+	"github.com/solidDoWant/registrygate/internal/config"
+	"github.com/solidDoWant/registrygate/internal/registry"
+	"github.com/solidDoWant/registrygate/internal/server"
+	"github.com/solidDoWant/registrygate/internal/upstream"
 )
 
 const (
@@ -62,7 +62,7 @@ const (
 
 	ciNamespace    = "ci-live"
 	serviceAccount = "builder"
-	proxyAudience  = "ghcr-proxy"
+	proxyAudience  = "registrygate"
 	// The pod is never scheduled in envtest; the image is never pulled.
 	unusedPodImage = "ghcr.io/soliddowant/unused@sha256:0000000000000000000000000000000000000000000000000000000000000000"
 )
@@ -73,7 +73,7 @@ var ownerPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,37}[a-z0-9])?$`)
 // liveEnv is one run: the proxy in front of ghcr.io and what the run pushed.
 type liveEnv struct {
 	owner string
-	// prefix is <owner>/ghcr-proxy-live-<run id>; every repository the run
+	// prefix is <owner>/registrygate-live-<run id>; every repository the run
 	// writes is prefix or below it.
 	prefix string
 	pat    string
@@ -166,7 +166,7 @@ func startEnv() (*liveEnv, error) {
 
 	env := &liveEnv{
 		owner:  owner,
-		prefix: owner + "/ghcr-proxy-live-" + runID,
+		prefix: owner + "/registrygate-live-" + runID,
 		pat:    strings.TrimSpace(string(raw)),
 		pushed: map[string]bool{},
 	}
@@ -208,7 +208,7 @@ func startEnv() (*liveEnv, error) {
 	return env, nil
 }
 
-// startProxy wires the proxy's components the way the ghcr-proxy command
+// startProxy wires the proxy's components the way the registrygate command
 // does, pointed at ghcr.io, with the run prefix as the only grant.
 func (e *liveEnv) startProxy(ctx context.Context, restConfig *rest.Config, patFile string) error {
 	configYAML := fmt.Sprintf(`

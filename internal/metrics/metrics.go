@@ -64,30 +64,30 @@ func New() *Metrics {
 	m := &Metrics{
 		registry: prometheus.NewRegistry(),
 		requests: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "ghcr_proxy_requests_total", Help: "Requests served, by action, decision and status class.",
+			Name: "registrygate_requests_total", Help: "Requests served, by action, decision and status class.",
 		}, []string{"action", "decision", "code"}),
 		upstreamDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
-			Name:    "ghcr_proxy_upstream_request_duration_seconds",
+			Name:    "registrygate_upstream_request_duration_seconds",
 			Help:    "Time to the upstream's or a mirror's response headers.",
 			Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 2.5, 10, 60},
 		}, []string{"target"}),
 		upstreamRequests: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "ghcr_proxy_upstream_requests_total", Help: "Requests sent to the upstream or a mirror, by status class.",
+			Name: "registrygate_upstream_requests_total", Help: "Requests sent to the upstream or a mirror, by status class.",
 		}, []string{"target", "code"}),
 		mirrorFallbacks: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "ghcr_proxy_mirror_fallbacks_total", Help: "Pulls that fell back from a mirror to the upstream.",
+			Name: "registrygate_mirror_fallbacks_total", Help: "Pulls that fell back from a mirror to the upstream.",
 		}, []string{"mirror"}),
 		tokenReviews: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "ghcr_proxy_token_reviews_total", Help: "ServiceAccount token reviews, by result and cache use.",
+			Name: "registrygate_token_reviews_total", Help: "ServiceAccount token reviews, by result and cache use.",
 		}, []string{"result", "cache"}),
 		upstreamTokens: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "ghcr_proxy_upstream_token_fetches_total", Help: "Registry token fetches, by target and result.",
+			Name: "registrygate_upstream_token_fetches_total", Help: "Registry token fetches, by target and result.",
 		}, []string{"target", "result"}),
 		credentialReloads: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "ghcr_proxy_credential_reloads_total", Help: "Credential file reloads, by kind and result.",
+			Name: "registrygate_credential_reloads_total", Help: "Credential file reloads, by kind and result.",
 		}, []string{"kind", "result"}),
 		policies: &policyCollector{desc: prometheus.NewDesc(
-			"ghcr_proxy_policies", "GHCRAccessPolicy objects in the local index, by whether they are inside the grants.",
+			"registrygate_policies", "GHCRAccessPolicy objects in the local index, by whether they are inside the grants.",
 			[]string{"ready"}, nil)},
 	}
 

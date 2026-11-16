@@ -14,9 +14,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
-	"github.com/solidDoWant/ghcr-proxy/api/v1alpha1"
-	"github.com/solidDoWant/ghcr-proxy/internal/authz"
-	"github.com/solidDoWant/ghcr-proxy/internal/config"
+	"github.com/solidDoWant/registrygate/api/v1alpha1"
+	"github.com/solidDoWant/registrygate/internal/authz"
+	"github.com/solidDoWant/registrygate/internal/config"
 )
 
 // Path is the URL path the validating webhook is served at.

@@ -59,5 +59,5 @@ The scheduler (`scripts/agents/scheduler.py`) launches you as a top-level headle
 - Before pushing to an existing PR, check `gh pr view <PR> --json autoMergeRequest`; if auto-merge is armed, disarm it first (`gh pr merge <PR> --disable-auto`) so unchecked commits cannot merge, and re-arm it on your new head after the self-check.
 - Never weaken lint/CI configuration to get green.
 - Update docs and `SPEC.md` in the same PR when behavior changes. Put each change in the page for the audience it affects, and load the `simple-english` skill before you write human-facing text (CLAUDE.md, Documentation).
-- **kind clusters:** name yours `ghcr-proxy-<issue>` and delete it before handing back `pr-ready` or `done`. Never touch another agent's cluster.
+- **kind clusters:** name yours `registrygate-<issue>` and delete it before handing back `pr-ready` or `done`. Never touch another agent's cluster.
 - If you hit an environment problem you cannot fix inside the VM, stop and hand back `HANDOFF: blocked` with the exact error.

@@ -13,8 +13,8 @@ import (
 	"github.com/google/go-github/v93/github"
 	"github.com/opencontainers/go-digest"
 
-	"github.com/solidDoWant/ghcr-proxy/internal/metrics"
-	"github.com/solidDoWant/ghcr-proxy/internal/upstream"
+	"github.com/solidDoWant/registrygate/internal/metrics"
+	"github.com/solidDoWant/registrygate/internal/upstream"
 )
 
 // GHCR refuses every registry delete endpoint, so a manifest delete by digest

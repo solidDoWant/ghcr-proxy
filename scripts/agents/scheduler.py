@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministic job scheduler for the ghcr-proxy agent team.
+"""Deterministic job scheduler for the registrygate agent team.
 
 Instead of one LLM
 session that re-derives every cycle what is ready and dispatches subagents,
@@ -75,7 +75,7 @@ DEFAULT_REPO_DIR = SCRIPT.parents[2]
 EXIT_RESTART = 75
 
 DEFAULT_CONFIG = {
-    "repo": "solidDoWant/ghcr-proxy",
+    "repo": "solidDoWant/registrygate",
     "slots": 5,
     # New issues (tier 5) may hold at most this many slots, so PR fix-ups and
     # special jobs never wait behind a slot pool full of long new work.
@@ -1066,7 +1066,7 @@ def fresh_prompt(job: Job, wt: Path, branch_note: str, sess: dict | None, why: s
         "merge-fixer": f"PR #{job.pr}" + (f" (issue #{job.issue})" if job.issue else ""),
     }.get(job.role, f"the {job.role} job {job.special_id or job.key}")
     lines = [
-        f"You were launched by the ghcr-proxy scheduler (scripts/agents/scheduler.py) as the {job.role} for {target}.",
+        f"You were launched by the registrygate scheduler (scripts/agents/scheduler.py) as the {job.role} for {target}.",
         "Your agent definition is your playbook; CLAUDE.md applies. You are a top-level session: there is no "
         "project manager to talk to; your final message is your handoff report.",
         "",
@@ -1695,7 +1695,7 @@ class Scheduler:
     def planner_job(self, reasons: list) -> Job:
         status = self.status_text(brief=True)
         prompt = (
-            "You are the ghcr-proxy planner. Read docs/agents/planner.md and follow it: handle the triggers below, "
+            "You are the registrygate planner. Read docs/agents/planner.md and follow it: handle the triggers below, "
             "keep the durable records, then exit. You never dispatch agents; the scheduler does.\n\n"
             "Triggers for this run:\n" + "\n".join(f"- {r}" for r in reasons) +
             "\n\nScheduler status (sched-status) at launch:\n\n" + status +
@@ -1896,7 +1896,7 @@ class Scheduler:
     def remove_orphan_stacks(self) -> None:
         out = self.sh("docker ps -a --format '{{.Label \"com.docker.compose.project\"}}' 2>/dev/null").stdout
         for project in sorted(set(out.split())):
-            m = re.fullmatch(r"ghcr-proxy-test-(\d+)", project)
+            m = re.fullmatch(r"registrygate-test-(\d+)", project)
             if not m:
                 continue
             try:

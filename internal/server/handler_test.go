@@ -25,16 +25,16 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache/informertest"
 
-	"github.com/solidDoWant/ghcr-proxy/api/v1alpha1"
-	"github.com/solidDoWant/ghcr-proxy/internal/audit"
-	"github.com/solidDoWant/ghcr-proxy/internal/authn"
-	"github.com/solidDoWant/ghcr-proxy/internal/authz"
-	"github.com/solidDoWant/ghcr-proxy/internal/config"
-	"github.com/solidDoWant/ghcr-proxy/internal/metrics"
-	"github.com/solidDoWant/ghcr-proxy/internal/registry"
-	"github.com/solidDoWant/ghcr-proxy/internal/server"
-	"github.com/solidDoWant/ghcr-proxy/internal/upstream"
-	"github.com/solidDoWant/ghcr-proxy/test/fakeghcr"
+	"github.com/solidDoWant/registrygate/api/v1alpha1"
+	"github.com/solidDoWant/registrygate/internal/audit"
+	"github.com/solidDoWant/registrygate/internal/authn"
+	"github.com/solidDoWant/registrygate/internal/authz"
+	"github.com/solidDoWant/registrygate/internal/config"
+	"github.com/solidDoWant/registrygate/internal/metrics"
+	"github.com/solidDoWant/registrygate/internal/registry"
+	"github.com/solidDoWant/registrygate/internal/server"
+	"github.com/solidDoWant/registrygate/internal/upstream"
+	"github.com/solidDoWant/registrygate/test/fakeghcr"
 )
 
 const (
@@ -172,7 +172,7 @@ grants:
 
 // basic is an Authorization value carrying token as the Basic password, as the credential helper's answer does.
 func basic(token string) string {
-	return "Basic " + base64.StdEncoding.EncodeToString([]byte("ghcr-proxy:"+token))
+	return "Basic " + base64.StdEncoding.EncodeToString([]byte("registrygate:"+token))
 }
 
 type answer struct {
@@ -225,7 +225,7 @@ func TestVersionCheckChallengesAnonymousCallersAndAnswersServiceAccountsLocally(
 
 	anonymous := proxy.do(t, http.MethodGet, "/v2/")
 	assert.Equal(t, http.StatusUnauthorized, anonymous.status)
-	assert.Equal(t, `Basic realm="ghcr-proxy"`, anonymous.header.Get("WWW-Authenticate"))
+	assert.Equal(t, `Basic realm="registrygate"`, anonymous.header.Get("WWW-Authenticate"))
 	assert.Equal(t, "UNAUTHORIZED", anonymous.code)
 
 	authenticated := proxy.do(t, http.MethodGet, "/v2/", basic(builderToken))
@@ -266,7 +266,7 @@ func TestAuthenticationRefusesCredentialsItCannotAccept(t *testing.T) {
 			assert.Equal(t, test.code, got.code)
 
 			if test.status == http.StatusUnauthorized {
-				assert.Equal(t, `Basic realm="ghcr-proxy"`, got.header.Get("WWW-Authenticate"))
+				assert.Equal(t, `Basic realm="registrygate"`, got.header.Get("WWW-Authenticate"))
 			} else {
 				assert.Equal(t, "5", got.header.Get("Retry-After"))
 			}
@@ -291,7 +291,7 @@ func (r *tokenReviews) Create(_ context.Context, review *authenticationv1.TokenR
 	switch review.Spec.Token {
 	case "token-for-proxy":
 		answer.Status = authenticationv1.TokenReviewStatus{
-			Authenticated: true, Audiences: []string{"ghcr-proxy"},
+			Authenticated: true, Audiences: []string{"registrygate"},
 			User: authenticationv1.UserInfo{
 				Username: "system:serviceaccount:ci-foo:builder",
 				Extra:    map[string]authenticationv1.ExtraValue{"authentication.kubernetes.io/pod-name": {"build-1"}},
@@ -311,7 +311,7 @@ func (r *tokenReviews) Create(_ context.Context, review *authenticationv1.TokenR
 
 func TestRealReviewerKeepsUnauthenticatedRequestsAwayFromTheUpstream(t *testing.T) {
 	reviews := &tokenReviews{}
-	reviewer, err := authn.NewReviewer(reviews, authn.Options{Audience: "ghcr-proxy", CacheTTL: time.Second, ReviewTimeout: 5 * time.Second})
+	reviewer, err := authn.NewReviewer(reviews, authn.Options{Audience: "registrygate", CacheTTL: time.Second, ReviewTimeout: 5 * time.Second})
 	require.NoError(t, err)
 
 	proxy := newHarness(t, harnessOptions{reviewer: reviewer})
@@ -427,7 +427,7 @@ func TestNotReadyReplicaAnswers503ToAuthenticatedRequests(t *testing.T) {
 
 				assert.Equal(t, http.StatusServiceUnavailable, got.status, request.target)
 				assert.Equal(t, "UNAVAILABLE", got.code, request.target)
-				assert.Equal(t, "ghcr-proxy is not ready", got.body, request.target)
+				assert.Equal(t, "registrygate is not ready", got.body, request.target)
 				assert.Equal(t, "5", got.header.Get("Retry-After"), request.target)
 			}
 
@@ -566,20 +566,20 @@ func TestRequestsAreCountedByActionDecisionAndStatusClass(t *testing.T) {
 
 	// The count is recorded after the response is written, so the last one can land just after the client returns.
 	expected := `
-# HELP ghcr_proxy_requests_total Requests served, by action, decision and status class.
-# TYPE ghcr_proxy_requests_total counter
-ghcr_proxy_requests_total{action="none",code="4xx",decision="unauthenticated"} 1
-ghcr_proxy_requests_total{action="pull",code="4xx",decision="unauthenticated"} 1
-ghcr_proxy_requests_total{action="pull",code="5xx",decision="unavailable"} 1
-ghcr_proxy_requests_total{action="push",code="4xx",decision="denied"} 1
-ghcr_proxy_requests_total{action="pull",code="2xx",decision="allowed"} 1
-ghcr_proxy_requests_total{action="unknown",code="4xx",decision="notfound"} 1
+# HELP registrygate_requests_total Requests served, by action, decision and status class.
+# TYPE registrygate_requests_total counter
+registrygate_requests_total{action="none",code="4xx",decision="unauthenticated"} 1
+registrygate_requests_total{action="pull",code="4xx",decision="unauthenticated"} 1
+registrygate_requests_total{action="pull",code="5xx",decision="unavailable"} 1
+registrygate_requests_total{action="push",code="4xx",decision="denied"} 1
+registrygate_requests_total{action="pull",code="2xx",decision="allowed"} 1
+registrygate_requests_total{action="unknown",code="4xx",decision="notfound"} 1
 `
 
 	var compareErr error
 
 	require.Eventually(t, func() bool {
-		compareErr = testutil.GatherAndCompare(proxyMetrics.Gatherer(), strings.NewReader(expected), "ghcr_proxy_requests_total")
+		compareErr = testutil.GatherAndCompare(proxyMetrics.Gatherer(), strings.NewReader(expected), "registrygate_requests_total")
 		return compareErr == nil
 	}, 10*time.Second, 10*time.Millisecond, "%v", compareErr)
 }

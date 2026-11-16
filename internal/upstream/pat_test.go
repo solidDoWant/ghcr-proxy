@@ -12,8 +12,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/solidDoWant/ghcr-proxy/internal/metrics"
-	"github.com/solidDoWant/ghcr-proxy/internal/upstream"
+	"github.com/solidDoWant/registrygate/internal/metrics"
+	"github.com/solidDoWant/registrygate/internal/upstream"
 )
 
 func TestPATFileLoading(t *testing.T) {
@@ -78,9 +78,9 @@ func TestPATReloadsAreCountedByResult(t *testing.T) {
 	holder.Reload()
 
 	require.NoError(t, testutil.GatherAndCompare(proxyMetrics.Gatherer(), strings.NewReader(`
-# HELP ghcr_proxy_credential_reloads_total Credential file reloads, by kind and result.
-# TYPE ghcr_proxy_credential_reloads_total counter
-ghcr_proxy_credential_reloads_total{kind="pat",result="error"} 1
-ghcr_proxy_credential_reloads_total{kind="pat",result="ok"} 1
-`), "ghcr_proxy_credential_reloads_total"))
+# HELP registrygate_credential_reloads_total Credential file reloads, by kind and result.
+# TYPE registrygate_credential_reloads_total counter
+registrygate_credential_reloads_total{kind="pat",result="error"} 1
+registrygate_credential_reloads_total{kind="pat",result="ok"} 1
+`), "registrygate_credential_reloads_total"))
 }

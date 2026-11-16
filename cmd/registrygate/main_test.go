@@ -19,19 +19,19 @@ func TestRun(t *testing.T) {
 			name:       "version flag prints the version and succeeds",
 			args:       []string{"--version"},
 			wantCode:   0,
-			wantStdout: "ghcr-proxy 0.0.0-dev\n",
+			wantStdout: "registrygate 0.0.0-dev\n",
 		},
 		{
 			name:       "config flag is accepted",
 			args:       []string{"--config", "/tmp/config.yaml", "--version"},
 			wantCode:   0,
-			wantStdout: "ghcr-proxy 0.0.0-dev\n",
+			wantStdout: "registrygate 0.0.0-dev\n",
 		},
 		{
 			name:       "missing config file fails before serving",
 			args:       []string{"--config", "/nonexistent/config.yaml"},
 			wantCode:   1,
-			wantStdout: "ghcr-proxy 0.0.0-dev\n",
+			wantStdout: "registrygate 0.0.0-dev\n",
 			wantStderr: "read config",
 		},
 		{

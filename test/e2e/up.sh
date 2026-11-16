@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Prepares the e2e environment on the kind cluster E2E_CLUSTER (default
-# ghcr-proxy-e2e, created with test/e2e/kind-config.yaml, ImageVolume on): the
+# registrygate-e2e, created with test/e2e/kind-config.yaml, ImageVolume on): the
 # proxy and credential helper images built for the host architecture and
 # loaded into kind, together with the fake GHCR image. The tests install the
 # fake GHCR and the proxy chart themselves, because the chart needs the PAT and
@@ -9,12 +9,12 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
-cluster="${E2E_CLUSTER:-ghcr-proxy-e2e}"
+cluster="${E2E_CLUSTER:-registrygate-e2e}"
 node_image="mirror.gcr.io/kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5"
 tag="e2e"
-proxy_image="ghcr.io/soliddowant/ghcr-proxy:${tag}"
-helper_image="ghcr.io/soliddowant/ghcr-proxy-credential-helper:${tag}"
-fake_image="ghcr.io/soliddowant/ghcr-proxy-fakeghcr:dev"
+proxy_image="ghcr.io/soliddowant/registrygate:${tag}"
+helper_image="ghcr.io/soliddowant/registrygate-credential-helper:${tag}"
+fake_image="ghcr.io/soliddowant/registrygate-fakeghcr:dev"
 arch="$(go env GOARCH)"
 env_file="build/e2e/${cluster}.env"
 mkdir -p build/e2e
@@ -28,8 +28,8 @@ fi
 
 log "building the images for linux/${arch}"
 mkdir -p "build/images/${arch}"
-CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -ldflags="-s -w -X main.version=${tag}" -o "build/images/${arch}/ghcr-proxy" ./cmd/ghcr-proxy
-CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -ldflags="-s -w -X main.version=${tag}" -o "build/images/${arch}/docker-credential-ghcr-proxy" ./cmd/docker-credential-ghcr-proxy
+CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -ldflags="-s -w -X main.version=${tag}" -o "build/images/${arch}/registrygate" ./cmd/registrygate
+CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -ldflags="-s -w -X main.version=${tag}" -o "build/images/${arch}/docker-credential-registrygate" ./cmd/docker-credential-registrygate
 docker buildx build --platform "linux/${arch}" --file Dockerfile --tag "$proxy_image" --load . >&2
 docker buildx build --platform "linux/${arch}" --file Dockerfile.credential-helper --tag "$helper_image" --load . >&2
 

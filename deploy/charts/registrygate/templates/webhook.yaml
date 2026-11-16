@@ -1,18 +1,18 @@
 {{- if .Values.webhook.enabled }}
-{{- $name := printf "%s-webhook" (include "ghcr-proxy.fullname" .) }}
+{{- $name := printf "%s-webhook" (include "registrygate.fullname" .) }}
 {{- $issuer := .Values.webhook.certManager.issuerRef }}
 apiVersion: v1
 kind: Service
 metadata:
   name: {{ $name }}
   labels:
-    {{- include "ghcr-proxy.labels" . | nindent 4 }}
+    {{- include "registrygate.labels" . | nindent 4 }}
 spec:
   type: ClusterIP
   # A replica that is not ready still answers admission requests, which need only the config and the certificate.
   publishNotReadyAddresses: true
   selector:
-    {{- include "ghcr-proxy.selectorLabels" . | nindent 4 }}
+    {{- include "registrygate.selectorLabels" . | nindent 4 }}
   ports:
     - name: webhook
       port: 443
@@ -24,9 +24,9 @@ kind: Certificate
 metadata:
   name: {{ $name }}
   labels:
-    {{- include "ghcr-proxy.labels" . | nindent 4 }}
+    {{- include "registrygate.labels" . | nindent 4 }}
 spec:
-  secretName: {{ include "ghcr-proxy.webhookSecretName" . }}
+  secretName: {{ include "registrygate.webhookSecretName" . }}
   dnsNames:
     - {{ $name }}.{{ .Release.Namespace }}.svc
     - {{ $name }}.{{ .Release.Namespace }}.svc.cluster.local
@@ -41,13 +41,13 @@ kind: ValidatingWebhookConfiguration
 metadata:
   name: {{ $name }}
   labels:
-    {{- include "ghcr-proxy.labels" . | nindent 4 }}
+    {{- include "registrygate.labels" . | nindent 4 }}
   {{- if $issuer.name }}
   annotations:
     cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ $name }}
   {{- end }}
 webhooks:
-  - name: ghcraccesspolicies.ghcr-proxy.soliddowant.dev
+  - name: ghcraccesspolicies.registrygate.soliddowant.dev
     admissionReviewVersions: ["v1"]
     sideEffects: None
     failurePolicy: Fail
@@ -63,7 +63,7 @@ webhooks:
       caBundle: {{ required "webhook.caBundle is required when you provide webhook.existingSecret" .Values.webhook.caBundle | quote }}
       {{- end }}
     rules:
-      - apiGroups: ["ghcr-proxy.soliddowant.dev"]
+      - apiGroups: ["registrygate.soliddowant.dev"]
         apiVersions: ["v1alpha1"]
         resources: ["ghcraccesspolicies"]
         operations: ["CREATE", "UPDATE"]

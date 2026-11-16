@@ -12,17 +12,17 @@ import (
 
 	"github.com/opencontainers/go-digest"
 
-	"github.com/solidDoWant/ghcr-proxy/internal/audit"
-	"github.com/solidDoWant/ghcr-proxy/internal/authn"
-	"github.com/solidDoWant/ghcr-proxy/internal/authz"
-	"github.com/solidDoWant/ghcr-proxy/internal/metrics"
-	"github.com/solidDoWant/ghcr-proxy/internal/registry"
+	"github.com/solidDoWant/registrygate/internal/audit"
+	"github.com/solidDoWant/registrygate/internal/authn"
+	"github.com/solidDoWant/registrygate/internal/authz"
+	"github.com/solidDoWant/registrygate/internal/metrics"
+	"github.com/solidDoWant/registrygate/internal/registry"
 )
 
 // Fixed client-facing messages of the pipeline.
 const (
 	messageUnauthorized      = "authentication required"
-	messageNotReady          = "ghcr-proxy is not ready"
+	messageNotReady          = "registrygate is not ready"
 	messageReviewUnavailable = "token review unavailable"
 )
 

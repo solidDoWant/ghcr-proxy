@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds the two images for linux/amd64 and linux/arm64 (`make build-images`):
-#   - ghcr.io/soliddowant/ghcr-proxy:$VERSION from Dockerfile (the proxy);
-#   - ghcr.io/soliddowant/ghcr-proxy-credential-helper:$VERSION from
+#   - ghcr.io/soliddowant/registrygate:$VERSION from Dockerfile (the proxy);
+#   - ghcr.io/soliddowant/registrygate-credential-helper:$VERSION from
 #     Dockerfile.credential-helper (the credential helper alone, FROM scratch).
 # Without PUSH_ALL=true the images for the host architecture are loaded into
 # the local Docker daemon; PUSH_ALL=true pushes the multi-arch images
@@ -17,8 +17,8 @@ ldflags="-s -w -X main.version=${version}"
 
 # name of the binary (and of its cmd/ directory), image, Dockerfile.
 images=(
-	"ghcr-proxy ghcr.io/soliddowant/ghcr-proxy:${version} Dockerfile"
-	"docker-credential-ghcr-proxy ghcr.io/soliddowant/ghcr-proxy-credential-helper:${version} Dockerfile.credential-helper"
+	"registrygate ghcr.io/soliddowant/registrygate:${version} Dockerfile"
+	"docker-credential-registrygate ghcr.io/soliddowant/registrygate-credential-helper:${version} Dockerfile.credential-helper"
 )
 
 for entry in "${images[@]}"; do

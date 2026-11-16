@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/runtime"
 
-	"github.com/solidDoWant/ghcr-proxy/api/v1alpha1"
+	"github.com/solidDoWant/registrygate/api/v1alpha1"
 )
 
 func TestAddToSchemeRegistersTheAccessPolicyKinds(t *testing.T) {
@@ -27,7 +27,7 @@ func TestAddToSchemeRegistersTheAccessPolicyKinds(t *testing.T) {
 			kinds, _, err := scheme.ObjectKinds(test.object)
 			require.NoError(t, err)
 			require.Len(t, kinds, 1)
-			assert.Equal(t, "ghcr-proxy.soliddowant.dev", kinds[0].Group)
+			assert.Equal(t, "registrygate.soliddowant.dev", kinds[0].Group)
 			assert.Equal(t, "v1alpha1", kinds[0].Version)
 			assert.Equal(t, test.kind, kinds[0].Kind)
 		})

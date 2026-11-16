@@ -23,9 +23,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/solidDoWant/ghcr-proxy/internal/registry"
-	"github.com/solidDoWant/ghcr-proxy/internal/upstream"
-	"github.com/solidDoWant/ghcr-proxy/test/fakeghcr"
+	"github.com/solidDoWant/registrygate/internal/registry"
+	"github.com/solidDoWant/registrygate/internal/upstream"
+	"github.com/solidDoWant/registrygate/test/fakeghcr"
 )
 
 // recordingTransport keeps a copy of every outbound request's URL and headers.
@@ -271,7 +271,7 @@ func TestForwarderAnonymousPullNeverUsesThePAT(t *testing.T) {
 		defer func() { _ = resp.Body.Close() }()
 
 		assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
-		assert.Equal(t, []string{`Basic realm="ghcr-proxy"`}, resp.Header.Values("WWW-Authenticate"))
+		assert.Equal(t, []string{`Basic realm="registrygate"`}, resp.Header.Values("WWW-Authenticate"))
 
 		for _, entry := range fake.Log() {
 			assert.NotEqual(t, fakeghcr.CredPATToken, entry.Credential)

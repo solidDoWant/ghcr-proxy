@@ -15,9 +15,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/solidDoWant/ghcr-proxy/internal/metrics"
-	"github.com/solidDoWant/ghcr-proxy/internal/registry"
-	"github.com/solidDoWant/ghcr-proxy/test/fakeghcr"
+	"github.com/solidDoWant/registrygate/internal/metrics"
+	"github.com/solidDoWant/registrygate/internal/registry"
+	"github.com/solidDoWant/registrygate/test/fakeghcr"
 )
 
 // withAPI sends deletes by digest to the REST API at apiURL.
@@ -162,11 +162,11 @@ func TestDeleteByDigestRecordsRESTCallsUnderTheAPITarget(t *testing.T) {
 	require.Equal(t, http.StatusAccepted, status, body)
 
 	require.NoError(t, testutil.GatherAndCompare(proxyMetrics.Gatherer(), strings.NewReader(`
-# HELP ghcr_proxy_upstream_requests_total Requests sent to the upstream or a mirror, by status class.
-# TYPE ghcr_proxy_upstream_requests_total counter
-ghcr_proxy_upstream_requests_total{code="2xx",target="api"} 2
-ghcr_proxy_upstream_requests_total{code="4xx",target="api"} 1
-`), "ghcr_proxy_upstream_requests_total"))
+# HELP registrygate_upstream_requests_total Requests sent to the upstream or a mirror, by status class.
+# TYPE registrygate_upstream_requests_total counter
+registrygate_upstream_requests_total{code="2xx",target="api"} 2
+registrygate_upstream_requests_total{code="4xx",target="api"} 1
+`), "registrygate_upstream_requests_total"))
 }
 
 func TestDeleteByDigestOutsideThePolicyGetsNoPATBackedAccess(t *testing.T) {

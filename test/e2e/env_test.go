@@ -30,7 +30,7 @@ import (
 )
 
 const (
-	proxyNamespace  = "ghcr-proxy-system"
+	proxyNamespace  = "registrygate-system"
 	fakeNamespace   = "fake-ghcr"
 	ciNamespace     = "ci-foo"
 	proxyClusterIP  = "10.96.0.50" // the address in docs/admin/ci-pods.md
@@ -124,7 +124,7 @@ func (e *env) setup(ctx context.Context) error {
 	// A cluster kept from an earlier run holds an old PAT and CA: start clean.
 	// This includes the release of the docs walk-through, which owns the CRD.
 	for _, namespace := range []string{proxyNamespace, docsProxyNS} {
-		if out, err := exec.CommandContext(ctx, "helm", "uninstall", "ghcr-proxy", "--kube-context", e.kubeContext, "--namespace", namespace, "--ignore-not-found", "--wait").CombinedOutput(); err != nil {
+		if out, err := exec.CommandContext(ctx, "helm", "uninstall", "registrygate", "--kube-context", e.kubeContext, "--namespace", namespace, "--ignore-not-found", "--wait").CombinedOutput(); err != nil {
 			return fmt.Errorf("helm uninstall: %w\n%s", err, out)
 		}
 	}
@@ -266,7 +266,7 @@ func newProxyCA() (caPEM, certPEM, keyPEM []byte, err error) {
 	}
 
 	caTemplate := &x509.Certificate{
-		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "ghcr-proxy e2e CA"},
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "registrygate e2e CA"},
 		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(24 * time.Hour),
 		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign,
 		PermittedDNSDomains: []string{"ghcr.io"}, PermittedDNSDomainsCritical: true,
@@ -361,7 +361,7 @@ func (e *env) installProxy(ctx context.Context, extraHelmArgs ...string) error {
 	}
 
 	tag := e.proxyImage[strings.LastIndex(e.proxyImage, ":")+1:]
-	args := []string{"upgrade", "--install", "ghcr-proxy", filepath.Join(e.repoRoot, "deploy/charts/ghcr-proxy"),
+	args := []string{"upgrade", "--install", "registrygate", filepath.Join(e.repoRoot, "deploy/charts/registrygate"),
 		"--kube-context", e.kubeContext, "--namespace", proxyNamespace,
 		"--set", "image.tag=" + tag, "--set", "image.pullPolicy=Never",
 		"--set", "pat.existingSecret=pat", "--set", "tls.existingSecret=tls",
@@ -461,7 +461,7 @@ func (e *env) ciPod(storageIP string) (corev1.Pod, error) {
 func (e *env) setupCI(ctx context.Context) error {
 	// Docker follows the blob redirect with the TLS settings of ghcr.io, so the
 	// CA of the fake's storage host goes into the same file.
-	if err := e.secret(ctx, ciNamespace, "ghcr-proxy-ca", "Opaque", map[string][]byte{"ca.crt": append(append([]byte{}, e.proxyCA...), e.fakeCA...)}); err != nil {
+	if err := e.secret(ctx, ciNamespace, "registrygate-ca", "Opaque", map[string][]byte{"ca.crt": append(append([]byte{}, e.proxyCA...), e.fakeCA...)}); err != nil {
 		return err
 	}
 
@@ -485,7 +485,7 @@ apiVersion: v1
 kind: ServiceAccount
 metadata: {name: builder, namespace: %[1]s}
 ---
-apiVersion: ghcr-proxy.soliddowant.dev/v1alpha1
+apiVersion: registrygate.soliddowant.dev/v1alpha1
 kind: GHCRAccessPolicy
 metadata: {name: builder, namespace: %[1]s}
 spec:

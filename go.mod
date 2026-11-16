@@ -1,4 +1,4 @@
-module github.com/solidDoWant/ghcr-proxy
+module github.com/solidDoWant/registrygate
 
 go 1.26.11
 

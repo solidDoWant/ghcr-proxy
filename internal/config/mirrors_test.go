@@ -18,8 +18,8 @@ mirrors:
   policy:
     url: https://harbor.example.com
     pathPrefix: ghcr
-    credentialsFile: /var/run/ghcr-proxy/mirror-policy/credentials
-    caFile: /var/run/ghcr-proxy/mirror-policy-ca/ca.crt
+    credentialsFile: /var/run/registrygate/mirror-policy/credentials
+    caFile: /var/run/registrygate/mirror-policy-ca/ca.crt
   anonymous:
     url: http://harbor.example.com:8080/
     pathPrefix: proxy/ghcr
@@ -32,8 +32,8 @@ mirrors:
 	require.NotNil(t, policy)
 	assert.Equal(t, "https://harbor.example.com", policy.URL.String())
 	assert.Equal(t, "ghcr", policy.PathPrefix)
-	assert.Equal(t, "/var/run/ghcr-proxy/mirror-policy/credentials", policy.CredentialsFile)
-	assert.Equal(t, "/var/run/ghcr-proxy/mirror-policy-ca/ca.crt", policy.CAFile)
+	assert.Equal(t, "/var/run/registrygate/mirror-policy/credentials", policy.CredentialsFile)
+	assert.Equal(t, "/var/run/registrygate/mirror-policy-ca/ca.crt", policy.CAFile)
 	assert.True(t, policy.FallbackToUpstream)
 	assert.Equal(t, 10*time.Second, policy.ResponseHeaderTimeout)
 

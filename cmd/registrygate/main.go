@@ -1,4 +1,4 @@
-// Command ghcr-proxy is the authenticating reverse proxy for ghcr.io.
+// Command registrygate is the authenticating reverse proxy for ghcr.io.
 package main
 
 import (
@@ -22,24 +22,24 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 
-	"github.com/solidDoWant/ghcr-proxy/api/v1alpha1"
-	"github.com/solidDoWant/ghcr-proxy/internal/audit"
-	"github.com/solidDoWant/ghcr-proxy/internal/authn"
-	"github.com/solidDoWant/ghcr-proxy/internal/authz"
-	"github.com/solidDoWant/ghcr-proxy/internal/config"
-	"github.com/solidDoWant/ghcr-proxy/internal/metrics"
-	"github.com/solidDoWant/ghcr-proxy/internal/mirror"
-	"github.com/solidDoWant/ghcr-proxy/internal/registry"
-	"github.com/solidDoWant/ghcr-proxy/internal/server"
-	"github.com/solidDoWant/ghcr-proxy/internal/upstream"
-	"github.com/solidDoWant/ghcr-proxy/internal/webhook"
+	"github.com/solidDoWant/registrygate/api/v1alpha1"
+	"github.com/solidDoWant/registrygate/internal/audit"
+	"github.com/solidDoWant/registrygate/internal/authn"
+	"github.com/solidDoWant/registrygate/internal/authz"
+	"github.com/solidDoWant/registrygate/internal/config"
+	"github.com/solidDoWant/registrygate/internal/metrics"
+	"github.com/solidDoWant/registrygate/internal/mirror"
+	"github.com/solidDoWant/registrygate/internal/registry"
+	"github.com/solidDoWant/registrygate/internal/server"
+	"github.com/solidDoWant/registrygate/internal/upstream"
+	"github.com/solidDoWant/registrygate/internal/webhook"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
 var version = "0.0.0-dev"
 
 // defaultConfigPath is where the chart mounts the rendered config file.
-const defaultConfigPath = "/etc/ghcr-proxy/config.yaml"
+const defaultConfigPath = "/etc/registrygate/config.yaml"
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
@@ -50,7 +50,7 @@ func main() {
 
 // run parses args, serves until ctx ends, and returns the process exit code.
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	flags := flag.NewFlagSet("ghcr-proxy", flag.ContinueOnError)
+	flags := flag.NewFlagSet("registrygate", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 
 	configPath := flags.String("config", defaultConfigPath, "Path to the YAML config file.")
@@ -60,7 +60,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	_, _ = fmt.Fprintf(stdout, "ghcr-proxy %s\n", version)
+	_, _ = fmt.Fprintf(stdout, "registrygate %s\n", version)
 
 	if *showVersion {
 		return 0
@@ -68,14 +68,14 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "ghcr-proxy: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "registrygate: %v\n", err)
 		return 1
 	}
 
 	logger := slog.New(slog.NewJSONHandler(stderr, nil))
 
 	if err := serve(ctx, cfg, logger); err != nil {
-		logger.Error("ghcr-proxy stopped", "error", err.Error())
+		logger.Error("registrygate stopped", "error", err.Error())
 		return 1
 	}
 

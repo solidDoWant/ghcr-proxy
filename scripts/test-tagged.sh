@@ -5,7 +5,7 @@
 # while no such file exists.
 #
 #   scripts/test-tagged.sh integration
-#   E2E_CLUSTER=ghcr-proxy-12 scripts/test-tagged.sh e2e
+#   E2E_CLUSTER=registrygate-12 scripts/test-tagged.sh e2e
 #   GHCR_LIVE_PAT_FILE=... GHCR_LIVE_OWNER=... scripts/test-tagged.sh live
 #
 # GO_TEST_JSON=file also writes the `go test -json` events there
@@ -46,7 +46,7 @@ if [[ "$tag" == e2e ]]; then
 	if ! docker info >/dev/null 2>&1; then
 		echo "test-e2e: Docker is not available; the e2e tests skip" >&2
 	else
-		export E2E_CLUSTER="${E2E_CLUSTER:-ghcr-proxy-e2e}"
+		export E2E_CLUSTER="${E2E_CLUSTER:-registrygate-e2e}"
 		created=true
 		if kind get clusters 2>/dev/null | grep -qx "$E2E_CLUSTER"; then created=false; fi
 		# shellcheck disable=SC2329 # runs through the EXIT trap

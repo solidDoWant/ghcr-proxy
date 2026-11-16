@@ -11,7 +11,7 @@ rules:
   verbs:
   - create
 - apiGroups:
-  - ghcr-proxy.soliddowant.dev
+  - registrygate.soliddowant.dev
   resources:
   - ghcraccesspolicies
   verbs:
@@ -19,7 +19,7 @@ rules:
   - list
   - watch
 - apiGroups:
-  - ghcr-proxy.soliddowant.dev
+  - registrygate.soliddowant.dev
   resources:
   - ghcraccesspolicies/status
   verbs:

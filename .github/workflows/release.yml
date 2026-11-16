@@ -2,10 +2,10 @@ name: release
 
 # A version tag v<version>, pushed by the release-manager on a master commit
 # after `make release VERSION=<version>` (the dry run) passed, publishes:
-#   - the images ghcr.io/soliddowant/ghcr-proxy:<version> and
-#     ghcr.io/soliddowant/ghcr-proxy-credential-helper:<version> (linux/amd64
+#   - the images ghcr.io/soliddowant/registrygate:<version> and
+#     ghcr.io/soliddowant/registrygate-credential-helper:<version> (linux/amd64
 #     and linux/arm64; plus :latest for a final version);
-#   - the Helm chart oci://ghcr.io/soliddowant/charts/ghcr-proxy;
+#   - the Helm chart oci://ghcr.io/soliddowant/charts/registrygate;
 #   - the GitHub release v<version>, with the CHANGELOG.md section of the
 #     version as its notes.
 on:
@@ -51,14 +51,14 @@ jobs:
           case "$VERSION" in
             *-*) ;;
             *)
-              nix develop -c crane tag "ghcr.io/soliddowant/ghcr-proxy:$VERSION" latest
-              nix develop -c crane tag "ghcr.io/soliddowant/ghcr-proxy-credential-helper:$VERSION" latest
+              nix develop -c crane tag "ghcr.io/soliddowant/registrygate:$VERSION" latest
+              nix develop -c crane tag "ghcr.io/soliddowant/registrygate-credential-helper:$VERSION" latest
               ;;
           esac
       - name: Push the chart
         run: |
-          nix develop -c helm package deploy/charts/ghcr-proxy --version "$VERSION" --app-version "$VERSION" --destination build/chart
-          nix develop -c helm push "build/chart/ghcr-proxy-$VERSION.tgz" oci://ghcr.io/soliddowant/charts
+          nix develop -c helm package deploy/charts/registrygate --version "$VERSION" --app-version "$VERSION" --destination build/chart
+          nix develop -c helm push "build/chart/registrygate-$VERSION.tgz" oci://ghcr.io/soliddowant/charts
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

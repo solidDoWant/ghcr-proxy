@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	docsChartRef     = "oci://ghcr.io/soliddowant/charts/ghcr-proxy"
-	docsProxyNS      = "ghcr-proxy"
+	docsChartRef     = "oci://ghcr.io/soliddowant/charts/registrygate"
+	docsProxyNS      = "registrygate"
 	docsUpstreamCA   = "upstream-ca"
 	docsBlockTimeout = 10 * time.Minute
 )
@@ -103,7 +103,7 @@ if [ "$swapped" = 1 ]; then
   args+=(--values %q)
 fi
 exec %q "${args[@]}"
-`, docsChartRef, filepath.Join(cluster.repoRoot, "deploy/charts/ghcr-proxy"), overlay, realHelm)
+`, docsChartRef, filepath.Join(cluster.repoRoot, "deploy/charts/registrygate"), overlay, realHelm)
 
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "helm"), []byte(script), 0o755))
 }
@@ -113,7 +113,7 @@ exec %q "${args[@]}"
 func docsReset(ctx context.Context, t *testing.T) {
 	t.Helper()
 
-	for _, release := range [][2]string{{"ghcr-proxy", proxyNamespace}, {"ghcr-proxy", docsProxyNS}, {"cert-manager", "cert-manager"}} {
+	for _, release := range [][2]string{{"registrygate", proxyNamespace}, {"registrygate", docsProxyNS}, {"cert-manager", "cert-manager"}} {
 		out, err := exec.CommandContext(ctx, "helm", "uninstall", release[0], "--kube-context", cluster.kubeContext, "--namespace", release[1], "--ignore-not-found", "--wait").CombinedOutput()
 		require.NoError(t, err, string(out))
 	}
@@ -161,7 +161,7 @@ func TestAdminDocsWalkThroughEndsWithWorkingDockerPush(t *testing.T) {
 	require.NotEmpty(t, blocks)
 
 	for number, block := range blocks {
-		if strings.Contains(block, "helm install ghcr-proxy") {
+		if strings.Contains(block, "helm install registrygate") {
 			require.NoError(t, cluster.secret(ctx, docsProxyNS, docsUpstreamCA, "Opaque", map[string][]byte{"ca.crt": cluster.fakeCA}))
 		}
 

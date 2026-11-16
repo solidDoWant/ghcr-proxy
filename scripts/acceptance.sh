@@ -29,7 +29,7 @@ mkdir -p "$results"
 # created is deleted afterwards unless KEEP_CLUSTER=1. Without Docker those
 # tests skip. The live tests skip unless GHCR_LIVE_PAT_FILE is set (operator only).
 if docker info >/dev/null 2>&1; then
-	export E2E_CLUSTER="${E2E_CLUSTER:-ghcr-proxy-e2e}"
+	export E2E_CLUSTER="${E2E_CLUSTER:-registrygate-e2e}"
 	created=true
 	if kind get clusters 2>/dev/null | grep -qx "$E2E_CLUSTER"; then created=false; fi
 	# shellcheck disable=SC2329 # runs through the EXIT trap

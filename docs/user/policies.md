@@ -9,7 +9,7 @@ A `GHCRAccessPolicy` says which ServiceAccounts in its namespace can pull, push 
 The policy lives in the namespace of the pod. It lists ServiceAccounts of that namespace and the rules for them.
 
 ```yaml
-apiVersion: ghcr-proxy.soliddowant.dev/v1alpha1
+apiVersion: registrygate.soliddowant.dev/v1alpha1
 kind: GHCRAccessPolicy
 metadata:
   name: builder
@@ -45,7 +45,7 @@ When the proxy denies a push or a delete, Docker shows `403` with the code `DENI
 
 If Docker shows another error, check this list:
 
-- `401`: The pod has no valid ServiceAccount token. The token must have the audience `ghcr-proxy`. Ask your admin to check the pod setup.
+- `401`: The pod has no valid ServiceAccount token. The token must have the audience `registrygate`. Ask your admin to check the pod setup.
 - `503`: The proxy is not ready or cannot review tokens. Try again.
 - `502`: The proxy cannot get a credential from GHCR or cannot reach GHCR. Ask your admin.
 

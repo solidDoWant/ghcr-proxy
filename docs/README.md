@@ -1,8 +1,8 @@
-# ghcr-proxy documentation
+# registrygate documentation
 
 For: anyone who wants to find the right page. You need to know nothing yet.
 
-ghcr-proxy has four kinds of readers. Each page is for one of them. This page says who the readers are, which pages are theirs, and what each page covers.
+registrygate has four kinds of readers. Each page is for one of them. This page says who the readers are, which pages are theirs, and what each page covers.
 
 ## Who reads these docs
 
@@ -27,7 +27,7 @@ The owner reads the acceptance checklists, the release notes and the status repo
 Every page under `docs/` is listed here. `make docs-check` fails when a page is missing from this list.
 
 ```
-README.md                  The front door: what ghcr-proxy is and its status.
+README.md                  The front door: what registrygate is and its status.
 SPEC.md                    The rules of the system. For developers and agents.
 CHANGELOG.md               The release notes.
 

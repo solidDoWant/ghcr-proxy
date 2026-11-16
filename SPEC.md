@@ -2,7 +2,7 @@
 
 registrygate is an authenticating, transparent reverse proxy for container registries. It runs in a Kubernetes cluster and stands in for registries such as `ghcr.io` and `quay.io` inside CI pods. Pods authenticate with their own Kubernetes ServiceAccount token. Namespaced custom resources declare which upstream registries the proxy stands in for, which credentials a namespace may push with, which pull-through mirror (for example a Harbor proxy-cache project) serves its pulls, and what each ServiceAccount may do. Pods never see an upstream or mirror credential.
 
-The project was called ghcr-proxy up to 0.2.x and served only `ghcr.io`. Phases 1 and 2 below were built under that name. Phase 3 generalizes it (issue #98) and renames it.
+The project was called registrygate up to 0.2.x and served only `ghcr.io`. Phases 1 and 2 below were built under that name. Phase 3 generalizes it (issue #98) and renames it.
 
 This file is the authoritative reference. Each phase is done when its checklist in `docs/acceptance/` passes (see "Phases").
 
@@ -227,8 +227,8 @@ It is a static Go binary (`CGO_ENABLED=0`) shipped alone in the image `ghcr.io/s
 
 Each phase ends with a release an admin can deploy. The owner deploys it in their own time; deploying never blocks a phase.
 
-1. **Done (0.1.x, as ghcr-proxy).** Push and pull through the proxy for `ghcr.io`.
-2. **Done (0.2.0, as ghcr-proxy).** Delete, mirrors and operations.
+1. **Done (0.1.x, as registrygate).** Push and pull through the proxy for `ghcr.io`.
+2. **Done (0.2.0, as registrygate).** Delete, mirrors and operations.
 3. **registrygate** (`docs/acceptance/phase-3.md`). The rename, the four custom resources, several upstreams by SNI, upstream auth by challenge, credentials with ceilings, per-namespace mirrors with tenant-owned Secrets, Secret watching, generic upload sessions and delete, path canonicalization, the credential helper's host list and `configure`, status, webhook, metrics, audit, chart and docs. Release 0.3.0: images `ghcr.io/soliddowant/registrygate:<version>` and `ghcr.io/soliddowant/registrygate-credential-helper:<version>`, chart `oci://ghcr.io/soliddowant/charts/registrygate`.
 
 Each phase's design (`docs/design/phase-N.md`) is reviewed before its issues are scheduled.

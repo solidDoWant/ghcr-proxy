@@ -11,8 +11,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/solidDoWant/ghcr-proxy/internal/filewatch"
-	"github.com/solidDoWant/ghcr-proxy/internal/metrics"
+	"github.com/solidDoWant/registrygate/internal/filewatch"
+	"github.com/solidDoWant/registrygate/internal/metrics"
 )
 
 // errPATEmpty is a PAT file holding only whitespace.

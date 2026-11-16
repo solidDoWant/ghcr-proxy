@@ -12,11 +12,11 @@ import (
 
 const (
 	// DefaultTokenFile is where the pod's projected ServiceAccount token is mounted.
-	DefaultTokenFile = "/var/run/secrets/ghcr-proxy/token"
+	DefaultTokenFile = "/var/run/secrets/registrygate/token"
 	// TokenFileEnv names the environment variable that overrides DefaultTokenFile.
-	TokenFileEnv = "GHCR_PROXY_TOKEN_FILE"
+	TokenFileEnv = "REGISTRYGATE_TOKEN_FILE"
 	// Username is the username returned with the token; the proxy ignores it.
-	Username = "ghcr-proxy"
+	Username = "registrygate"
 
 	registryHost = "ghcr.io"
 )
@@ -40,7 +40,7 @@ func (h Helper) Get(serverURL string) (string, string, error) {
 
 	// The message carries only the path: never the file's contents or the underlying error.
 	if err != nil || token == "" {
-		return "", "", fmt.Errorf("ghcr-proxy credential helper: token file %s is missing or empty", h.TokenFile)
+		return "", "", fmt.Errorf("registrygate credential helper: token file %s is missing or empty", h.TokenFile)
 	}
 
 	return Username, token, nil
