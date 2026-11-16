@@ -81,7 +81,7 @@ A namespace is admitted when it is the object's own namespace, is in `names`, or
 
 | Kind | Who writes it, where | Spec |
 |---|---|---|
-| `UpstreamRegistry` | admin, **admin namespaces only** | `hosts` (DNS names the proxy answers for), `url` (where requests go), `caSecretRef` (optional, to trust the upstream), `tls.secretRef` (serving certificate: `tls.crt`, `tls.key`; its SANs must cover every host), `tokenRealmHosts` (optional; hosts allowed as the token endpoint besides the `url` host), `defaultMirrorRef` (optional), `allowedMirrorURLs` (URL prefixes a mirror of this upstream may use), `timeouts`, `allowedNamespaces` (who may point credentials, mirrors and policies at it) |
+| `UpstreamRegistry` | admin, **admin namespaces only** | `hosts` (DNS names the proxy answers for), `url` (where requests go), `caSecretRef` (optional, to trust the upstream), `tls.secretRef` (serving certificate: `tls.crt`, `tls.key`; its SANs must cover every host), `tokenRealmHosts` (optional; hosts allowed as the token endpoint besides the `url` host), `anonymousPulls` (`Challenge`, the default, or `Forward`; see "Resolution"), `defaultMirrorRef` (optional), `allowedMirrorURLs` (URL prefixes a mirror of this upstream may use), `timeouts`, `allowedNamespaces` (who may point credentials, mirrors and policies at it) |
 | `UpstreamCredential` | admin or tenant, any namespace | `upstreamRef`, `secretRef` (`name`; keys `username` and `password` by default, or `usernameKey` / `passwordKey`), `ceiling` (list of `{repositories, actions}`: the most any policy may do with it), `allowedNamespaces` |
 | `RegistryMirror` | admin or tenant, any namespace | `upstreamRef`, `url`, `pathPrefix`, `secretRef` (optional, same key rules), `caSecretRef` (optional), `fallbackToUpstream` (default `true`), `timeouts`, `allowedNamespaces` |
 | `RegistryAccessPolicy` | tenant, its own namespace | `serviceAccounts` (in this namespace only), `rules` (below) |
@@ -96,7 +96,7 @@ A namespace is admitted when it is the object's own namespace, is in `names`, or
 
 Repository patterns are globs: `*` matches within one path segment, `**` across segments. A rule's upstream is the one its credential or mirror points at. A credential rule is **accepted** only if every repository pattern for every action is contained in the credential's ceiling for that action (the existing containment check; when in doubt, not contained). Rules have no order.
 
-**Status.** Every kind has `observedGeneration` and a `Ready` condition with a reason (`Ready`, `NotAllowed`, `RefNotFound`, `SecretUnavailable`, `SecretInvalid`, `HostConflict`, `CertificateMismatch`, `URLNotAllowed`). `RegistryAccessPolicy` status also has `rules[]`, keyed by `name`, each with conditions: `Accepted` (`True`, or `False` with `OutsideCeiling`, `NotAllowed`, `RefNotFound`, `RefNotReady`). An unaccepted rule is ignored; the rest of the policy still applies.
+**Status.** Every kind has `observedGeneration` and a `Ready` condition with a reason (`Ready`, `InvalidSpec`, `NotAllowed`, `RefNotFound`, `RefNotReady`, `SecretUnavailable`, `SecretInvalid`, `HostConflict`, `CertificateMismatch`, `URLNotAllowed`, `RulesNotAccepted`). `RegistryAccessPolicy` status also has `rules[]`, keyed by `name`, each with conditions: `Accepted` (`True`, or `False` with `OutsideCeiling`, `NotAllowed`, `RefNotFound`, `RefNotReady`). An unaccepted rule is ignored; the rest of the policy still applies.
 
 ### Secrets
 
@@ -129,21 +129,22 @@ Repository patterns are globs: `*` matches within one path segment, `**` across 
 
 Repository names are parsed with the distribution reference grammar and compared lower-cased.
 
-**Upload sessions.** The upload `Location` an upstream returns is opaque and differs between registries (GHCR uses `/v2/<name>/blobs/upload/<session>`). The proxy gives the client its own session URL, `/v2/<name>/blobs/uploads/<token>`, where `<token>` encodes the upstream's `Location` path and query. When a request comes in on such a URL, the proxy decodes it and refuses it (`404 BLOB_UPLOAD_UNKNOWN`) unless the upstream URL has the upstream's origin and a path under `/v2/<name>/blobs/` for the same `<name>`. The session is checked against policy as `push` on `<name>`.
+**Upload sessions.** The upload `Location` an upstream returns is opaque and differs between registries (GHCR uses `/v2/<name>/blobs/upload/<session>`). The proxy gives the client its own session URL, `/v2/<name>/blobs/uploads/<token>`, where `<token>` encodes the upstream's `Location` path and query and is signed with HMAC-SHA-256 over the upstream, `<name>` and that path, with a key from a Secret all replicas share. When a request comes in on such a URL, the proxy checks the signature and refuses it (`404 BLOB_UPLOAD_UNKNOWN`) unless it matches and the upstream path stays under `/v2/<name>/blobs/` for the same `<name>`. The session is checked against policy as `push` on `<name>`.
 
 ### Resolution
 
 For a request to host `H`, repository `R` and action `A`:
 
 1. The upstream `U` is the ready `UpstreamRegistry` that claims `H`.
-2. If the caller is a ServiceAccount, the **candidates** are the accepted rules, in policies in the caller's namespace that name its ServiceAccount, whose upstream is `U`, whose repositories match `R`, and whose actions include `A`. A credential rule is a candidate only if its credential is ready; a mirror rule only if its mirror is ready.
+2. If the caller is a ServiceAccount, the **candidates** are the accepted rules, in policies in the caller's namespace that name its ServiceAccount, whose upstream is `U`, whose repositories match `R`, and whose actions include `A`. A credential rule is a candidate only if its credential is ready. A mirror rule whose mirror isn't ready is still a candidate, and that mirror counts as failed (see "Mirrors"), so a tenant's `fallbackToUpstream: false` is kept.
 3. **Precedence:** for a pull, credential rules win over mirror rules (private content needs the credential; mirrors are for public content).
 4. **Ambiguity:** if the remaining candidates name more than one distinct credential, or more than one distinct mirror, the request is denied: `403 DENIED` with a message naming the policies and rules. Candidates that name the same credential or mirror simply combine.
 5. **One candidate target:**
    - credential: forwarded to `U` with that credential (pulls too: credentialed pulls never go to a mirror);
    - mirror: a pull of a manifest or blob goes to the mirror; a tag list or referrers request goes to `U` anonymously.
 6. **No candidate:**
-   - pull: to `U`'s `defaultMirrorRef` if it is set and ready, else to `U` anonymously;
+   - an anonymous request (no `Authorization`) to an upstream with `anonymousPulls: Challenge` (the default): `401` with the Basic challenge, for pulls too. BuildKit and containerd try anonymously first, so this is what makes them send their ServiceAccount token, and with it lets per-namespace mirrors see their pulls;
+   - pull (authenticated, or anonymous with `anonymousPulls: Forward`): to `U`'s `defaultMirrorRef` if it is set and ready, else to `U` anonymously;
    - push or delete by a ServiceAccount: `403 DENIED` naming the namespace, ServiceAccount, repository and action; nothing is sent;
    - push or delete by an anonymous caller: `401` with the Basic challenge, so Docker retries with its credential.
 7. **Mounts** use the credential chosen for `push` on `<name>`. If `pull` on `<other>` doesn't resolve to that same credential, or the parameters are malformed or repeated, `mount` and `from` are dropped and the upstream answers with an ordinary upload session.
