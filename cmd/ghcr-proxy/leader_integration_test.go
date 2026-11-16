@@ -82,6 +82,8 @@ func writeSelfSigned(t *testing.T, dir string) (string, string) {
 
 type proxyUnderTest struct {
 	env    *envtest.Environment
+	// outageDone, when set, is waited on before the environment is stopped.
+	outageDone chan struct{}
 	health string
 	stderr *syncBuffer
 	done   chan int
@@ -99,7 +101,14 @@ func startProxy(t *testing.T, ctx context.Context) *proxyUnderTest {
 	}
 	_, err := env.Start()
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = env.Stop() })
+	proxy := &proxyUnderTest{env: env}
+	t.Cleanup(func() {
+		if proxy.outageDone != nil {
+			<-proxy.outageDone
+		}
+
+		_ = env.Stop()
+	})
 
 	user, err := env.ControlPlane.AddUser(envtest.User{Name: "admin", Groups: []string{"system:masters"}}, nil)
 	require.NoError(t, err)
@@ -140,7 +149,7 @@ grants:
 	t.Setenv("KUBECONFIG", filepath.Join(dir, "kubeconfig"))
 	t.Setenv("POD_NAMESPACE", "default")
 
-	proxy := &proxyUnderTest{env: env, health: health, stderr: &syncBuffer{}, done: make(chan int, 1), k8s: k8s}
+	proxy.health, proxy.stderr, proxy.done, proxy.k8s = health, &syncBuffer{}, make(chan int, 1), k8s
 
 	go func() {
 		proxy.done <- run(ctx, []string{"--config", filepath.Join(dir, "config.yaml")}, &bytes.Buffer{}, proxy.stderr)
@@ -183,7 +192,13 @@ func TestLeaderKeepsServingThroughAPIServerOutage(t *testing.T) {
 		30*time.Second, 200*time.Millisecond, "never became leader")
 
 	// The API server stops listening at once but may linger on open watch connections; the outage starts then.
-	go func() { _ = proxy.env.ControlPlane.APIServer.Stop() }()
+	proxy.outageDone = make(chan struct{})
+
+	go func() {
+		defer close(proxy.outageDone)
+
+		_ = proxy.env.ControlPlane.APIServer.Stop()
+	}()
 
 	stoppedAt := time.Now()
 
