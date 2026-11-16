@@ -14,21 +14,21 @@ The phase 2 design review (#63) is answered in this text.
   - The anonymous public pull uses one fixed, already-public image, read-only: `ghcr.io/soliddowant/ghcr-proxy:0.1.0`. No other package is listed, read, changed or deleted, and visibility is never changed.
   - Tests never print the PAT or tokens; failures show status codes and registry error codes only.
   - Packages left by a killed run are removed by hand by the operator, never by a later run.
-- **First live issue:** record in `docs/dev/ghcr-behaviour.md` what GHCR answers for `DELETE /v2/<name>/manifests/<digest>`, `DELETE /v2/<name>/manifests/<tag>` and `DELETE /v2/<name>/blobs/<digest>`; which scopes its token endpoint accepts for delete (`delete`, `*`, `pull,push,delete`); and `expires_in`. The operator then amends section 2 with the result (a design PR). The delete implementation issue stays blocked until that PR merges.
+- **First live issue:** record in `docs/dev/ghcr-behaviour.md` what GHCR answers for `DELETE /v2/<name>/manifests/<digest>`, `DELETE /v2/<name>/manifests/<tag>` and `DELETE /v2/<name>/blobs/<digest>`; which scopes its token endpoint accepts for delete (`delete`, `*`, `pull,push,delete`); and `expires_in`. The operator then amends section 2 with the result (a design PR). Done on 2026-11-16.
 
 ## 2. Delete
 
-**The path is chosen once, from the live results, not at runtime.** The operator's amendment fills in this table:
+**The path was chosen once, from the operator's live run on 2026-11-16 (`docs/dev/ghcr-behaviour.md`), not at runtime.** GHCR answers `405 UNSUPPORTED` to every registry delete endpoint, whatever the token's scope:
 
 | Route | Path | Upstream token scope |
 |---|---|---|
-| `DELETE /v2/<name>/manifests/<digest>` | `OCI` or `REST` (from the live results) | (from the live results) |
-| `DELETE /v2/<name>/manifests/<tag>` | OCI, GHCR's answer passed through | (from the live results) |
-| `DELETE /v2/<name>/blobs/<digest>` | OCI, GHCR's answer passed through | (from the live results) |
+| `DELETE /v2/<name>/manifests/<digest>` | `REST` (below). No registry `DELETE` is ever sent to GHCR for it. | none (the REST call uses the PAT directly) |
+| `DELETE /v2/<name>/manifests/<tag>` | registry, GHCR's answer passed through (today `405 UNSUPPORTED`) | `repository:<name>:delete` |
+| `DELETE /v2/<name>/blobs/<digest>` | registry, GHCR's answer passed through (today `405 UNSUPPORTED`) | `repository:<name>:delete` |
 
-For OCI paths, phase 1's rules apply unchanged: an upstream `401` is retried once, then answered `502 "upstream rejected the proxy's credential"`. A refusal (`405`, or `UNSUPPORTED`) from the registry is passed through to the client. A `401` is never a reason to switch to REST.
+For the registry paths, phase 1's rules apply unchanged: an upstream `401` is retried once, then answered `502 "upstream rejected the proxy's credential"`. A refusal (`405`, or `UNSUPPORTED`) is passed through to the client. A `401` is never a reason to switch to REST. Deleting by tag stays unsupported, as `SPEC.md`'s "Won't do" list allows.
 
-**REST path** for `DELETE /v2/<owner>/<package...>/manifests/<digest>` when the table says `REST`:
+**REST path** for `DELETE /v2/<owner>/<package...>/manifests/<digest>`:
 
 1. **Name check.** A `<name>` with fewer than two segments gets `404 NAME_UNKNOWN`, with no REST call.
 2. **Owner type.** Try the `orgs` versions listing first. A `404` there means the owner is a user, so retry with `users`. The result is cached for an hour (successes only; errors are never cached). There is no separate `GET /users/<owner>` call.
