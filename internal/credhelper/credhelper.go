@@ -5,6 +5,7 @@ package credhelper
 import (
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/docker/docker-credential-helpers/credentials"
@@ -18,20 +19,23 @@ const (
 	// Username is the username returned with the token; the proxy ignores it.
 	Username = "registrygate"
 
-	registryHost = "ghcr.io"
+	// HostsEnv names the environment variable that lists the registry hosts the helper serves.
+	HostsEnv = "REGISTRYGATE_HOSTS"
 )
 
-// Helper is a credentials.Helper that serves only ghcr.io.
+// Helper is a credentials.Helper that serves only the listed hosts.
 type Helper struct {
+	// Hosts are the normalized hosts the helper answers for (see ParseHosts). Empty means no host.
+	Hosts []string
 	// TokenFile is the path of the token file, read on every Get.
 	TokenFile string
 }
 
 var _ credentials.Helper = Helper{}
 
-// Get returns the token for ghcr.io, or "credentials not found" for any other server.
+// Get returns the token for a listed host, or "credentials not found" for any other server.
 func (h Helper) Get(serverURL string) (string, string, error) {
-	if !isGHCR(serverURL) {
+	if !h.serves(serverURL) {
 		return "", "", credentials.NewErrCredentialsNotFound()
 	}
 
@@ -55,11 +59,32 @@ func (Helper) Delete(string) error { return nil }
 // List returns no stored credentials.
 func (Helper) List() (map[string]string, error) { return map[string]string{}, nil }
 
-// isGHCR reports whether serverURL is ghcr.io, with or without a scheme and path.
-func isGHCR(serverURL string) bool {
-	rest := strings.TrimSpace(serverURL)
+// serves reports whether serverURL names one of the helper's hosts.
+func (h Helper) serves(serverURL string) bool {
+	host := NormalizeHost(serverURL)
+
+	return host != "" && slices.Contains(h.Hosts, host)
+}
+
+// NormalizeHost lower-cases a server and strips an https scheme, any path and a trailing ":443".
+func NormalizeHost(server string) string {
+	rest := strings.ToLower(strings.TrimSpace(server))
 	rest = strings.TrimPrefix(rest, "https://")
 	host, _, _ := strings.Cut(rest, "/")
 
-	return host == registryHost
+	return strings.TrimSuffix(host, ":443")
+}
+
+// ParseHosts splits a comma-separated host list into normalized, non-empty, unique hosts.
+func ParseHosts(list string) []string {
+	var hosts []string
+
+	for _, item := range strings.Split(list, ",") {
+		host := NormalizeHost(item)
+		if host != "" && !slices.Contains(hosts, host) {
+			hosts = append(hosts, host)
+		}
+	}
+
+	return hosts
 }

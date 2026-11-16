@@ -34,7 +34,7 @@ func get(t *testing.T, helper credentials.Helper, server string) (string, error)
 }
 
 func TestGetAnswersOnlyForGHCR(t *testing.T) {
-	helper := credhelper.Helper{TokenFile: writeToken(t, "tok-1\n")}
+	helper := credhelper.Helper{Hosts: []string{"ghcr.io"}, TokenFile: writeToken(t, "tok-1\n")}
 
 	tests := []struct {
 		server   string
@@ -70,7 +70,7 @@ func TestGetAnswersOnlyForGHCR(t *testing.T) {
 
 func TestGetReadsReplacedTokenFile(t *testing.T) {
 	path := writeToken(t, "old-token")
-	helper := credhelper.Helper{TokenFile: path}
+	helper := credhelper.Helper{Hosts: []string{"ghcr.io"}, TokenFile: path}
 
 	out, err := get(t, helper, "ghcr.io")
 	require.NoError(t, err)
@@ -97,7 +97,7 @@ func TestGetFailsOnMissingOrEmptyTokenFile(t *testing.T) {
 
 	for name, path := range tests {
 		t.Run(name, func(t *testing.T) {
-			out, err := get(t, credhelper.Helper{TokenFile: path}, "ghcr.io")
+			out, err := get(t, credhelper.Helper{Hosts: []string{"ghcr.io"}, TokenFile: path}, "ghcr.io")
 			require.EqualError(t, err, "registrygate credential helper: token file "+path+" is missing or empty")
 			assert.Empty(t, out)
 		})
@@ -105,7 +105,7 @@ func TestGetFailsOnMissingOrEmptyTokenFile(t *testing.T) {
 }
 
 func TestStoreEraseAndListDoNothing(t *testing.T) {
-	helper := credhelper.Helper{TokenFile: writeToken(t, "tok")}
+	helper := credhelper.Helper{Hosts: []string{"ghcr.io"}, TokenFile: writeToken(t, "tok")}
 
 	var out bytes.Buffer
 	require.NoError(t, credentials.HandleCommand(helper, credentials.ActionStore,
@@ -117,4 +117,99 @@ func TestStoreEraseAndListDoNothing(t *testing.T) {
 
 	require.NoError(t, credentials.HandleCommand(helper, credentials.ActionList, strings.NewReader(""), &out))
 	assert.JSONEq(t, `{}`, out.String())
+}
+
+func TestGetAnswersOnlyForListedHosts(t *testing.T) {
+	helper := credhelper.Helper{TokenFile: writeToken(t, "tok"), Hosts: credhelper.ParseHosts("ghcr.io,quay.io")}
+
+	tests := []struct {
+		server   string
+		notFound bool
+	}{
+		{server: "ghcr.io"},
+		{server: "https://quay.io/v2/"},
+		{server: "quay.io:443"},
+		{server: "QUAY.io"},
+		{server: "docker.io", notFound: true},
+		{server: "quay.io:5000", notFound: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.server, func(t *testing.T) {
+			_, err := get(t, helper, test.server)
+			if test.notFound {
+				require.Error(t, err)
+				assert.True(t, credentials.IsErrCredentialsNotFound(err))
+
+				return
+			}
+
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestGetAnswersNothingWithoutHosts(t *testing.T) {
+	for _, list := range []string{"", " , "} {
+		helper := credhelper.Helper{TokenFile: writeToken(t, "tok"), Hosts: credhelper.ParseHosts(list)}
+		_, err := get(t, helper, "ghcr.io")
+		assert.True(t, credentials.IsErrCredentialsNotFound(err))
+	}
+}
+
+func TestConfigureMergesIntoExistingConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	require.NoError(t, os.WriteFile(path,
+		[]byte(`{"auths":{"x.io":{"auth":"abc"}},"credHelpers":{"other.io":"foo","ghcr.io":"old"}}`), 0o644))
+
+	require.NoError(t, credhelper.ConfigureFile(path, []string{"ghcr.io", "quay.io"}))
+
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"auths":{"x.io":{"auth":"abc"}},`+
+		`"credHelpers":{"other.io":"foo","ghcr.io":"registrygate","quay.io":"registrygate"}}`, string(raw))
+}
+
+func TestConfigureCreatesFileAndDirectoryPrivately(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "new", ".docker")
+	path := filepath.Join(dir, "config.json")
+
+	require.NoError(t, credhelper.ConfigureFile(path, []string{"ghcr.io"}))
+
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+
+	info, err = os.Stat(dir)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o700), info.Mode().Perm())
+}
+
+func TestConfigureLeavesInvalidFilesUntouched(t *testing.T) {
+	tests := map[string]string{
+		"array":             `[1]`,
+		"null":              `null`,
+		"text":              `nope`,
+		"credHelpers array": `{"credHelpers":["a"]}`,
+		"credHelpers null":  `{"credHelpers":null}`,
+	}
+
+	for name, content := range tests {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+			require.Error(t, credhelper.ConfigureFile(path, []string{"ghcr.io"}))
+
+			raw, err := os.ReadFile(path)
+			require.NoError(t, err)
+			assert.Equal(t, content, string(raw))
+		})
+	}
+}
+
+func TestConfigureRejectsNoHosts(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	require.Error(t, credhelper.ConfigureFile(path, nil))
+	assert.NoFileExists(t, path)
 }

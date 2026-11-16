@@ -9,7 +9,8 @@ A CI pod pushes and pulls with the normal image name `ghcr.io/<owner>/<image>`. 
 - A `hostAliases` entry that maps `ghcr.io` to the fixed ClusterIP of the proxy Service (the value of `service.clusterIP`).
 - A projected volume `registrygate-token`. It holds a ServiceAccount token with the audience `registrygate` and `expirationSeconds: 3600`, in the file `token`. Mount it at `/var/run/secrets/registrygate` in the container that runs the Docker CLI.
 - An image volume from `ghcr.io/soliddowant/registrygate-credential-helper`, mounted at `/opt/registrygate/bin` in the same container. Add that directory to `PATH` of the container.
-- The file `~/.docker/config.json` with `{"credHelpers":{"ghcr.io":"registrygate"}}`. The setup of the step writes it.
+- The environment variable `REGISTRYGATE_HOSTS=ghcr.io` in the container that runs the Docker CLI. The helper gives the token only to the hosts in this comma-separated list. For any other host, it answers "credentials not found".
+- The file `~/.docker/config.json` with `{"credHelpers":{"ghcr.io":"registrygate"}}`. The setup of the step writes it. Run `docker-credential-registrygate configure` to do this: it adds one `credHelpers` entry for each host in `REGISTRYGATE_HOSTS` and keeps the other keys of the file. It exits with status 1 if no host is listed or if the file is not a JSON object.
 - The CA certificate at `/etc/docker/certs.d/ghcr.io/ca.crt` in the Docker daemon container (dind). The daemon makes the registry connections, so the CA belongs there and not in the CLI container.
 - A `GHCRAccessPolicy` in the namespace of the pod that names the ServiceAccount of the pod. See [how to write a policy](../user/policies.md).
 
@@ -66,6 +67,9 @@ spec:
   containers:
     - name: docker
       image: ${DOCKER_CLI_IMAGE}
+      env:
+        - name: REGISTRYGATE_HOSTS
+          value: ghcr.io
       command: [sh, -c]
       args:
         - |
@@ -77,6 +81,8 @@ spec:
       env:
         - name: DOCKER_HOST
           value: tcp://localhost:2375
+        - name: REGISTRYGATE_HOSTS
+          value: ghcr.io
         - name: PATH
           value: /opt/registrygate/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       volumeMounts:
