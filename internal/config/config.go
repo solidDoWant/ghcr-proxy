@@ -32,7 +32,26 @@ type Config struct {
 	Listen         Listen
 	Server         Server
 	Audit          Audit
+	Mirrors        Mirrors
 	Webhook        Webhook
+}
+
+// Mirrors holds the optional pull mirrors. A nil mirror is not configured.
+type Mirrors struct {
+	Policy    *Mirror
+	Anonymous *Mirror
+}
+
+// Mirror is one pull mirror: a registry that serves GHCR's content under
+// PathPrefix. Its credentials come from CredentialsFile only, never from the
+// PAT.
+type Mirror struct {
+	URL                   *url.URL
+	PathPrefix            string
+	CredentialsFile       string
+	CAFile                string
+	FallbackToUpstream    bool
+	ResponseHeaderTimeout time.Duration
 }
 
 // Upstream describes the registry the proxy forwards to.
@@ -122,12 +141,25 @@ type rawConfig struct {
 	Audit struct {
 		Enabled *bool `json:"enabled"`
 	} `json:"audit"`
+	Mirrors struct {
+		Policy    *rawMirror `json:"policy"`
+		Anonymous *rawMirror `json:"anonymous"`
+	} `json:"mirrors"`
 	Webhook struct {
 		Enabled  bool   `json:"enabled"`
 		Listen   string `json:"listen"`
 		CertFile string `json:"certFile"`
 		KeyFile  string `json:"keyFile"`
 	} `json:"webhook"`
+}
+
+type rawMirror struct {
+	URL                   string `json:"url"`
+	PathPrefix            string `json:"pathPrefix"`
+	CredentialsFile       string `json:"credentialsFile"`
+	CAFile                string `json:"caFile"`
+	FallbackToUpstream    *bool  `json:"fallbackToUpstream"`
+	ResponseHeaderTimeout string `json:"responseHeaderTimeout"`
 }
 
 // Load reads and validates the config file at path. The error lists every
@@ -240,6 +272,43 @@ func Parse(data []byte) (*Config, error) {
 	if raw.Audit.Enabled != nil {
 		cfg.Audit.Enabled = *raw.Audit.Enabled
 	}
+
+	mirror := func(field string, rm *rawMirror) *Mirror {
+		if rm == nil {
+			return nil
+		}
+
+		m := &Mirror{
+			PathPrefix:         rm.PathPrefix,
+			CredentialsFile:    rm.CredentialsFile,
+			CAFile:             rm.CAFile,
+			FallbackToUpstream: true,
+		}
+
+		if u, err := parseMirrorURL(rm.URL); err != nil {
+			addf("%s.url: %w", field, err)
+		} else {
+			m.URL = u
+		}
+
+		if err := validatePathPrefix(rm.PathPrefix); err != nil {
+			addf("%s.pathPrefix: %w", field, err)
+		}
+
+		if rm.CredentialsFile != "" && sameFile(rm.CredentialsFile, cfg.Upstream.PATFile) {
+			addf("%s.credentialsFile: %q is the PAT file; a mirror must have its own credentials", field, rm.CredentialsFile)
+		}
+
+		if rm.FallbackToUpstream != nil {
+			m.FallbackToUpstream = *rm.FallbackToUpstream
+		}
+
+		m.ResponseHeaderTimeout = duration(field+".responseHeaderTimeout", rm.ResponseHeaderTimeout, "10s", positive, "must be positive")
+
+		return m
+	}
+	cfg.Mirrors.Policy = mirror("mirrors.policy", raw.Mirrors.Policy)
+	cfg.Mirrors.Anonymous = mirror("mirrors.anonymous", raw.Mirrors.Anonymous)
 
 	if len(errs) > 0 {
 		return nil, fmt.Errorf("invalid config:\n%w", joinLines(errs))

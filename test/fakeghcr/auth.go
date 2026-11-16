@@ -101,6 +101,10 @@ func writeUnauthorized(resp http.ResponseWriter, challenge string) {
 // credentialOf classifies the request's credential without judging whether it
 // is enough.
 func (f *Fake) credentialOf(req *http.Request) (Credential, *grant) {
+	if f.bearerIsPAT(req) {
+		return CredPATBearer, nil
+	}
+
 	if token, found := strings.CutPrefix(req.Header.Get("Authorization"), "Bearer "); found {
 		if g := f.tokens.lookup(token); g != nil {
 			return g.cred, g

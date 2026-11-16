@@ -56,6 +56,45 @@ upstream:
   timeout: 30m
   # -- Timeout of one upstream token exchange.
   tokenTimeout: 10s
+mirrors:
+  policy:
+    # -- URL of the policy pull mirror, with a scheme, a host and an optional port only. Empty turns this mirror off. Allowed pulls of manifests and blobs go to this mirror.
+    url: ""
+    # -- Path under which the mirror serves GHCR's repositories. The mirror name of `owner/image` is `<pathPrefix>/owner/image`.
+    pathPrefix: ""
+    credentials:
+      # -- Name of a Secret with the mirror's own credentials as `user:password`. Empty means the proxy connects to the mirror with no credentials. Never put the PAT here.
+      existingSecret: ""
+      # -- Key in that Secret that holds the credentials.
+      key: credentials
+    ca:
+      # -- Name of a Secret with an extra CA certificate (PEM) to trust for the mirror, next to the system roots.
+      existingSecret: ""
+      # -- Key in that Secret that holds the CA certificate.
+      key: ca.crt
+    # -- Send the pull to the upstream when the mirror fails.
+    fallbackToUpstream: true
+    # -- How long the proxy waits for the mirror's response headers before it counts the mirror as failed.
+    responseHeaderTimeout: 10s
+  anonymous:
+    # -- URL of the anonymous pull mirror, with a scheme, a host and an optional port only. Empty turns this mirror off. Anonymous and not-allowed pulls of manifests and blobs go to this mirror. It must have no upstream credentials, because anyone who can reach the proxy can read through it.
+    url: ""
+    # -- Path under which the mirror serves GHCR's repositories. The mirror name of `owner/image` is `<pathPrefix>/owner/image`.
+    pathPrefix: ""
+    credentials:
+      # -- Name of a Secret with the mirror's own credentials as `user:password`. Empty means the proxy connects to the mirror with no credentials. Never put the PAT here.
+      existingSecret: ""
+      # -- Key in that Secret that holds the credentials.
+      key: credentials
+    ca:
+      # -- Name of a Secret with an extra CA certificate (PEM) to trust for the mirror, next to the system roots.
+      existingSecret: ""
+      # -- Key in that Secret that holds the CA certificate.
+      key: ca.crt
+    # -- Send the pull to the upstream when the mirror fails.
+    fallbackToUpstream: true
+    # -- How long the proxy waits for the mirror's response headers before it counts the mirror as failed.
+    responseHeaderTimeout: 10s
 authentication:
   # -- Audience that ServiceAccount tokens must carry.
   audience: ghcr-proxy

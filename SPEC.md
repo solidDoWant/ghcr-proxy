@@ -142,7 +142,7 @@ GHCR's support for the OCI `DELETE` endpoints is not documented. Phase 2 verifie
 
 ### Pull mirrors (phase 2)
 
-The config may name a **policy mirror** and an **anonymous mirror**, each `{url, pathPrefix, credentialsFile, fallbackToUpstream}`. Allowed pulls of manifests and blobs go to the policy mirror; anonymous and not-allowed pulls go to the anonymous mirror. Tag lists, referrers, pushes, deletes and mounts always go to the upstream. The PAT is never sent to a mirror; a mirror uses its own credentials. When a mirror fails (connection error, `5xx`, or a `404` for a manifest) and `fallbackToUpstream` is true (default), the request goes to the upstream as above.
+The config may name a **policy mirror** and an **anonymous mirror**, each `{url, pathPrefix, credentialsFile, caFile, fallbackToUpstream, responseHeaderTimeout}`. Allowed pulls of manifests and blobs go to the policy mirror; anonymous and not-allowed pulls go to the anonymous mirror. Tag lists, referrers, pushes, deletes and mounts always go to the upstream. The PAT is never sent to a mirror; a mirror uses its own credentials. When a mirror fails (connection error, `5xx`, or a `404` for a manifest) and `fallbackToUpstream` is true (default), the request goes to the upstream as above.
 
 Admins must configure the anonymous mirror with **no upstream credentials**; otherwise anonymous callers could read private images through it. The proxy can't check this; the admin docs say so prominently.
 
@@ -193,7 +193,7 @@ Each phase's design (`docs/design/phase-N.md`) is reviewed before its issues are
 ## 8. Testing
 
 - **Unit:** Go `testing` + `testify`, table-driven. Path parsing and action mapping, glob matching and containment, grant expansion, rewrites and the credential helper are unit-tested.
-- **Fake GHCR** (`test/fakeghcr`): an in-process registry built from `github.com/google/go-containerregistry/pkg/registry`, wrapped to behave like GHCR where it matters: bearer-token challenge with a `/token` endpoint that checks a PAT and enforces scopes, absolute `Location` URLs for uploads, `307` redirects for blob downloads to a separate storage host, public and private repositories. It is a test double, not product code.
+- **Fake GHCR** (`test/fakeghcr`): an in-process registry built from `github.com/google/go-containerregistry/pkg/registry`, wrapped to behave like GHCR where it matters: bearer-token challenge with a `/token` endpoint that checks a PAT and enforces scopes, absolute `Location` URLs for uploads, `307` redirects for blob downloads to a separate storage host, public and private repositories, and the GitHub REST endpoints that list and delete container package versions for users and organizations. It is a test double, not product code.
 - **Integration** (`//go:build integration`): envtest plus the proxy and the fake GHCR in-process; real `TokenReview` from envtest's API server.
 - **e2e** (`//go:build e2e`): kind with `ImageVolume` on, the proxy installed from the chart with a locally built image, the fake GHCR in the cluster, and a pod set up exactly as the admin guide says (hostAliases, `certs.d` CA, helper image volume, projected token, dind) running real `docker build`, `docker push` and `docker pull`.
 - **Live** (`//go:build live`): the same client flows against the real `ghcr.io`. **Never in CI.** The only PAT available belongs to the owner's main GitHub account, so the operator runs `make test-live` by hand outside CI, with `GHCR_LIVE_PAT_FILE` pointing at the token file; agents never get the token. Without the variable the tests skip. The tests touch only packages they create themselves (section 1 of `docs/design/phase-2.md`). Phase 2 uses them to settle the delete question.
@@ -215,7 +215,8 @@ internal/audit/                     audit log lines
 internal/credhelper/                credential helper logic
 config/crd/bases/, config/rbac/     generated
 deploy/charts/ghcr-proxy            Helm chart
-test/fakeghcr/, test/e2e/           fake GHCR, e2e harness and fixtures
+test/fakeghcr/, test/e2e/,          fake GHCR, e2e harness and fixtures,
+test/live/                          live tests against ghcr.io
 docs/                               user/ admin/ dev/ agents/ design/ acceptance/
 scripts/                            dev and agent scripts
 ```
