@@ -17,7 +17,7 @@ For: admins who install registrygate with its Helm chart.
 | `pat.existingSecret` | `""` | Name of the Secret that holds the GitHub personal access token. Required. The chart never creates it. |
 | `pat.key` | `token` | Key in that Secret that holds the token. |
 | `tls.existingSecret` | `""` | Name of the `kubernetes.io/tls` Secret with the serving certificate. Required. The chart never creates it. |
-| `webhook.enabled` | `false` | Serve the validating admission webhook that rejects policies outside the namespace's grant at apply time. The proxy still enforces the grant either way. |
+| `webhook.enabled` | `false` | Serve the validating admission webhook that rejects an `UpstreamRegistry` outside the admin namespaces, and a `RegistryAccessPolicy` rule outside the ceiling of its credential, at apply time. The proxy still enforces both either way. |
 | `webhook.existingSecret` | `""` | Name of the `kubernetes.io/tls` Secret with the webhook's serving certificate. Required when the webhook is on and `webhook.certManager.issuerRef.name` is empty. The chart never creates it. |
 | `webhook.caBundle` | `""` | Base64 CA bundle that signed the webhook certificate. Required when you provide `webhook.existingSecret`. |
 | `webhook.certManager.issuerRef.name` | `""` | Name of a cert-manager Issuer or ClusterIssuer. When set, the chart makes the certificate and cainjector adds the CA bundle (cainjector must run). |

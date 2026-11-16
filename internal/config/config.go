@@ -34,6 +34,8 @@ type Config struct {
 	Audit          Audit
 	Mirrors        Mirrors
 	Webhook        Webhook
+	// AdminNamespaces are the namespaces whose UpstreamRegistry objects count.
+	AdminNamespaces []string
 }
 
 // Mirrors holds the optional pull mirrors. A nil mirror is not configured.
@@ -151,7 +153,8 @@ type rawConfig struct {
 		Policy    *rawMirror `json:"policy"`
 		Anonymous *rawMirror `json:"anonymous"`
 	} `json:"mirrors"`
-	Webhook struct {
+	AdminNamespaces []string `json:"adminNamespaces"`
+	Webhook         struct {
 		Enabled  bool   `json:"enabled"`
 		Listen   string `json:"listen"`
 		CertFile string `json:"certFile"`
@@ -263,6 +266,7 @@ func Parse(data []byte) (*Config, error) {
 	cfg.Listen.HTTPS = orDefault(raw.Listen.HTTPS, ":8443")
 	cfg.Listen.Health = orDefault(raw.Listen.Health, ":8080")
 
+	cfg.AdminNamespaces = raw.AdminNamespaces
 	cfg.Webhook.Enabled = raw.Webhook.Enabled
 	cfg.Webhook.Listen = orDefault(raw.Webhook.Listen, ":9443")
 	cfg.Webhook.CertFile = orDefault(raw.Webhook.CertFile, "/var/run/registrygate/webhook-tls/tls.crt")
