@@ -93,12 +93,33 @@ func serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 
 	// A mirror whose files are missing or invalid is unavailable, not fatal: its pulls take the fallback rule.
 	var mirrorFiles []*mirror.Files
-	if cfg.Mirrors.Policy != nil {
-		mirrorFiles = append(mirrorFiles, mirror.NewFiles("policy", cfg.Mirrors.Policy, logger))
+
+	newMirror := func(name string, mirrorConfig *config.Mirror) (registry.MirrorClient, error) {
+		if mirrorConfig == nil {
+			return nil, nil
+		}
+
+		files := mirror.NewFiles(name, mirrorConfig, logger)
+		mirrorFiles = append(mirrorFiles, files)
+
+		client, err := mirror.NewClient(mirror.ClientConfig{
+			Mirror: mirrorConfig, Files: files, TokenTimeout: cfg.Upstream.TokenTimeout, Logger: logger,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("%s mirror: %w", name, err)
+		}
+
+		return client, nil
 	}
 
-	if cfg.Mirrors.Anonymous != nil {
-		mirrorFiles = append(mirrorFiles, mirror.NewFiles("anonymous", cfg.Mirrors.Anonymous, logger))
+	policyMirror, err := newMirror("policy", cfg.Mirrors.Policy)
+	if err != nil {
+		return err
+	}
+
+	anonymousMirror, err := newMirror("anonymous", cfg.Mirrors.Anonymous)
+	if err != nil {
+		return err
 	}
 
 	tokens, err := upstream.NewTokens(upstream.TokensConfig{
@@ -119,6 +140,9 @@ func serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		Tokens:    tokens,
 		Timeout:   cfg.Upstream.Timeout,
 		Logger:    logger,
+
+		PolicyMirror:    policyMirror,
+		AnonymousMirror: anonymousMirror,
 	})
 
 	restConfig, err := ctrl.GetConfig()

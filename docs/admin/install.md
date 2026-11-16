@@ -232,6 +232,12 @@ mirrors:
       existingSecret: ghcr-proxy-mirror-policy
 ```
 
+A mirror fails when the proxy cannot connect to it, when its response headers do not arrive in `responseHeaderTimeout`, or when it answers `5xx` or `404`. If `fallbackToUpstream` is `true`, the pull then goes to the upstream. If it is `false`, the client gets `502` with the message `mirror unavailable`, except for a `404`, which the client gets as is. A blob goes to the upstream only if the mirror failed before it sent the response headers.
+
+If the policy mirror answers `401` or `403`, or its token endpoint rejects the mirror credentials, the client gets `502` with the message `mirror unavailable`. The pull does not go to the upstream, because the mirror credentials are wrong and you must fix them. The same answers from the anonymous mirror give the client the normal request for credentials.
+
+A blob check (`HEAD` on a blob) always goes to the upstream. `docker push` uses it to decide which layers to upload, and a mirror can keep a blob that GHCR no longer has.
+
 The proxy reads the credentials and CA files at start. It reads them again when the Secrets change. If a file is missing or not valid at start, the proxy marks that mirror as unavailable and pulls take the fallback rule. Pulls never go to the other mirror. If a file becomes not valid later, the proxy keeps the last good value and logs an error.
 
 ## Turn on the admission webhook

@@ -16,15 +16,15 @@ Scenarios marked **(live)** run against the real `ghcr.io` through `make test-li
 ## Pull mirrors
 
 - **AC-2-04 Allowed pulls use the policy mirror.** With a policy mirror configured, an allowed pull of a private image is served from the mirror (the upstream sees no manifest or blob request for it), using the mirror's own credentials.
-  Tests:
+  Tests: `internal/registry: TestForwarderServesAllowedPullsFromThePolicyMirror`
 - **AC-2-05 Anonymous pulls use the anonymous mirror.** Anonymous and not-allowed pulls go to the anonymous mirror, never to the policy mirror.
-  Tests:
+  Tests: `internal/registry: TestForwarderServesAnonymousPullsFromTheAnonymousMirror`
 - **AC-2-06 Fallback.** With the mirror down or answering `5xx`, pulls fall back to the upstream; with `fallbackToUpstream: false` they fail with `502`.
-  Tests:
+  Tests: `internal/registry: TestForwarderFallsBackToTheUpstreamWhenTheMirrorFails`, `internal/registry: TestForwarderMapsMirrorLocationsBackToTheClientHost`
 - **AC-2-07 Pushes skip mirrors.** Pushes, deletes, tag lists and mounts go to the upstream even with mirrors configured.
-  Tests:
+  Tests: `internal/registry: TestForwarderSendsBlobChecksAndWritesToTheUpstreamOnly`
 - **AC-2-08 PAT never reaches a mirror.** No request to either mirror carries the PAT or a PAT-backed token.
-  Tests:
+  Tests: `internal/registry: TestForwarderNeverSendsThePATToAMirror`
 - **AC-2-09 Harbor as the mirror.** With a Harbor proxy-cache project for the fake GHCR as the policy mirror, a Docker pull in the e2e pod works and the second pull is served by Harbor.
   Tests:
 

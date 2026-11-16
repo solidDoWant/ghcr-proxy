@@ -15,6 +15,7 @@ const (
 	messageCredentialRejected = "upstream rejected the proxy's credential"
 	messageRealmNotAllowed    = "upstream token endpoint not allowed"
 	messageUnavailable        = "upstream unavailable"
+	messageMirrorUnavailable  = "mirror unavailable"
 	messageNotReady           = "ghcr-proxy is not ready"
 	messageManifestTooLarge   = "manifest too large"
 )
