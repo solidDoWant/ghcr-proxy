@@ -30,14 +30,15 @@ import (
 )
 
 const (
-	proxyNamespace = "ghcr-proxy-system"
-	fakeNamespace  = "fake-ghcr"
-	ciNamespace    = "ci-foo"
-	proxyClusterIP = "10.96.0.50" // the address in docs/admin/ci-pods.md
-	storageHost    = "pkg-containers.githubusercontent.com"
-	fakeRegistry   = "fakeghcr." + fakeNamespace + ".svc"
-	fakeStorageSvc = "fakeghcr-storage"
-	proxyMemory    = 256 << 20 // the chart's default memory limit
+	proxyNamespace  = "ghcr-proxy-system"
+	fakeNamespace   = "fake-ghcr"
+	ciNamespace     = "ci-foo"
+	proxyClusterIP  = "10.96.0.50" // the address in docs/admin/ci-pods.md
+	storageHost     = "pkg-containers.githubusercontent.com"
+	fakeRegistry    = "fakeghcr." + fakeNamespace + ".svc"
+	fakeStorageSvc  = "fakeghcr-storage"
+	harborNamespace = "harbor"
+	proxyMemory     = 256 << 20 // the chart's default memory limit
 
 	dockerCLIImage  = "mirror.gcr.io/library/docker:29.9.3-cli@sha256:5a7af0dcb0e46c803efe9b45371dd21cb500e5b4453250394ac6f06d49b6e6f1"
 	dockerDindImage = "mirror.gcr.io/library/docker:29.9.3-dind@sha256:7bf70dcb85c822e3fa6f2d332143e474b99147b9d7b39102b0cfe8b04a7dd61b"
@@ -308,19 +309,23 @@ func newProxyCA() (caPEM, certPEM, keyPEM []byte, err error) {
 		pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), nil
 }
 
-func (e *env) installProxy(ctx context.Context) error {
-	caPEM, certPEM, keyPEM, err := newProxyCA()
-	if err != nil {
-		return err
-	}
+// installProxy installs the chart; extraHelmArgs add values, for example a mirror.
+func (e *env) installProxy(ctx context.Context, extraHelmArgs ...string) error {
+	// A second install keeps the certificate: the CI pod already trusts its CA.
+	if e.proxyCA == nil {
+		caPEM, certPEM, keyPEM, err := newProxyCA()
+		if err != nil {
+			return err
+		}
 
-	e.proxyCA = caPEM
+		e.proxyCA = caPEM
+
+		if err := e.secret(ctx, proxyNamespace, "tls", "kubernetes.io/tls", map[string][]byte{"tls.crt": certPEM, "tls.key": keyPEM}); err != nil {
+			return err
+		}
+	}
 
 	if err := e.secret(ctx, proxyNamespace, "pat", "Opaque", map[string][]byte{"token": []byte(e.pat)}); err != nil {
-		return err
-	}
-
-	if err := e.secret(ctx, proxyNamespace, "tls", "kubernetes.io/tls", map[string][]byte{"tls.crt": certPEM, "tls.key": keyPEM}); err != nil {
 		return err
 	}
 
@@ -335,10 +340,15 @@ func (e *env) installProxy(ctx context.Context) error {
 		return err
 	}
 
-	extraEgress, err := json.Marshal([]map[string]any{{
-		"to":    []map[string]any{{"namespaceSelector": map[string]any{"matchLabels": map[string]string{"kubernetes.io/metadata.name": fakeNamespace}}}},
-		"ports": []map[string]any{{"protocol": "TCP", "port": 8443}},
-	}})
+	egressTo := func(namespace string, port int) map[string]any {
+		return map[string]any{
+			"to":    []map[string]any{{"namespaceSelector": map[string]any{"matchLabels": map[string]string{"kubernetes.io/metadata.name": namespace}}}},
+			"ports": []map[string]any{{"protocol": "TCP", "port": port}},
+		}
+	}
+
+	// Harbor's nginx listens on pod port 8080 behind its Service on port 80.
+	extraEgress, err := json.Marshal([]map[string]any{egressTo(fakeNamespace, 8443), egressTo(harborNamespace, 8080)})
 	if err != nil {
 		return err
 	}
@@ -351,26 +361,46 @@ func (e *env) installProxy(ctx context.Context) error {
 	}
 
 	tag := e.proxyImage[strings.LastIndex(e.proxyImage, ":")+1:]
-	cmd := exec.CommandContext(ctx, "helm", "upgrade", "--install", "ghcr-proxy", filepath.Join(e.repoRoot, "deploy/charts/ghcr-proxy"),
+	args := []string{"upgrade", "--install", "ghcr-proxy", filepath.Join(e.repoRoot, "deploy/charts/ghcr-proxy"),
 		"--kube-context", e.kubeContext, "--namespace", proxyNamespace,
-		"--set", "image.tag="+tag, "--set", "image.pullPolicy=Never",
+		"--set", "image.tag=" + tag, "--set", "image.pullPolicy=Never",
 		"--set", "pat.existingSecret=pat", "--set", "tls.existingSecret=tls",
-		"--set", "service.clusterIP="+proxyClusterIP,
-		"--set", "upstream.url=https://"+fakeRegistry,
+		"--set", "service.clusterIP=" + proxyClusterIP,
+		"--set", "upstream.url=https://" + fakeRegistry,
 		"--set", "upstream.ca.existingSecret=upstream-ca",
-		"--set-json", "grants="+string(grants),
+		"--set-json", "grants=" + string(grants),
 		"--set", "networkPolicy.enabled=true",
-		"--set", "networkPolicy.clientNamespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name="+ciNamespace,
-		"--set", "networkPolicy.apiServerCIDRs[0]="+strings.TrimSpace(apiServer)+"/32",
-		"--set-json", "networkPolicy.extraEgress="+string(extraEgress),
+		"--set", "networkPolicy.clientNamespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name=" + ciNamespace,
+		"--set", "networkPolicy.apiServerCIDRs[0]=" + strings.TrimSpace(apiServer) + "/32",
+		"--set-json", "networkPolicy.extraEgress=" + string(extraEgress),
 		"--set", "podDisruptionBudget.enabled=true",
-		"--wait", "--timeout", "5m")
+		"--wait", "--timeout", "5m"}
+	cmd := exec.CommandContext(ctx, "helm", append(args, extraHelmArgs...)...)
 
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("helm install: %w\n%s", err, out)
 	}
 
-	return nil
+	// After an upgrade the replaced pods are still shutting down. Later tests
+	// count the pods and send requests, so wait until only the new ones are left.
+	deadline := time.Now().Add(2 * time.Minute)
+
+	for {
+		pods, err := e.kubectl(ctx, "", "-n", proxyNamespace, "get", "pods", "-o", "name")
+		if err != nil {
+			return err
+		}
+
+		if len(strings.Fields(pods)) == 2 {
+			return nil
+		}
+
+		if time.Now().After(deadline) {
+			return fmt.Errorf("the replaced proxy pods did not terminate:\n%s", pods)
+		}
+
+		time.Sleep(time.Second)
+	}
 }
 
 // podImages are the images the admin guide leaves to the reader.
