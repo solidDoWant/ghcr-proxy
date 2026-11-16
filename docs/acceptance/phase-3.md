@@ -81,9 +81,9 @@ In the e2e scenarios, "a CI pod" is a pod with a dind sidecar set up exactly as 
 ## Client side
 
 - **AC-3-29 Credential helper hosts.** The helper answers `get` only for hosts in `REGISTRYGATE_HOSTS`, and answers "credentials not found" for any other.
-  Tests:
+  Tests: `internal/credhelper: TestGetAnswersOnlyForListedHosts`, `internal/credhelper: TestGetAnswersNothingWithoutHosts`
 - **AC-3-30 `configure`.** `docker-credential-registrygate configure` adds `credHelpers` entries for every listed host to an existing `config.json`, keeping its other keys, or creates it; `docker buildx build` works afterwards.
-  Tests:
+  Tests: `internal/credhelper: TestConfigureMergesIntoExistingConfig`, `internal/credhelper: TestConfigureCreatesFileAndDirectoryPrivately`, `internal/credhelper: TestConfigureLeavesInvalidFilesUntouched`, `internal/credhelper: TestConfigureRejectsNoHosts`
 
 ## Operations
 
