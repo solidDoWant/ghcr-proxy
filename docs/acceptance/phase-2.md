@@ -37,4 +37,4 @@ Scenarios marked **(live)** run against the real `ghcr.io` through `make test-li
 - **AC-2-12 Chart options.** Enabling the PodDisruptionBudget, NetworkPolicy and ServiceMonitor values renders working objects, and the e2e scenarios still pass with the NetworkPolicy on.
   Tests:
 - **AC-2-13 Docs walk-through.** Following `docs/admin/` from an empty kind cluster (cert-manager, a name-constrained CA, the chart, a CI pod) gets to a working `docker push`, scripted as an e2e test that uses only commands from the docs.
-  Tests:
+  Tests: `test/e2e: TestAdminDocsWalkThroughEndsWithWorkingDockerPush`

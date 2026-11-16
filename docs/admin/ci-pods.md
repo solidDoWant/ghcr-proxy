@@ -19,26 +19,61 @@ Pin the image digests of the helper and dind images in your own manifests.
 
 This pod runs the Docker CLI against a dind sidecar. The Secret `ghcr-proxy-ca` in the pod namespace holds the CA certificate in the key `ca.crt`. Copy it from the `ca.crt` of the proxy certificate Secret (see [Install ghcr-proxy](install.md#make-the-tls-certificate)).
 
-```yaml
+First make the namespace, the Secret with the CA certificate, the ServiceAccount and the policy. The policy lets the ServiceAccount push to `soliddowant/foo`. The grant in [Install ghcr-proxy](install.md#plan-the-grants) covers that repository for the namespace `ci-foo`.
+
+<!-- e2e -->
+```sh
+kubectl create namespace ci-foo
+kubectl -n ghcr-proxy get secret ghcr-proxy-tls -o jsonpath='{.data.ca\.crt}' | base64 -d > ca.crt
+kubectl -n ci-foo create secret generic ghcr-proxy-ca --from-file=ca.crt=./ca.crt
+kubectl -n ci-foo create serviceaccount builder
+kubectl apply -f - <<'EOF'
+apiVersion: ghcr-proxy.soliddowant.dev/v1alpha1
+kind: GHCRAccessPolicy
+metadata:
+  name: builder
+  namespace: ci-foo
+spec:
+  serviceAccounts: [builder]
+  rules:
+    - repositories: [soliddowant/foo]
+      actions: [pull, push]
+EOF
+```
+
+Set these variables to the images that you use. The pod below reads them. In your own manifests, write the images in the manifest:
+
+- `DOCKER_CLI_IMAGE`: an image with the Docker CLI.
+- `DOCKER_DIND_IMAGE`: an image with the Docker daemon.
+- `HELPER_IMAGE`: `ghcr.io/soliddowant/ghcr-proxy-credential-helper:<version>`, where `<version>` is a release of the proxy.
+
+The pod waits for the daemon, builds a small image and pushes it.
+
+<!-- e2e -->
+```sh
+kubectl apply -f - <<EOF
 apiVersion: v1
 kind: Pod
 metadata:
   name: build
   namespace: ci-foo
 spec:
+  restartPolicy: Never
   serviceAccountName: builder
   hostAliases:
     - ip: 10.96.0.50          # service.clusterIP of the proxy
       hostnames: [ghcr.io]
   containers:
     - name: docker
-      image: quay.io/example/docker-cli@sha256:...   # an image with the Docker CLI
+      image: ${DOCKER_CLI_IMAGE}
       command: [sh, -c]
       args:
         - |
           mkdir -p ~/.docker
           echo '{"credHelpers":{"ghcr.io":"ghcr-proxy"}}' > ~/.docker/config.json
-          docker build -t ghcr.io/soliddowant/foo:latest . && docker push ghcr.io/soliddowant/foo:latest
+          until docker info >/dev/null 2>&1; do sleep 1; done
+          printf 'FROM scratch\nLABEL built-by=ci\n' | docker build -t ghcr.io/soliddowant/foo:latest -
+          docker push ghcr.io/soliddowant/foo:latest
       env:
         - name: DOCKER_HOST
           value: tcp://localhost:2375
@@ -52,7 +87,7 @@ spec:
           mountPath: /opt/ghcr-proxy/bin
           readOnly: true
     - name: dind
-      image: quay.io/example/docker-dind@sha256:...   # an image with the Docker daemon
+      image: ${DOCKER_DIND_IMAGE}
       env:
         - name: DOCKER_TLS_CERTDIR
           value: ""
@@ -72,14 +107,22 @@ spec:
               path: token
     - name: credential-helper
       image:
-        reference: ghcr.io/soliddowant/ghcr-proxy-credential-helper:<version>
+        reference: ${HELPER_IMAGE}
         pullPolicy: IfNotPresent
     - name: ghcr-proxy-ca
       secret:
         secretName: ghcr-proxy-ca
+EOF
 ```
 
-Replace `<version>` with a release of the proxy. The helper image holds one file, `/docker-credential-ghcr-proxy`. Docker finds the helper by the name `docker-credential-ghcr-proxy` on `PATH`, and the config entry `ghcr-proxy` selects it.
+The push worked when the `docker` container ends with exit code 0:
+
+<!-- e2e -->
+```sh
+kubectl -n ci-foo wait --for=jsonpath='{.status.containerStatuses[?(@.name=="docker")].state.terminated.reason}'=Completed pod/build --timeout=600s
+```
+
+The helper image holds one file, `/docker-credential-ghcr-proxy`. Docker finds the helper by the name `docker-credential-ghcr-proxy` on `PATH`, and the config entry `ghcr-proxy` selects it.
 
 The helper reads the token file on every call, so token rotation by the kubelet needs no action. To use another path, set `GHCR_PROXY_TOKEN_FILE`.
 

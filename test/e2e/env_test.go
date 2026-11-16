@@ -38,6 +38,9 @@ const (
 	fakeRegistry   = "fakeghcr." + fakeNamespace + ".svc"
 	fakeStorageSvc = "fakeghcr-storage"
 	proxyMemory    = 256 << 20 // the chart's default memory limit
+
+	dockerCLIImage  = "mirror.gcr.io/library/docker:29.9.3-cli@sha256:5a7af0dcb0e46c803efe9b45371dd21cb500e5b4453250394ac6f06d49b6e6f1"
+	dockerDindImage = "mirror.gcr.io/library/docker:29.9.3-dind@sha256:7bf70dcb85c822e3fa6f2d332143e474b99147b9d7b39102b0cfe8b04a7dd61b"
 )
 
 // env is the cluster the tests share.
@@ -118,8 +121,11 @@ func (e *env) setup(ctx context.Context) error {
 	}
 
 	// A cluster kept from an earlier run holds an old PAT and CA: start clean.
-	if out, err := exec.CommandContext(ctx, "helm", "uninstall", "ghcr-proxy", "--kube-context", e.kubeContext, "--namespace", proxyNamespace, "--ignore-not-found", "--wait").CombinedOutput(); err != nil {
-		return fmt.Errorf("helm uninstall: %w\n%s", err, out)
+	// This includes the release of the docs walk-through, which owns the CRD.
+	for _, namespace := range []string{proxyNamespace, docsProxyNS} {
+		if out, err := exec.CommandContext(ctx, "helm", "uninstall", "ghcr-proxy", "--kube-context", e.kubeContext, "--namespace", namespace, "--ignore-not-found", "--wait").CombinedOutput(); err != nil {
+			return fmt.Errorf("helm uninstall: %w\n%s", err, out)
+		}
 	}
 
 	for namespace, pod := range map[string]string{fakeNamespace: "fakeghcr", ciNamespace: "build"} {
@@ -347,6 +353,15 @@ func (e *env) installProxy(ctx context.Context) error {
 	return nil
 }
 
+// podImages are the images the admin guide leaves to the reader.
+func (e *env) podImages() map[string]string {
+	return map[string]string{
+		"DOCKER_CLI_IMAGE":  dockerCLIImage,
+		"DOCKER_DIND_IMAGE": dockerDindImage,
+		"HELPER_IMAGE":      e.helperImage,
+	}
+}
+
 // ciPod reads the pod from docs/admin/ci-pods.md and adds only what the fake
 // GHCR needs: its storage host.
 func (e *env) ciPod(storageIP string) (corev1.Pod, error) {
@@ -357,43 +372,34 @@ func (e *env) ciPod(storageIP string) (corev1.Pod, error) {
 		return pod, err
 	}
 
-	match := regexp.MustCompile("(?s)## Pod example.*?\n```yaml\n(.*?)\n```").FindSubmatch(doc)
+	match := regexp.MustCompile("(?s)## Pod example.*?<<EOF\n(.*?)\nEOF\n```").FindSubmatch(doc)
 	if match == nil {
 		return pod, fmt.Errorf("docs/admin/ci-pods.md has no pod example")
 	}
 
-	if err := yaml.UnmarshalStrict(match[1], &pod); err != nil {
+	// The guide leaves the images to the reader, as variables the shell expands.
+	manifest := os.Expand(string(match[1]), func(name string) string { return e.podImages()[name] })
+	if err := yaml.UnmarshalStrict([]byte(manifest), &pod); err != nil {
 		return pod, err
 	}
 
-	// The guide leaves the images, the version and the command to the reader. The
-	// tests fill them in and run the Docker commands themselves.
+	// The tests run the Docker commands themselves.
 	pod.Namespace = ciNamespace
-	images := map[string]string{
-		"docker": "mirror.gcr.io/library/docker:29.9.3-cli@sha256:5a7af0dcb0e46c803efe9b45371dd21cb500e5b4453250394ac6f06d49b6e6f1",
-		"dind":   "mirror.gcr.io/library/docker:29.9.3-dind@sha256:7bf70dcb85c822e3fa6f2d332143e474b99147b9d7b39102b0cfe8b04a7dd61b",
-	}
+	pod.Spec.RestartPolicy = corev1.RestartPolicyAlways
 
 	for index := range pod.Spec.Containers {
 		container := &pod.Spec.Containers[index]
-		container.Image = images[container.Name]
 
 		if container.Name == "docker" {
 			var setup []string
 
 			for _, line := range strings.Split(container.Args[0], "\n") {
-				if !strings.HasPrefix(line, "docker ") {
+				if !strings.Contains(line, "docker build") && !strings.Contains(line, "docker push") {
 					setup = append(setup, line)
 				}
 			}
 
 			container.Args = []string{strings.Join(setup, "\n") + "\nexec sleep infinity"}
-		}
-	}
-
-	for index := range pod.Spec.Volumes {
-		if image := pod.Spec.Volumes[index].Image; image != nil {
-			image.Reference = e.helperImage
 		}
 	}
 
