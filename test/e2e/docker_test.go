@@ -68,34 +68,95 @@ func requestsFor(entries []fakeEntry, repo string) []fakeEntry {
 	return out
 }
 
-var (
-	portForwardOnce sync.Once
-	forwardPort     string
-)
+// fakeForward is a kubectl port-forward to the fake registry that is started
+// again whenever a dial to it fails, because the forward dies when the pod
+// restarts or its connection drops.
+var fakeForward struct {
+	mutex sync.Mutex
+	port  string
+	cmd   *exec.Cmd
+}
 
-// seedClient reaches the fake registry through a port-forward, with the CA and
+// startFakeForward replaces the forward. The caller holds fakeForward.mutex.
+func startFakeForward() error {
+	if fakeForward.cmd != nil {
+		_ = fakeForward.cmd.Process.Kill()
+		_ = fakeForward.cmd.Wait()
+	}
+
+	cmd := exec.Command("kubectl", "--context", cluster.kubeContext, "-n", fakeNamespace, "port-forward", "pod/fakeghcr", ":8443")
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	reader := bufio.NewReader(stdout)
+
+	first, err := reader.ReadString('\n')
+	if err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+
+		return fmt.Errorf("reading port-forward output: %w", err)
+	}
+
+	match := regexp.MustCompile(`127\.0\.0\.1:(\d+)`).FindStringSubmatch(first)
+	if match == nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+
+		return fmt.Errorf("unexpected port-forward output: %s", first)
+	}
+
+	fakeForward.cmd, fakeForward.port = cmd, match[1]
+
+	// Keep reading so kubectl never gets a broken pipe.
+	go func() { _, _ = io.Copy(io.Discard, reader) }()
+
+	return nil
+}
+
+// dialFake connects to the fake registry, restarting the forward when the
+// connection is refused or the forward does not exist yet.
+func dialFake(ctx context.Context, network string) (net.Conn, error) {
+	fakeForward.mutex.Lock()
+	defer fakeForward.mutex.Unlock()
+
+	var lastErr error
+
+	for attempt := 0; attempt < 5; attempt++ {
+		if fakeForward.cmd != nil {
+			conn, err := (&net.Dialer{}).DialContext(ctx, network, "127.0.0.1:"+fakeForward.port)
+			if err == nil {
+				return conn, nil
+			}
+
+			lastErr = err
+		}
+
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
+		if err := startFakeForward(); err != nil {
+			lastErr = err
+
+			time.Sleep(time.Second)
+		}
+	}
+
+	return nil, fmt.Errorf("fake registry port-forward unavailable: %w", lastErr)
+}
+
+// seedOptions reaches the fake registry through a port-forward, with the CA and
 // the PAT, so tests can put images in it and look at what is stored.
 func seedOptions(t *testing.T) []remote.Option {
 	t.Helper()
-
-	portForwardOnce.Do(func() {
-		cmd := exec.Command("kubectl", "--context", cluster.kubeContext, "-n", fakeNamespace, "port-forward", "pod/fakeghcr", ":8443")
-		stdout, err := cmd.StdoutPipe()
-		require.NoError(t, err)
-		require.NoError(t, cmd.Start())
-
-		reader := bufio.NewReader(stdout)
-		first, err := reader.ReadString('\n')
-		require.NoError(t, err)
-
-		match := regexp.MustCompile(`127\.0\.0\.1:(\d+)`).FindStringSubmatch(first)
-		require.NotNil(t, match, "port-forward output: %s", first)
-
-		forwardPort = match[1]
-
-		// Keep reading so kubectl never gets a broken pipe.
-		go func() { _, _ = io.Copy(io.Discard, reader) }()
-	})
 
 	pool := x509.NewCertPool()
 	require.True(t, pool.AppendCertsFromPEM(cluster.fakeCA))
@@ -103,7 +164,7 @@ func seedOptions(t *testing.T) []remote.Option {
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12},
 		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
-			return (&net.Dialer{}).DialContext(ctx, network, "127.0.0.1:"+forwardPort)
+			return dialFake(ctx, network)
 		},
 	}
 
