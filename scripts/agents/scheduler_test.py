@@ -259,6 +259,20 @@ class PlanTest(unittest.TestCase):
         # A ready (non-draft) PR still waits for review instead.
         self.assertEqual(keys(plan_for(snap([issue(1)], [pr(10, 1, check="pending")]), {"sessions": sessions})), [])
 
+    def test_ci_failure_skips_a_worker_waiting_on_an_open_pr(self):
+        cfg = s.deep_merge(CFG, {"reviews": False})
+        for auto in (False, True):
+            failed = pr(10, 1, check="failure", auto=auto)
+            wait = lambda n: {"sessions": {"worker:1": {"role": "issue-worker", "issue": 1,
+                                                       "handoff": {"state": "wait-pr", "pr": n}}}}
+            sn = snap([issue(1, status="status:in-review")], [failed, pr(80, 2, check="pending")])
+            plan = plan_for(sn, wait(80), cfg=cfg)
+            self.assertEqual(keys(plan), [])
+            self.assertIn(("PR #10", "worker waiting on PR #80"), plan.skipped)
+            # Once the awaited PR is gone, the worker is resumed.
+            plan = plan_for(snap([issue(1, status="status:in-review")], [failed]), wait(80), cfg=cfg)
+            self.assertEqual(keys(plan), ["worker:1"])
+
     def test_reviews_off_routes_prs_without_a_reviewer(self):
         cfg = s.deep_merge(CFG, {"reviews": False})
         # A finished PR with green CI is armed by the scheduler, with no reviewer job.
