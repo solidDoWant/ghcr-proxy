@@ -40,6 +40,10 @@ jobs:
       # runs just those tests (the scoreboard-tests job) and the docs checks.
       acceptance: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/master') && 'true' || steps.filter.outputs.acceptance }}
       docs: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/master') && 'true' || steps.filter.outputs.docs }}
+      # e2e runs on code changes other than Go test files, which are never
+      # built into the binaries and images e2e deploys. Its own harness
+      # (test/e2e) always counts.
+      e2e: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/master') && 'true' || ((steps.filter.outputs.e2e_code == 'true' || steps.filter.outputs.e2e_harness == 'true') && 'true' || 'false') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: filter
@@ -55,6 +59,17 @@ jobs:
               - '!LICENSE'
               - '!.github/renovate.json5'
               - '!.github/renovate/**'
+            e2e_code:
+              - '**'
+              - '!*.md'
+              - '!docs/**'
+              - '!.claude/**'
+              - '!LICENSE'
+              - '!.github/renovate.json5'
+              - '!.github/renovate/**'
+              - '!**/*_test.go'
+            e2e_harness:
+              - 'test/e2e/**'
             acceptance:
               - 'docs/acceptance/**'
             docs:
@@ -138,7 +153,7 @@ jobs:
   # the proxy from this repo's chart.
   e2e:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.e2e == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
