@@ -101,7 +101,7 @@ Status for every kind: `ObservedGeneration int64`, `Conditions []metav1.Conditio
 ```go
 // +listType=map
 // +listMapKey=name
-Rules []RuleStatus `json:"rules,omitempty"` // RuleStatus{Name string; Conditions []metav1.Condition} — condition type Accepted
+Rules []RuleStatus `json:"rules,omitempty"` // RuleStatus{Name string; Conditions []metav1.Condition}; condition type Accepted
 ```
 
 Reasons (`Ready` / `Accepted`): `Ready`, `Accepted`, `InvalidSpec`, `NotAllowed`, `RefNotFound`, `RefNotReady`, `SecretUnavailable`, `SecretInvalid`, `HostConflict`, `CertificateMismatch`, `URLNotAllowed`, `OutsideCeiling`, `RulesNotAccepted` (policy `Ready=False` when any rule isn't accepted; the message lists the rule names). `GHCRAccessPolicy` and its controller, webhook and metrics are deleted.
