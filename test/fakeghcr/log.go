@@ -18,17 +18,21 @@ const (
 	CredPATToken Credential = "pat-token"
 	// CredPATBasic is HTTP Basic with the PAT, as sent to the token endpoint.
 	CredPATBasic Credential = "pat-basic"
+	// CredPATBearer is the PAT itself as a bearer token, as sent to the REST API.
+	CredPATBearer Credential = "pat-bearer"
 )
 
 // Entry is one request the fake saw. It holds no header values or query values.
 type Entry struct {
-	// Server is "registry" or "storage".
-	Server     string
-	Method     string
-	Path       string
-	QueryKeys  []string
-	Credential Credential
-	Status     int
+	// Server is "registry", "storage" or "api".
+	Server string
+	Method string
+	// Path is the decoded path; EscapedPath is the path as the client sent it.
+	Path        string
+	EscapedPath string
+	QueryKeys   []string
+	Credential  Credential
+	Status      int
 }
 
 type requestLog struct {

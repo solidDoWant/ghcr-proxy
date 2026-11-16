@@ -47,6 +47,7 @@ docs/admin/
 
 docs/dev/
   README.md                What the developer pages will cover, and the commands.
+  ghcr-behaviour.md        What ghcr.io answers to delete requests, from the live tests.
 
 docs/acceptance/
   phase-1.md               The owner's checklist for phase 1: push and pull through the proxy.

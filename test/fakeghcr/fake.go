@@ -1,6 +1,7 @@
 // Package fakeghcr is an in-process test double for ghcr.io: a registry with
 // bearer-token authentication, absolute upload Location headers and blob
-// downloads redirected to a separate storage server. It wraps
+// downloads redirected to a separate storage server, and the GitHub REST
+// endpoints for container package versions on a third server. It wraps
 // go-containerregistry's registry package for storage and is not a GHCR clone.
 package fakeghcr
 
@@ -36,11 +37,13 @@ type Options struct {
 	// RegistryAddr and StorageAddr are the listen addresses. Default 127.0.0.1:0.
 	RegistryAddr string
 	StorageAddr  string
+	APIAddr      string
 	// RegistryHost and StorageHost are the host:port clients are told to use
 	// for the registry (Location headers, token realm) and for blob redirects.
 	// They default to the listener addresses.
 	RegistryHost string
 	StorageHost  string
+	APIHost      string
 	// DNSNames are extra names the server certificate covers.
 	DNSNames []string
 	// BlobDir holds blob data. A new temporary directory when empty.
@@ -55,12 +58,18 @@ type Fake struct {
 	blobs        *redirectingBlobs
 	registry     *http.Server
 	storage      *http.Server
+	api          *http.Server
 	registryHost string
 	storageHost  string
+	apiHost      string
 	ownedBlobDir string
 
-	tokens tokenStore
-	log    requestLog
+	tokens   tokenStore
+	log      requestLog
+	packages packageStore
+	// registryStore is the registry behind authentication, for the packages
+	// API to delete versions through.
+	registryStore http.Handler
 
 	mu     sync.Mutex
 	public map[string]bool
@@ -109,6 +118,10 @@ func Start(opts Options) (*Fake, error) {
 		opts.StorageAddr = "127.0.0.1:0"
 	}
 
+	if opts.APIAddr == "" {
+		opts.APIAddr = "127.0.0.1:0"
+	}
+
 	authority, err := newAuthority(opts.DNSNames)
 	if err != nil {
 		return nil, err
@@ -139,8 +152,17 @@ func Start(opts Options) (*Fake, error) {
 		return nil, err
 	}
 
+	apiListener, err := tls.Listen("tcp", opts.APIAddr, tlsConfig)
+	if err != nil {
+		_ = registryListener.Close()
+		_ = storageListener.Close()
+
+		return nil, err
+	}
+
 	fake.registryHost = hostOr(opts.RegistryHost, registryListener)
 	fake.storageHost = hostOr(opts.StorageHost, storageListener)
+	fake.apiHost = hostOr(opts.APIHost, apiListener)
 	fake.realm = "https://" + fake.registryHost + "/token"
 
 	fake.blobs = &redirectingBlobs{
@@ -150,8 +172,11 @@ func Start(opts Options) (*Fake, error) {
 	fake.registry = &http.Server{Handler: fake.registryHandler(), ReadHeaderTimeout: 30 * time.Second}
 
 	fake.storage = &http.Server{Handler: fake.storageHandler(), ReadHeaderTimeout: 30 * time.Second}
+	fake.api = &http.Server{Handler: fake.apiHandler(), ReadHeaderTimeout: 30 * time.Second}
+
 	go func() { _ = fake.registry.Serve(registryListener) }()
 	go func() { _ = fake.storage.Serve(storageListener) }()
+	go func() { _ = fake.api.Serve(apiListener) }()
 
 	return fake, nil
 }
@@ -164,9 +189,9 @@ func hostOr(host string, listener net.Listener) string {
 	return listener.Addr().String()
 }
 
-// Close stops both servers and removes blob data the fake created itself.
+// Close stops the servers and removes blob data the fake created itself.
 func (f *Fake) Close() error {
-	err := errors.Join(f.registry.Close(), f.storage.Close())
+	err := errors.Join(f.registry.Close(), f.storage.Close(), f.api.Close())
 	if f.ownedBlobDir != "" {
 		err = errors.Join(err, os.RemoveAll(f.ownedBlobDir))
 	}
@@ -183,7 +208,10 @@ func (f *Fake) RegistryHost() string { return f.registryHost }
 // StorageHost is the host:port blob redirects point to.
 func (f *Fake) StorageHost() string { return f.storageHost }
 
-// CAPEM is the PEM of the CA that signed both servers' certificate.
+// APIURL is the base URL of the GitHub REST API double, ending in "/".
+func (f *Fake) APIURL() string { return "https://" + f.apiHost + "/" }
+
+// CAPEM is the PEM of the CA that signed the servers' certificate.
 func (f *Fake) CAPEM() []byte { return f.auth.caPEM }
 
 // CAPool holds the CA, for clients to trust.
@@ -254,10 +282,10 @@ func (f *Fake) RemoteOptions(withPAT bool) []remote.Option {
 }
 
 func (f *Fake) registryHandler() http.Handler {
-	store := registry.New(registry.WithBlobHandler(f.blobs), registry.Logger(discardLogger()))
+	f.registryStore = f.trackManifests(registry.New(registry.WithBlobHandler(f.blobs), registry.Logger(discardLogger())))
 	mux := http.NewServeMux()
 	mux.HandleFunc("/token", f.tokenEndpoint)
-	mux.Handle("/", f.authorize(store))
+	mux.Handle("/", f.authorize(f.registryStore))
 
 	return f.record("registry", "https://"+f.registryHost, mux)
 }
@@ -269,7 +297,7 @@ func (f *Fake) record(server, absoluteTo string, next http.Handler) http.Handler
 		recorder := &statusRecorder{ResponseWriter: resp, status: http.StatusOK, absoluteTo: absoluteTo}
 		next.ServeHTTP(recorder, req)
 		f.log.add(Entry{
-			Server: server, Method: req.Method, Path: req.URL.Path,
+			Server: server, Method: req.Method, Path: req.URL.Path, EscapedPath: req.URL.EscapedPath(),
 			QueryKeys: queryKeys(req), Credential: cred, Status: recorder.status,
 		})
 	})
