@@ -29,6 +29,7 @@ import (
 	"github.com/solidDoWant/registrygate/internal/config"
 	"github.com/solidDoWant/registrygate/internal/metrics"
 	"github.com/solidDoWant/registrygate/internal/mirror"
+	"github.com/solidDoWant/registrygate/internal/model"
 	"github.com/solidDoWant/registrygate/internal/registry"
 	"github.com/solidDoWant/registrygate/internal/server"
 	"github.com/solidDoWant/registrygate/internal/upstream"
@@ -221,7 +222,7 @@ func serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 
 	var components sync.WaitGroup
 
-	backgroundErrs := make(chan error, 4+len(mirrorFiles))
+	backgroundErrs := make(chan error, 5+len(mirrorFiles))
 
 	start := func(run func(context.Context) error) {
 		components.Go(func() { backgroundErrs <- run(background) })
@@ -230,10 +231,21 @@ func serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	start(policyCache.Start)
 
 	if cfg.Webhook.Enabled {
-		webhookServer, err := webhook.NewServer(cfg.Webhook, scheme, cfg.Grants)
+		// The webhook reads the same snapshot as serving. The snapshot has no Secret store here: admission only
+		// needs the ceilings, which don't depend on Secrets.
+		snapshots := model.New(model.Options{
+			Reader:          policyCache,
+			Informers:       policyCache,
+			AdminNamespaces: cfg.AdminNamespaces,
+			Logger:          logger,
+		})
+
+		webhookServer, err := webhook.NewServer(cfg.Webhook, scheme, cfg.AdminNamespaces, snapshots.Snapshot)
 		if err != nil {
 			return err
 		}
+
+		start(snapshots.Run)
 
 		start(webhookServer.Start)
 	}

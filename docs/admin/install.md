@@ -242,11 +242,11 @@ The proxy reads the credentials and CA files at start. It reads them again when 
 
 ## Turn on the admission webhook
 
-The proxy enforces grants whether or not you use the webhook. The webhook only gives fast feedback: `kubectl apply` fails at once when a policy is outside the grants of its namespace. The webhook is off by default.
+The proxy enforces ceilings and admin namespaces whether or not you use the webhook. The webhook only gives fast feedback: `kubectl apply` fails at once. The webhook is off by default.
 
-The webhook rejects a new policy, and a change to the `spec` of a policy, when any repository pattern or action is outside the grants of the namespace. The message lists each rejected pattern. The webhook admits an update that does not change the `spec`, and an update of an object that is being deleted. So labels and finalizers still change after you narrow a grant.
+The webhook rejects an `UpstreamRegistry` that is not in an admin namespace. It also rejects a new `RegistryAccessPolicy`, and a change to its `spec`, when a rule with a `credentialRef` has a repository pattern or action outside the ceiling of that credential. The message names the rule and the patterns. A rule whose credential does not exist yet is admitted; the policy status reports it. The webhook reads the same view of the cluster as the proxy, and rejects a policy while that view is not yet built. The webhook admits an update that does not change the `spec`, and an update of an object that is being deleted. So labels and finalizers still change after you narrow a grant.
 
-The webhook has its own Service and its own certificate. Every proxy replica serves it, also a replica that is not ready. A missing PAT or an unsynced policy cache never blocks a policy write. If no replica runs, the webhook rejects all writes of `GHCRAccessPolicy` objects, because it fails closed (`failurePolicy: Fail`).
+The webhook has its own Service and its own certificate. Every proxy replica serves it, also a replica that is not ready. If no replica runs, the webhook rejects all writes of `UpstreamRegistry` and `RegistryAccessPolicy` objects, because it fails closed (`failurePolicy: Fail`).
 
 Choose one way to give the webhook a certificate:
 

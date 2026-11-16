@@ -14,9 +14,8 @@ import (
 )
 
 // NewServer returns the webhook server for cfg with the validator registered. Its certificate watcher reloads the
-// key pair when the files change. Start it with its Start method; it needs no leader election, the PAT or the
-// policy informer.
-func NewServer(cfg config.Webhook, scheme *runtime.Scheme, grants config.Grants) (ctrlwebhook.Server, error) {
+// key pair when the files change. Start it with its Start method; it needs no leader election.
+func NewServer(cfg config.Webhook, scheme *runtime.Scheme, adminNamespaces []string, snapshot SnapshotFunc) (ctrlwebhook.Server, error) {
 	host, portText, err := net.SplitHostPort(cfg.Listen)
 	if err != nil {
 		return nil, fmt.Errorf("webhook listen address: %w", err)
@@ -40,7 +39,7 @@ func NewServer(cfg config.Webhook, scheme *runtime.Scheme, grants config.Grants)
 		KeyName:  filepath.Base(cfg.KeyFile),
 	})
 
-	Register(server, scheme, grants)
+	Register(server, scheme, adminNamespaces, snapshot)
 
 	return server, nil
 }

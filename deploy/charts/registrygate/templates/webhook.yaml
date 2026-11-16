@@ -47,7 +47,7 @@ metadata:
     cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ $name }}
   {{- end }}
 webhooks:
-  - name: ghcraccesspolicies.registrygate.soliddowant.dev
+  - name: upstreamregistries.registrygate.soliddowant.dev
     admissionReviewVersions: ["v1"]
     sideEffects: None
     failurePolicy: Fail
@@ -57,7 +57,7 @@ webhooks:
       service:
         name: {{ $name }}
         namespace: {{ .Release.Namespace }}
-        path: /validate-ghcraccesspolicy
+        path: /validate-upstreamregistry
         port: 443
       {{- if not $issuer.name }}
       caBundle: {{ required "webhook.caBundle is required when you provide webhook.existingSecret" .Values.webhook.caBundle | quote }}
@@ -65,6 +65,26 @@ webhooks:
     rules:
       - apiGroups: ["registrygate.soliddowant.dev"]
         apiVersions: ["v1alpha1"]
-        resources: ["ghcraccesspolicies"]
+        resources: ["upstreamregistries"]
+        operations: ["CREATE", "UPDATE"]
+  - name: registryaccesspolicies.registrygate.soliddowant.dev
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    failurePolicy: Fail
+    timeoutSeconds: 5
+    matchPolicy: Equivalent
+    clientConfig:
+      service:
+        name: {{ $name }}
+        namespace: {{ .Release.Namespace }}
+        path: /validate-registryaccesspolicy
+        port: 443
+      {{- if not $issuer.name }}
+      caBundle: {{ required "webhook.caBundle is required when you provide webhook.existingSecret" .Values.webhook.caBundle | quote }}
+      {{- end }}
+    rules:
+      - apiGroups: ["registrygate.soliddowant.dev"]
+        apiVersions: ["v1alpha1"]
+        resources: ["registryaccesspolicies"]
         operations: ["CREATE", "UPDATE"]
 {{- end }}

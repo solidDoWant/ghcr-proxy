@@ -18,7 +18,7 @@ In the e2e scenarios, "a CI pod" is a pod with a dind sidecar set up exactly as 
 - **AC-3-04 Host conflict.** Two `UpstreamRegistry` objects claiming the same host are both `Ready=False, reason=HostConflict` for it, and the host isn't served.
   Tests: `internal/server: TestSNICertificatesRefuseHostsInConflict`, `internal/model: TestBuildHostConflictMarksBothAndServesNeither`
 - **AC-3-05 Admin namespaces only.** An `UpstreamRegistry` outside the admin namespaces is ignored by the proxy and, with the webhook on, rejected.
-  Tests:
+  Tests: `internal/webhook: TestUpstreamValidatorAdmitsOnlyAdminNamespaces`, `internal/webhook: TestAdmissionRejectsPoliciesOutsideTheGrant`
 - **AC-3-06 Registry API only.** A request outside `/v2` gets `404`. A non-canonical path (`..`, `//`, encoded `/`, `/V2/`, `/%76%32/`) gets `400`. Neither sends anything upstream.
   Tests: `internal/server: TestNonCanonicalPathsAre400AndNeverReachTheUpstream`, `internal/server: TestCatalogAndUnknownPathsAre404AndNeverReachTheUpstream`, `internal/registry: TestClassifyRefusesNonCanonicalPaths`
 - **AC-3-07 Upstream auth by challenge.** The proxy works with an upstream that allows anonymous access, one that challenges with Basic, and one that challenges with Bearer. A token endpoint on a host other than the `url` host or `tokenRealmHosts` is refused with `502`.
@@ -90,7 +90,7 @@ In the e2e scenarios, "a CI pod" is a pod with a dind sidecar set up exactly as 
 - **AC-3-31 Status.** Every kind reports `observedGeneration` and `Ready` with the reasons in the spec; `RegistryAccessPolicy` reports `status.rules[]` by name.
   Tests:
 - **AC-3-32 Admission webhook.** With the webhook on, it rejects an `UpstreamRegistry` outside the admin namespaces, a rule with both or neither of `credentialRef` and `mirrorRef`, a mirror rule with a non-pull action, and a credential rule outside its ceiling (naming the patterns). A valid policy applies.
-  Tests:
+  Tests: `internal/webhook: TestValidateCreate`, `internal/webhook: TestValidateUpdate`, `internal/webhook: TestAdmissionRejectsPoliciesOutsideTheGrant`
 - **AC-3-33 Metrics and audit.** `/metrics` has the series in the spec with `upstream` as the only object-name label. Each request writes one audit line with the upstream, rule, and credential or mirror used, and never a credential, token or header value.
   Tests:
 - **AC-3-34 Docs walk-through.** Following `docs/admin/` from an empty kind cluster (cert-manager, one name-constrained CA per upstream, the chart, two upstreams, a tenant mirror, a CI pod) gets to a working `docker push` and a mirrored `docker pull`, scripted as an e2e test that uses only commands from the docs.

@@ -25,7 +25,7 @@ tls:
   # -- Name of the `kubernetes.io/tls` Secret with the serving certificate. Required. The chart never creates it.
   existingSecret: ""
 webhook:
-  # -- Serve the validating admission webhook that rejects policies outside the namespace's grant at apply time. The proxy still enforces the grant either way.
+  # -- Serve the validating admission webhook that rejects an `UpstreamRegistry` outside the admin namespaces, and a `RegistryAccessPolicy` rule outside the ceiling of its credential, at apply time. The proxy still enforces both either way.
   enabled: false
   # -- Name of the `kubernetes.io/tls` Secret with the webhook's serving certificate. Required when the webhook is on and `webhook.certManager.issuerRef.name` is empty. The chart never creates it.
   existingSecret: ""

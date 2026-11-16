@@ -1,12 +1,13 @@
-// Package webhook is the validating admission webhook for GHCRAccessPolicy. It gives fast feedback at apply time:
-// a policy that the namespace's grants would cut down is rejected with the patterns named. The proxy stays the
-// enforcement point; the webhook only needs the config and its own certificate.
+// Package webhook is the validating admission webhook for UpstreamRegistry and RegistryAccessPolicy. It gives fast
+// feedback at apply time. The proxy stays the enforcement point; the webhook reads the same snapshot as serving, so
+// it never decides differently from it.
 package webhook
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -15,29 +16,70 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	"github.com/solidDoWant/registrygate/api/v1alpha1"
-	"github.com/solidDoWant/registrygate/internal/authz"
-	"github.com/solidDoWant/registrygate/internal/config"
+	"github.com/solidDoWant/registrygate/internal/model"
 )
 
-// Path is the URL path the validating webhook is served at.
-const Path = "/validate-ghcraccesspolicy"
+// URL paths the validating webhooks are served at.
+const (
+	UpstreamPath = "/validate-upstreamregistry"
+	PolicyPath   = "/validate-registryaccesspolicy"
+)
 
-// Validator rejects policies the grants would not fully accept.
-type Validator struct {
-	Grants config.Grants
+// SnapshotFunc returns the current snapshot, or nil before the first build.
+type SnapshotFunc func() *model.Snapshot
+
+// UpstreamValidator rejects an UpstreamRegistry outside the admin namespaces.
+type UpstreamValidator struct {
+	AdminNamespaces []string
 }
 
-var _ admission.Validator[*v1alpha1.GHCRAccessPolicy] = (*Validator)(nil)
+var _ admission.Validator[*v1alpha1.UpstreamRegistry] = (*UpstreamValidator)(nil)
 
-// ValidateCreate rejects a new policy that is not fully inside its namespace's grants.
-func (v *Validator) ValidateCreate(_ context.Context, policy *v1alpha1.GHCRAccessPolicy) (admission.Warnings, error) {
+// ValidateCreate rejects an upstream outside the admin namespaces.
+func (v *UpstreamValidator) ValidateCreate(_ context.Context, upstream *v1alpha1.UpstreamRegistry) (admission.Warnings, error) {
+	return nil, v.check(upstream)
+}
+
+// ValidateUpdate rejects a spec change outside the admin namespaces. An update that leaves the spec as it was, or
+// one on an object that is being deleted, is admitted, so labels and finalizers can still change.
+func (v *UpstreamValidator) ValidateUpdate(_ context.Context, oldUpstream, upstream *v1alpha1.UpstreamRegistry) (admission.Warnings, error) {
+	if upstream.DeletionTimestamp != nil || equality.Semantic.DeepEqual(oldUpstream.Spec, upstream.Spec) {
+		return nil, nil
+	}
+
+	return nil, v.check(upstream)
+}
+
+// ValidateDelete admits every delete.
+func (v *UpstreamValidator) ValidateDelete(context.Context, *v1alpha1.UpstreamRegistry) (admission.Warnings, error) {
+	return nil, nil
+}
+
+func (v *UpstreamValidator) check(upstream *v1alpha1.UpstreamRegistry) error {
+	if slices.Contains(v.AdminNamespaces, upstream.Namespace) {
+		return nil
+	}
+
+	return fmt.Errorf("an UpstreamRegistry may only be created in an admin namespace (%s), not in %q",
+		strings.Join(v.AdminNamespaces, ", "), upstream.Namespace)
+}
+
+// PolicyValidator rejects a RegistryAccessPolicy with a credential rule outside its credential's ceiling.
+type PolicyValidator struct {
+	Snapshot SnapshotFunc
+}
+
+var _ admission.Validator[*v1alpha1.RegistryAccessPolicy] = (*PolicyValidator)(nil)
+
+// ValidateCreate rejects a new policy with a rule outside its credential's ceiling.
+func (v *PolicyValidator) ValidateCreate(_ context.Context, policy *v1alpha1.RegistryAccessPolicy) (admission.Warnings, error) {
 	return nil, v.check(policy)
 }
 
-// ValidateUpdate rejects a spec change that is not fully inside the grants. An update that leaves the spec as it
-// was, or one on an object that is being deleted, is admitted, so labels, annotations and finalizers can still
-// change after a grant is narrowed.
-func (v *Validator) ValidateUpdate(_ context.Context, oldPolicy, policy *v1alpha1.GHCRAccessPolicy) (admission.Warnings, error) {
+// ValidateUpdate rejects a spec change with a rule outside the ceiling. An update that leaves the spec as it was,
+// or one on an object that is being deleted, is admitted, so labels and finalizers can still change after an admin
+// narrows a ceiling.
+func (v *PolicyValidator) ValidateUpdate(_ context.Context, oldPolicy, policy *v1alpha1.RegistryAccessPolicy) (admission.Warnings, error) {
 	if policy.DeletionTimestamp != nil || equality.Semantic.DeepEqual(oldPolicy.Spec, policy.Spec) {
 		return nil, nil
 	}
@@ -46,36 +88,31 @@ func (v *Validator) ValidateUpdate(_ context.Context, oldPolicy, policy *v1alpha
 }
 
 // ValidateDelete admits every delete.
-func (v *Validator) ValidateDelete(context.Context, *v1alpha1.GHCRAccessPolicy) (admission.Warnings, error) {
+func (v *PolicyValidator) ValidateDelete(context.Context, *v1alpha1.RegistryAccessPolicy) (admission.Warnings, error) {
 	return nil, nil
 }
 
-func (v *Validator) check(policy *v1alpha1.GHCRAccessPolicy) error {
-	effective := authz.Effective(policy, v.Grants.For(policy.Namespace))
-	if effective.Ready() {
+func (v *PolicyValidator) check(policy *v1alpha1.RegistryAccessPolicy) error {
+	snapshot := v.Snapshot()
+	if snapshot == nil {
+		return errors.New("registrygate is not ready to check the policy; try again")
+	}
+
+	violations := snapshot.CeilingViolations(policy)
+	if len(violations) == 0 {
 		return nil
 	}
 
-	parts := make([]string, 0, len(effective.Rejected))
-	for _, rejected := range effective.Rejected {
-		actions := make([]string, 0, len(rejected.Actions))
-		for _, action := range rejected.Actions {
-			actions = append(actions, string(action))
-		}
-
-		parts = append(parts, fmt.Sprintf("rules[%d] %q (%s: %s)", rejected.Rule, rejected.Repository,
-			strings.Join(actions, ", "), rejected.Reason))
+	parts := make([]string, 0, len(violations))
+	for _, violation := range violations {
+		parts = append(parts, violation.String())
 	}
 
-	if len(parts) == 0 {
-		return errors.New("the policy is not inside the namespace's grants: " + effective.Message)
-	}
-
-	return fmt.Errorf("the policy is not inside the namespace's grants; these repository patterns are rejected: %s",
-		strings.Join(parts, "; "))
+	return errors.New(strings.Join(parts, "; "))
 }
 
-// Register serves the validator at Path on server.
-func Register(server webhook.Server, scheme *runtime.Scheme, grants config.Grants) {
-	server.Register(Path, admission.WithValidator(scheme, &Validator{Grants: grants}))
+// Register serves the validators at UpstreamPath and PolicyPath on server.
+func Register(server webhook.Server, scheme *runtime.Scheme, adminNamespaces []string, snapshot SnapshotFunc) {
+	server.Register(UpstreamPath, admission.WithValidator(scheme, &UpstreamValidator{AdminNamespaces: adminNamespaces}))
+	server.Register(PolicyPath, admission.WithValidator(scheme, &PolicyValidator{Snapshot: snapshot}))
 }
