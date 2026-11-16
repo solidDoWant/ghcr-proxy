@@ -97,6 +97,7 @@ func (b *builder) secret(namespace, name string) secrets.Secret {
 	}
 
 	secret := secrets.Secret{State: secrets.Pending}
+
 	if b.in.Secrets != nil {
 		if got, tracked := b.in.Secrets.Get(key); tracked {
 			secret = got

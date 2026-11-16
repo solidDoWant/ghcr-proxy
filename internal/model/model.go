@@ -115,6 +115,7 @@ func (m *Model) Run(ctx context.Context) error {
 		m.rebuild(ctx)
 
 		timer.Reset(rebuildInterval)
+
 		select {
 		case <-ctx.Done():
 			return nil
