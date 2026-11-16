@@ -115,16 +115,18 @@ Grant rules:
 | GET, HEAD | `/v2/<name>/tags/list` | pull |
 | GET, HEAD | `/v2/<name>/referrers/<digest>` | pull |
 | POST | `/v2/<name>/blobs/uploads/` | push; with a valid mount (below): push on `<name>` + pull on `from` |
-| GET, PATCH, PUT, DELETE | `/v2/<name>/blobs/uploads/<session>` | push (`DELETE` here cancels an upload, still push) |
+| GET, PATCH, PUT, DELETE | `/v2/<name>/blobs/uploads/<session>` or `/v2/<name>/blobs/upload/<session>` | push (`DELETE` here cancels an upload, still push) |
 | PUT | `/v2/<name>/manifests/<ref>` | push |
 | DELETE | `/v2/<name>/manifests/<ref>`, `/v2/<name>/blobs/<digest>` | delete |
 | anything else, including `/v2/_catalog` | | `404 NOT_FOUND`, nothing upstream |
 
-Route matching runs from the right: the last segments must be one of `manifests/<ref>`, `blobs/uploads/<session>`, `blobs/uploads/` (trailing slash), `blobs/<digest>`, `tags/list`, `referrers/<digest>`; the rest is `<name>`. Because `<session>` and `<ref>` are single segments and `uploads` is not a digest, the split is unique.
+Route matching runs from the right: the last segments must be one of `manifests/<ref>`, `blobs/uploads/<session>`, `blobs/upload/<session>`, `blobs/uploads/` (trailing slash), `blobs/<digest>`, `tags/list`, `referrers/<digest>`; the rest is `<name>`. Because `<session>` and `<ref>` are single segments and neither `uploads` nor `upload` is a digest, the split is unique.
+
+**GHCR's upload session path.** The real `ghcr.io` answers `POST .../blobs/uploads/` with a `Location` of `/v2/<name>/blobs/upload/<session>` (singular `upload`; the session looks like `19.3c730f6c-c0f8-4e04-9c9c-8864a15a4a1b`). Found by the operator's live run on 2026-11-16. The proxy accepts both forms and forwards the session path in the same form the client sent (`UpstreamURL()` keeps `upload` or `uploads`). The fake GHCR answers upload starts with the singular form, as GHCR does, so CI covers it.
 
 **Query parameters.** The forwarded query is rebuilt from the classified request, never copied:
 - `POST .../blobs/uploads/`: only `digest`, `mount` and `from` are kept. A **valid mount** is exactly one `mount` (a valid digest) and exactly one `from` (a valid `<name>`, lower-case). Any other combination (repeated keys, `mount` without `from`, `from` without `mount`, an invalid value, `from` equal to `<name>`) drops both `mount` and `from` and the request is a plain upload start. `digest` (monolithic upload) is kept only if it appears once and is valid, else the request is `400 DIGEST_INVALID` with nothing upstream.
-- `PUT .../blobs/uploads/<session>`: `digest` required once and valid; all other parameters, including the upstream's upload state parameters (`_state` and similar), are kept as sent, because the upload session URL is the upstream's own. The path segments are still rebuilt.
+- `PUT .../blobs/uploads/<session>` (or `.../blobs/upload/<session>`): `digest` required once and valid; all other parameters, including the upstream's upload state parameters (`_state` and similar), are kept as sent, because the upload session URL is the upstream's own. The path segments are still rebuilt.
 - `GET .../tags/list`: only `n` and `last`. `GET .../referrers/<digest>`: only `artifactType`.
 - Every other route: no query.
 
