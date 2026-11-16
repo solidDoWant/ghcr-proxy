@@ -322,6 +322,21 @@ func (e *env) installProxy(ctx context.Context) error {
 		return err
 	}
 
+	// The NetworkPolicy sees addresses after Service translation: the API server's
+	// own endpoint, and the fake GHCR's pod port.
+	apiServer, err := e.kubectl(ctx, "", "get", "endpoints", "kubernetes", "-o", "jsonpath={.subsets[0].addresses[0].ip}")
+	if err != nil {
+		return err
+	}
+
+	extraEgress, err := json.Marshal([]map[string]any{{
+		"to":    []map[string]any{{"namespaceSelector": map[string]any{"matchLabels": map[string]string{"kubernetes.io/metadata.name": fakeNamespace}}}},
+		"ports": []map[string]any{{"protocol": "TCP", "port": 8443}},
+	}})
+	if err != nil {
+		return err
+	}
+
 	grants, err := json.Marshal([]map[string]any{{
 		"namespaces": ciNamespace, "repositories": []string{"soliddowant/**"}, "actions": []string{"pull", "push", "delete"},
 	}})
@@ -338,6 +353,11 @@ func (e *env) installProxy(ctx context.Context) error {
 		"--set", "upstream.url=https://"+fakeRegistry,
 		"--set", "upstream.ca.existingSecret=upstream-ca",
 		"--set-json", "grants="+string(grants),
+		"--set", "networkPolicy.enabled=true",
+		"--set", "networkPolicy.clientNamespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name="+ciNamespace,
+		"--set", "networkPolicy.apiServerCIDRs[0]="+strings.TrimSpace(apiServer)+"/32",
+		"--set-json", "networkPolicy.extraEgress="+string(extraEgress),
+		"--set", "podDisruptionBudget.enabled=true",
 		"--wait", "--timeout", "5m")
 
 	if out, err := cmd.CombinedOutput(); err != nil {

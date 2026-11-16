@@ -50,3 +50,14 @@ For: admins who install ghcr-proxy with its Helm chart.
 | `nodeSelector` | `{}` | Node selector. |
 | `tolerations` | `[]` | Tolerations. |
 | `affinity` | `{}` | Affinity rules. |
+| `podDisruptionBudget.enabled` | `false` | Create a PodDisruptionBudget. With `replicas: 1` and `maxUnavailable: 1` it allows full disruption, so a drain can take the only replica down. |
+| `podDisruptionBudget.maxUnavailable` | `1` | Number of pods that may be down during a voluntary disruption. |
+| `networkPolicy.enabled` | `false` | Create a NetworkPolicy. Ports match the destination pod's port after Service translation (the Service's port 443 is the pod's 8443), not the Service port. The policy needs a CNI that enforces NetworkPolicy. |
+| `networkPolicy.clientNamespaceSelector` | `{}` | Namespaces whose pods may connect to port 8443 (the registry). The default matches every namespace; narrow it, for example with `matchLabels`. |
+| `networkPolicy.metricsNamespaceSelector` | `{}` | Namespaces whose pods may scrape port 8080 (health and metrics), such as the monitoring namespace. The default matches every namespace. |
+| `networkPolicy.apiServerCIDRs` | `[]` | CIDRs of the Kubernetes API server. They may reach port 9443 (the admission webhook) and the proxy may reach them on `apiServerPorts`. Without them, the proxy cannot reach the API server for token reviews. Use the addresses of `kubectl get endpoints kubernetes`, because the NetworkPolicy sees the address after Service translation. |
+| `networkPolicy.apiServerPorts` | `[443, 6443]` | Ports of the API server, after Service translation. |
+| `networkPolicy.extraEgress` | `[]` | Extra raw egress rules (NetworkPolicy `egress` items), for example for an in-cluster upstream or mirror. Port 443 to any address is always allowed. |
+| `serviceMonitor.enabled` | `false` | Create a Prometheus Operator ServiceMonitor for the metrics port. Needs the ServiceMonitor CRD. |
+| `serviceMonitor.interval` | `30s` | Scrape interval. |
+| `serviceMonitor.labels` | `{}` | Extra labels on the ServiceMonitor, for example the label your Prometheus selects on. |
