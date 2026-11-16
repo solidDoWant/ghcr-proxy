@@ -29,6 +29,7 @@ This work is part of the next phase and is still in progress.
 This work is part of the next phase and is still in progress.
 
 - The chart can create a PodDisruptionBudget, a NetworkPolicy and a Prometheus Operator ServiceMonitor. Each one is off by default. Set `podDisruptionBudget.enabled`, `networkPolicy.enabled` or `serviceMonitor.enabled` to `true`. [Optional chart objects](https://github.com/solidDoWant/ghcr-proxy/blob/v0.1.1/docs/admin/install.md#optional-chart-objects) tells you about them ([#72](https://github.com/solidDoWant/ghcr-proxy/pull/72)).
+- The proxy serves Prometheus metrics at `/metrics` on the health port (`8080`). They count requests, requests to `ghcr.io` and the mirrors, mirror fallbacks, token reviews, policies and credential reloads. No metric has a label for a repository, namespace or ServiceAccount. [Metrics](https://github.com/solidDoWant/ghcr-proxy/blob/v0.1.1/docs/admin/metrics.md) lists them ([#81](https://github.com/solidDoWant/ghcr-proxy/pull/81)).
 - The admin guides have full commands that you can copy and run, from an empty cluster to a CI pod that pushes an image. Tests run these commands ([#74](https://github.com/solidDoWant/ghcr-proxy/pull/74)).
 
 Internal work: the design for the next phase, tests against the real `ghcr.io` that the operator runs by hand, test fixes, scheduler fixes and dependency updates ([#60](https://github.com/solidDoWant/ghcr-proxy/pull/60), [#61](https://github.com/solidDoWant/ghcr-proxy/pull/61), [#64](https://github.com/solidDoWant/ghcr-proxy/pull/64), [#73](https://github.com/solidDoWant/ghcr-proxy/pull/73), [#80](https://github.com/solidDoWant/ghcr-proxy/pull/80), [#83](https://github.com/solidDoWant/ghcr-proxy/pull/83)).
@@ -36,7 +37,6 @@ Internal work: the design for the next phase, tests against the real `ghcr.io` t
 ### Known issues
 
 - Deleting images through the proxy is not yet tested with `ghcr.io`, and it can fail. The next phase finishes it ([#65](https://github.com/solidDoWant/ghcr-proxy/issues/65)).
-- The proxy has no registry metrics yet. The next phase adds them ([#21](https://github.com/solidDoWant/ghcr-proxy/issues/21)).
 - The pull mirrors are not yet tested with Harbor ([#68](https://github.com/solidDoWant/ghcr-proxy/issues/68)).
 
 ## 0.1.0
