@@ -18,22 +18,26 @@ The tests start envtest and the proxy in one process. The proxy forwards to `htt
 
 The test output shows status codes, registry error codes and `expires_in` only. It never shows the PAT or a token.
 
+## Results of the live run
+
+The operator ran the live tests on 2026-11-16 against `master` at `a700f7e`. Every test passed. The push, pull, cross-repository mount and anonymous public pull through the proxy all worked. The cleanup deleted every package the run had pushed.
+
 ## DELETE of a manifest by digest
 
-To be filled by the operator's live run. The `TestGHCRDeleteBehaviour/DELETE_manifest_by_digest` lines give the answer to `DELETE /v2/<name>/manifests/<digest>`, and the answer to a `HEAD` of the digest afterwards.
+GHCR refuses it: `405` with the registry error code `UNSUPPORTED`. A `HEAD` of the digest afterwards still answers `200`, so nothing was deleted. The proxy must delete by digest through the GitHub REST API instead.
 
 ## DELETE of a manifest by tag
 
-To be filled by the operator's live run. The `TestGHCRDeleteBehaviour/DELETE_manifest_by_tag` lines give the answer to `DELETE /v2/<name>/manifests/<tag>`, and the answers to a `HEAD` of the tag and of its digest afterwards.
+GHCR refuses it: `405 UNSUPPORTED`. A `HEAD` of the tag and of its digest afterwards both answer `200`.
 
 ## DELETE of a blob
 
-To be filled by the operator's live run. The `TestGHCRDeleteBehaviour/DELETE_blob` lines give the answer to `DELETE /v2/<name>/blobs/<digest>`, and the answer to a `HEAD` of the blob afterwards.
+GHCR refuses it: `405 UNSUPPORTED`. A `HEAD` of the blob afterwards answers `200`.
 
 ## Delete scopes that the token endpoint accepts
 
-To be filled by the operator's live run. The `TestGHCRDeleteBehaviour/token_endpoint_scopes_for_delete` lines show the answer of the token endpoint for the actions `delete`, `*` and `pull,push,delete`. For each token that the endpoint gives, they also show the answer to a `DELETE` of a manifest by tag with that token.
+The token endpoint gives a token (`200`) for each of the actions `delete`, `*` and `pull,push,delete`. With each of them, a `DELETE` of a manifest by tag still answers `405 UNSUPPORTED`. The scope makes no difference: GHCR doesn't support the registry delete endpoints at all.
 
 ## Lifetime of registry tokens
 
-To be filled by the operator's live run. The same lines show the `expires_in` value that the token endpoint gives with each token.
+The token endpoint gives `expires_in` as `0` (or leaves it out). The proxy treats that as "not given" and keeps each token for 60 seconds.
