@@ -744,6 +744,13 @@ def build_plan(snap: Snapshot, state: dict, cfg: dict, holds: dict, now: dt.date
         else:
             plan.skipped.append((target, f"Renovate PR, CI {pr.check}"))
 
+    def waiting_on_open_pr(key):
+        """The open PR a session's last handoff (`wait-pr`) waits on, else None."""
+        handoff = (sessions.get(key) or {}).get("handoff") or {}
+        if handoff.get("state") == "wait-pr" and handoff.get("pr") in snap.prs:
+            return handoff["pr"]
+        return None
+
     # PR jobs (tiers 1-3).
     for pr in sorted(snap.prs.values(), key=lambda p: issue_sort(pr_issue(p))):
         target = f"PR #{pr.number}"
@@ -784,6 +791,8 @@ def build_plan(snap: Snapshot, state: dict, cfg: dict, holds: dict, now: dt.date
                         "if it is mechanical (your playbook's Conflicts section) and re-arm auto-merge on the new head; "
                         "otherwise request changes (\"rebase needed\", naming the conflicts).",
                         issue, pr.number, claims))
+            elif pr.check == "failure" and waiting_on_open_pr(worker_key):
+                plan.skipped.append((target, f"worker waiting on PR #{waiting_on_open_pr(worker_key)}"))
             elif pr.check == "failure":
                 reruns = state.get("ci_reruns", {}).get(str(pr.number), {})
                 failed = ", ".join(f"{f['name']} ({f['url']})" for f in pr.failed_runs) or "see the checks tab"
@@ -825,6 +834,8 @@ def build_plan(snap: Snapshot, state: dict, cfg: dict, holds: dict, now: dt.date
             if pr.mergeable == "CONFLICTING":
                 add(Job(fixer_key, "merge-fixer", 2, sort, "PR conflicts with master", fixer_trigger,
                         issue, pr.number, claims))
+            elif pr.check == "failure" and waiting_on_open_pr(worker_key):
+                plan.skipped.append((target, f"worker waiting on PR #{waiting_on_open_pr(worker_key)}"))
             elif pr.check == "failure":
                 failed = ", ".join(f"{f['name']} ({f['url']})" for f in pr.failed_runs) or "see the checks tab"
                 add(Job(worker_key, "issue-worker", 2, sort, "CI failed on the PR",
