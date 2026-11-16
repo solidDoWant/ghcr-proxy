@@ -40,8 +40,8 @@ const (
 	harborNamespace = "harbor"
 	proxyMemory     = 256 << 20 // the chart's default memory limit
 
-	dockerCLIImage  = "mirror.gcr.io/library/docker:29.9.3-cli@sha256:5a7af0dcb0e46c803efe9b45371dd21cb500e5b4453250394ac6f06d49b6e6f1"
-	dockerDindImage = "mirror.gcr.io/library/docker:29.9.3-dind@sha256:7bf70dcb85c822e3fa6f2d332143e474b99147b9d7b39102b0cfe8b04a7dd61b"
+	dockerCLIImage  = "mirror.gcr.io/library/docker:29.10.0-cli@sha256:34507eb5069d8be82c95dd3b6987d4250fd5fee49b82e2509b7d7a7030740d6d"
+	dockerDindImage = "mirror.gcr.io/library/docker:29.10.0-dind@sha256:4bbc7223f81db790097c6dea42fb93e05b8fead4f0431fbe6ccaba6e8473201c"
 )
 
 // env is the cluster the tests share.
