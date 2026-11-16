@@ -46,6 +46,7 @@ upstream:
   {{- end }}
   timeout: {{ .Values.upstream.timeout | quote }}
   tokenTimeout: {{ .Values.upstream.tokenTimeout | quote }}
+  apiURL: {{ .Values.upstream.apiURL | quote }}
 authentication:
   audience: {{ .Values.authentication.audience | quote }}
   cacheTTL: {{ .Values.authentication.cacheTTL | quote }}

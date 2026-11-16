@@ -214,12 +214,13 @@ func (e *liveEnv) startProxy(ctx context.Context, restConfig *rest.Config, patFi
 	configYAML := fmt.Sprintf(`
 upstream:
   url: %s
+  apiURL: %s
   patFile: %s
 grants:
   - namespaces: %s
     repositories: [%q, %q]
     actions: [pull, push, delete]
-`, registryURL, patFile, ciNamespace, e.prefix, e.prefix+"/**")
+`, registryURL, apiURL, patFile, ciNamespace, e.prefix, e.prefix+"/**")
 
 	cfg, err := config.Parse([]byte(configYAML))
 	if err != nil {
@@ -239,6 +240,7 @@ grants:
 
 	forwarder := registry.NewForwarder(registry.ForwarderConfig{
 		Upstream: cfg.Upstream.URL, Tokens: tokens, Timeout: cfg.Upstream.Timeout, Logger: logger,
+		API: registry.APIConfig{URL: cfg.Upstream.APIURL, Timeout: cfg.Upstream.APITimeout, PAT: pat},
 	})
 
 	reviewer, err := authn.NewReviewerForConfig(restConfig, authn.Options{

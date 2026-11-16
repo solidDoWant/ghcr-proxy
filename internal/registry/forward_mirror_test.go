@@ -426,7 +426,8 @@ func TestForwarderSendsBlobChecksAndWritesToTheUpstreamOnly(t *testing.T) {
 	anonImage := pushMirrorImage(t, "anon/app", upstreamFake, policy, anonymous)
 	upstreamFake.MakePublic("anon/app")
 
-	harness := newProxyHarness(t, upstreamFake, upstreamFake.PAT(), decideByOwner, withMirrors(policy, anonymous))
+	harness := newProxyHarness(t, upstreamFake, upstreamFake.PAT(), decideByOwner, withMirrors(policy, anonymous),
+		withFakeAPI(upstreamFake))
 
 	for _, request := range []struct{ method, path string }{
 		{http.MethodHead, "/v2/owner/app/blobs/" + image.layer.String()},
@@ -445,7 +446,8 @@ func TestForwarderSendsBlobChecksAndWritesToTheUpstreamOnly(t *testing.T) {
 		sawUpstream := false
 
 		for _, entry := range upstreamFake.Log() {
-			if entry.Method == request.method && strings.HasPrefix(request.path, entry.Path) {
+			// A delete by digest goes to the upstream's REST API.
+			if entry.Method == request.method && (strings.HasPrefix(request.path, entry.Path) || entry.Server == "api") {
 				sawUpstream = true
 			}
 		}

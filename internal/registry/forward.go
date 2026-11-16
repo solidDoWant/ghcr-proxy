@@ -84,6 +84,9 @@ type ForwarderConfig struct {
 	AnonymousMirror MirrorClient
 	// Metrics counts upstream requests and mirror fallbacks; nil turns it off.
 	Metrics *metrics.Metrics
+	// API is the GitHub REST API that manifest deletes by digest go to. With
+	// no API URL those deletes are refused without an upstream call.
+	API APIConfig
 }
 
 // MirrorClient sends pulls to one mirror with the mirror's own credential.
@@ -103,6 +106,7 @@ type MirrorClient interface {
 type Forwarder struct {
 	cfg   ForwarderConfig
 	proxy *httputil.ReverseProxy
+	rest  *restDeleter
 }
 
 // NewForwarder returns a Forwarder for cfg.
@@ -116,6 +120,18 @@ func NewForwarder(cfg ForwarderConfig) *Forwarder {
 	}
 
 	forwarder := &Forwarder{cfg: cfg}
+
+	if cfg.API.URL != nil {
+		// The config check accepts only URLs go-github takes; should it still
+		// refuse one, deletes by digest are refused, never sent elsewhere.
+		rest, err := newRESTDeleter(cfg.API, cfg.Metrics)
+		if err != nil {
+			cfg.Logger.Error("REST API client not set up; deletes by digest are refused", "error", err.Error())
+		}
+
+		forwarder.rest = rest
+	}
+
 	forwarder.proxy = &httputil.ReverseProxy{
 		Rewrite:        forwarder.rewrite,
 		Transport:      &tokenTransport{forwarder: forwarder},
@@ -144,6 +160,10 @@ type exchangeKey struct{}
 // ServeForward forwards the request and writes the answer. It returns the
 // status the upstream answered with, or 0 if nothing came back.
 func (f *Forwarder) ServeForward(resp http.ResponseWriter, req *http.Request, forward Forward) int {
+	if isRESTDelete(forward.Request) {
+		return f.serveRESTDelete(resp, req, forward)
+	}
+
 	state := &exchange{forward: forward, clientHost: req.Host}
 
 	if forward.Request.Route == RouteManifest && req.Method == http.MethodPut {
@@ -175,6 +195,21 @@ func (f *Forwarder) ServeForward(resp http.ResponseWriter, req *http.Request, fo
 	f.proxy.ServeHTTP(&noInterimWriter{ResponseWriter: resp}, req.WithContext(ctx))
 
 	return state.upstreamStatus
+}
+
+// serveRESTDelete deletes the package version through the REST API. Only a
+// PAT-backed delete gets there: no registry DELETE is sent for it either way.
+func (f *Forwarder) serveRESTDelete(resp http.ResponseWriter, req *http.Request, forward Forward) int {
+	switch {
+	case forward.Credential != CredentialPAT:
+		WriteError(resp, errUnauthorized())
+		return 0
+	case f.rest == nil:
+		WriteError(resp, &Error{Status: http.StatusMethodNotAllowed, Code: "UNSUPPORTED", Message: messageDeleteRefused})
+		return 0
+	}
+
+	return f.rest.serve(req.Context(), resp, forward.Request)
 }
 
 func exchangeOf(req *http.Request) *exchange {

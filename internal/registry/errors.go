@@ -46,7 +46,7 @@ func WriteError(resp http.ResponseWriter, registryErr *Error) {
 		header.Set("WWW-Authenticate", BasicChallenge)
 	}
 
-	if registryErr.Status == http.StatusServiceUnavailable {
+	if registryErr.Status == http.StatusServiceUnavailable && header.Get("Retry-After") == "" {
 		header.Set("Retry-After", "5")
 	}
 

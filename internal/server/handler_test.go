@@ -98,9 +98,13 @@ func newHarness(t *testing.T, options harnessOptions) *harness {
 	})
 	require.NoError(t, err)
 
+	apiURL, err := url.Parse(fake.APIURL())
+	require.NoError(t, err)
+
 	forwarder := registry.NewForwarder(registry.ForwarderConfig{
 		Upstream: upstreamURL, Transport: fake.Transport(), Tokens: tokens, Timeout: time.Minute,
 		Metrics: options.metrics,
+		API:     registry.APIConfig{URL: apiURL, Transport: fake.Transport(), Timeout: time.Minute, PAT: pat},
 	})
 
 	index := authz.NewIndex(chartGrants(t))
@@ -121,6 +125,7 @@ func newHarness(t *testing.T, options harnessOptions) *harness {
 				Rules: []v1alpha1.AccessRule{
 					{Repositories: []string{"soliddowant/foo/app"}, Actions: []v1alpha1.Action{v1alpha1.ActionPush}},
 					{Repositories: []string{"soliddowant/foo/source"}, Actions: []v1alpha1.Action{v1alpha1.ActionPull}},
+					{Repositories: []string{"soliddowant/foo/disposable"}, Actions: []v1alpha1.Action{v1alpha1.ActionDelete}},
 				},
 			},
 		})

@@ -62,6 +62,10 @@ type Upstream struct {
 	CAFile       string
 	Timeout      time.Duration
 	TokenTimeout time.Duration
+	// APIURL is the GitHub REST API that deletes by digest go to.
+	APIURL *url.URL
+	// APITimeout bounds one REST delete, listing included.
+	APITimeout time.Duration
 }
 
 // Authentication configures ServiceAccount token review.
@@ -117,6 +121,8 @@ type rawConfig struct {
 		CAFile       string   `json:"caFile"`
 		Timeout      string   `json:"timeout"`
 		TokenTimeout string   `json:"tokenTimeout"`
+		APIURL       string   `json:"apiURL"`
+		APITimeout   string   `json:"apiTimeout"`
 	} `json:"upstream"`
 	Authentication struct {
 		Audience      string `json:"audience"`
@@ -231,6 +237,15 @@ func Parse(data []byte) (*Config, error) {
 	cfg.Upstream.CAFile = up.CAFile
 	cfg.Upstream.Timeout = duration("upstream.timeout", up.Timeout, "30m", positive, "must be positive")
 	cfg.Upstream.TokenTimeout = duration("upstream.tokenTimeout", up.TokenTimeout, "10s", positive, "must be positive")
+
+	rawAPIURL := orDefault(up.APIURL, "https://api.github.com/")
+	if u, err := url.Parse(rawAPIURL); err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
+		addf("upstream.apiURL: %q is not an http or https URL", rawAPIURL)
+	} else {
+		cfg.Upstream.APIURL = u
+	}
+
+	cfg.Upstream.APITimeout = duration("upstream.apiTimeout", up.APITimeout, "30s", positive, "must be positive")
 
 	au := raw.Authentication
 	cfg.Authentication.Audience = orDefault(au.Audience, "ghcr-proxy")

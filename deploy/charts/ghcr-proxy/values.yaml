@@ -56,6 +56,8 @@ upstream:
   timeout: 30m
   # -- Timeout of one upstream token exchange.
   tokenTimeout: 10s
+  # -- GitHub REST API URL. Deletes by digest delete the package version through this API with the PAT. Uses the upstream CA when set.
+  apiURL: https://api.github.com/
 mirrors:
   policy:
     # -- URL of the policy pull mirror, with a scheme, a host and an optional port only. Empty turns this mirror off. Allowed pulls of manifests and blobs go to this mirror.
