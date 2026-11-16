@@ -559,7 +559,8 @@ func TestRequestsAreCountedByActionDecisionAndStatusClass(t *testing.T) {
 	proxy.do(t, http.MethodGet, "/v2/_catalog", basic(builderToken))
 	proxy.do(t, http.MethodGet, "/v2/soliddowant/foo/source/manifests/latest", basic(builderToken))
 
-	require.NoError(t, testutil.GatherAndCompare(proxyMetrics.Gatherer(), strings.NewReader(`
+	// The count is recorded after the response is written, so the last one can land just after the client returns.
+	expected := `
 # HELP ghcr_proxy_requests_total Requests served, by action, decision and status class.
 # TYPE ghcr_proxy_requests_total counter
 ghcr_proxy_requests_total{action="none",code="4xx",decision="unauthenticated"} 1
@@ -568,5 +569,12 @@ ghcr_proxy_requests_total{action="pull",code="5xx",decision="unavailable"} 1
 ghcr_proxy_requests_total{action="push",code="4xx",decision="denied"} 1
 ghcr_proxy_requests_total{action="pull",code="2xx",decision="allowed"} 1
 ghcr_proxy_requests_total{action="unknown",code="4xx",decision="notfound"} 1
-`), "ghcr_proxy_requests_total"))
+`
+
+	var compareErr error
+
+	require.Eventually(t, func() bool {
+		compareErr = testutil.GatherAndCompare(proxyMetrics.Gatherer(), strings.NewReader(expected), "ghcr_proxy_requests_total")
+		return compareErr == nil
+	}, 10*time.Second, 10*time.Millisecond, "%v", compareErr)
 }
