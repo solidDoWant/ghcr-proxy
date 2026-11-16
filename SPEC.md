@@ -26,7 +26,7 @@ Record the choice on the issue.
 
 Non-negotiable. Tests enforce them, and only the owner can change them.
 
-1. **The PAT never leaves the proxy.** It is read from a Secret and sent only to `ghcr.io`'s token endpoint (or the configured upstream). It is never logged, never returned to a client, never put in status, events, metrics or errors, and never sent to a mirror.
+1. **The PAT never leaves the proxy.** It is read from a Secret and sent only to `ghcr.io`'s token endpoint (or the configured upstream), and for the delete fallback to the GitHub REST API host (`upstream.apiURL`). It is never logged, never returned to a client, never put in status, events, metrics or errors, and never sent to a mirror.
 2. **A caller gets no more than its policy, and a policy no more than its grant.** A request uses the PAT only when a `GHCRAccessPolicy` in the caller's own namespace names the caller's ServiceAccount and allows that action on that repository, and the proxy's grant for that namespace covers it. Everything else is either forwarded with no credential (pulls) or denied.
 3. **Fail closed.** If the proxy can't decide (token review unavailable, policies not yet synced, config invalid) it denies or forwards anonymously; it never falls back to the PAT.
 4. **Transparent to Docker.** A Docker client set up as in "How it is used" can push, pull and delete exactly as against `ghcr.io`, with no changes to image references, Dockerfiles or commands.
@@ -175,7 +175,7 @@ It is a static Go binary (`CGO_ENABLED=0`) shipped alone in the image `ghcr.io/s
 - Proxying registries other than `ghcr.io`, or more than one upstream.
 - Pull-through caching inside the proxy (use a mirror, phase 2), or storing any image data.
 - Deny rules, cluster-scoped policies, or policies that name ServiceAccounts in other namespaces.
-- `/v2/_catalog`, the GitHub packages REST API beyond the one delete call above, package visibility or settings.
+- `/v2/_catalog`, the GitHub packages REST API beyond the version listing and version delete calls above, package visibility or settings.
 - Untagging a tag without deleting the version it points to, when GHCR itself doesn't support it.
 - Issuing or rotating the TLS certificate (the admin uses cert-manager or similar).
 - Hand-written cryptography or registry protocol code where a maintained library exists (see `CLAUDE.md`).
