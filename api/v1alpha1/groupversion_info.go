@@ -18,6 +18,10 @@ var (
 		metav1.AddToGroupVersion(s, GroupVersion)
 		s.AddKnownTypes(GroupVersion,
 			&GHCRAccessPolicy{}, &GHCRAccessPolicyList{},
+			&UpstreamRegistry{}, &UpstreamRegistryList{},
+			&UpstreamCredential{}, &UpstreamCredentialList{},
+			&RegistryMirror{}, &RegistryMirrorList{},
+			&RegistryAccessPolicy{}, &RegistryAccessPolicyList{},
 		)
 
 		return nil

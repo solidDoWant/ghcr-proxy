@@ -159,7 +159,7 @@ func createPolicy(t *testing.T, c client.Client, namespace, name string, reposit
 		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: name},
 		Spec: v1alpha1.GHCRAccessPolicySpec{
 			ServiceAccounts: []string{"builder"},
-			Rules: []v1alpha1.AccessRule{{
+			Rules: []v1alpha1.GHCRAccessRule{{
 				Repositories: repositories,
 				Actions:      []v1alpha1.Action{v1alpha1.ActionPush},
 			}},

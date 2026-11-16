@@ -17,8 +17,8 @@ const (
 	ActionDelete Action = "delete"
 )
 
-// AccessRule allows some actions on the repositories its patterns match.
-type AccessRule struct {
+// GHCRAccessRule allows some actions on the repositories its patterns match.
+type GHCRAccessRule struct {
 	// Repositories are glob patterns of repository names, without the registry host. `*` matches within one path
 	// segment and `**` matches any number of whole segments.
 	// +kubebuilder:validation:MinItems=1
@@ -48,7 +48,7 @@ type GHCRAccessPolicySpec struct {
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=32
 	// +listType=atomic
-	Rules []AccessRule `json:"rules"`
+	Rules []GHCRAccessRule `json:"rules"`
 }
 
 // RejectedReason says why a repository pattern lost actions.

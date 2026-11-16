@@ -122,7 +122,7 @@ func newHarness(t *testing.T, options harnessOptions) *harness {
 			ObjectMeta: metav1.ObjectMeta{Namespace: "ci-foo", Name: "build"},
 			Spec: v1alpha1.GHCRAccessPolicySpec{
 				ServiceAccounts: []string{"builder"},
-				Rules: []v1alpha1.AccessRule{
+				Rules: []v1alpha1.GHCRAccessRule{
 					{Repositories: []string{"soliddowant/foo/app"}, Actions: []v1alpha1.Action{v1alpha1.ActionPush}},
 					{Repositories: []string{"soliddowant/foo/source"}, Actions: []v1alpha1.Action{v1alpha1.ActionPull}},
 					{Repositories: []string{"soliddowant/foo/disposable"}, Actions: []v1alpha1.Action{v1alpha1.ActionDelete}},

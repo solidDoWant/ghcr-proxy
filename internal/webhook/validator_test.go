@@ -36,7 +36,7 @@ func policy(namespace string, repositories []string, actions ...v1alpha1.Action)
 		ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: namespace},
 		Spec: v1alpha1.GHCRAccessPolicySpec{
 			ServiceAccounts: []string{"builder"},
-			Rules:           []v1alpha1.AccessRule{{Repositories: repositories, Actions: actions}},
+			Rules:           []v1alpha1.GHCRAccessRule{{Repositories: repositories, Actions: actions}},
 		},
 	}
 }

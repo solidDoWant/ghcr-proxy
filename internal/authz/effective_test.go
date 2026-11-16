@@ -18,15 +18,15 @@ const (
 	delete = v1alpha1.ActionDelete
 )
 
-func policy(rules ...v1alpha1.AccessRule) *v1alpha1.GHCRAccessPolicy {
+func policy(rules ...v1alpha1.GHCRAccessRule) *v1alpha1.GHCRAccessPolicy {
 	return &v1alpha1.GHCRAccessPolicy{
 		ObjectMeta: metav1.ObjectMeta{Namespace: "ci-foo", Name: "p"},
 		Spec:       v1alpha1.GHCRAccessPolicySpec{ServiceAccounts: []string{"builder"}, Rules: rules},
 	}
 }
 
-func rule(actions []v1alpha1.Action, repositories ...string) v1alpha1.AccessRule {
-	return v1alpha1.AccessRule{Repositories: repositories, Actions: actions}
+func rule(actions []v1alpha1.Action, repositories ...string) v1alpha1.GHCRAccessRule {
+	return v1alpha1.GHCRAccessRule{Repositories: repositories, Actions: actions}
 }
 
 // fooGrant is the default grant expanded for the namespace ci-foo.
