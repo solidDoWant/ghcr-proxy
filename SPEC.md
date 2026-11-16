@@ -1,236 +1,280 @@
-# ghcr-proxy specification
+# registryproxy specification
 
-ghcr-proxy is an authenticating reverse proxy for `ghcr.io`. It runs in a Kubernetes cluster, holds one GitHub classic personal access token (PAT), and lets CI pods push, pull and delete GHCR images without ever seeing that token. Pods authenticate with their own Kubernetes ServiceAccount token. What each ServiceAccount may do is declared in `GHCRAccessPolicy` custom resources, capped per namespace by the proxy's own configuration.
+registryproxy is an authenticating, transparent reverse proxy for container registries. It runs in a Kubernetes cluster and stands in for registries such as `ghcr.io` and `quay.io` inside CI pods. Pods authenticate with their own Kubernetes ServiceAccount token. Namespaced custom resources declare which upstream registries the proxy stands in for, which credentials a namespace may push with, which pull-through mirror (for example a Harbor proxy-cache project) serves its pulls, and what each ServiceAccount may do. Pods never see an upstream or mirror credential.
+
+The project was called ghcr-proxy up to 0.2.x and served only `ghcr.io`. Phases 1 and 2 below were built under that name. Phase 3 generalizes it (issue #98) and renames it.
 
 This file is the authoritative reference. Each phase is done when its checklist in `docs/acceptance/` passes (see "Phases").
 
 ## 1. Purpose and reference behaviour
 
-**The owner's goal.** GitHub has no API for minting GHCR credentials: GHCR still needs a classic PAT, and classic PATs can't be created, scoped or expired by a program. The owner runs self-hosted CI (Tekton, one `ci-<repository>` namespace per repository, builds with the Docker CLI against a dind sidecar in a kata VM). They want each repository's builds to get short-lived credentials that reach only that repository's images, with no PAT handed out.
+**The owner's goal.** The owner runs self-hosted CI: Tekton, one `ci-<repository>` namespace per repository, builds with the Docker CLI against a `dockerd` dind sidecar in a kata VM. They want:
+- every image pull a build makes, by `dockerd` and by BuildKit, from any configured registry, to go through a Harbor proxy-cache project that belongs to **that CI project**, so storage quotas, retention and cost are tracked per project;
+- pushes (and deletes) authenticated with the pod's ServiceAccount token, so builds never hold a registry credential;
+- all of this with no change to Dockerfiles, pipeline scripts or image references.
 
-**How it is used.** CI pods are set up to resolve `ghcr.io` to the proxy (pod `hostAliases`) and to trust the proxy's certificate for `ghcr.io` only (Docker's `/etc/docker/certs.d/ghcr.io/ca.crt`). The cluster admin issues that certificate from a private CA limited to `ghcr.io` by name constraints; ghcr-proxy only serves it. The Docker CLI gets its credential from `docker-credential-ghcr-proxy`, a static credential helper shipped as its own image and mounted into CI pods as an image volume. The helper returns the pod's projected ServiceAccount token. Builds keep using plain `ghcr.io/<owner>/<image>` references: nothing in a Dockerfile or pipeline changes.
+`dockerd` can't do this by itself: its `registry-mirrors` covers Docker Hub only and can't add Harbor's project path, and with the containerd image store it ignores `hosts.toml` mirrors. BuildKit mirrors cover only builds and hold one credential per host. A proxy that intercepts the registry hosts and holds the credentials itself covers both (issue #98 has the proof of concept).
+
+**How it is used.** CI pods resolve each intercepted registry host (`ghcr.io`, `quay.io`, …) to the proxy's Service (pod `hostAliases`). `dockerd` trusts the proxy's certificate for each host through `/etc/docker/certs.d/<host>/ca.crt`. The Docker CLI gets its credential from `docker-credential-registryproxy`, a static credential helper shipped as its own image and mounted as an image volume. The helper returns the pod's projected ServiceAccount token. Builds keep using plain `ghcr.io/<owner>/<image>` and `quay.io/<org>/<image>` references.
+
+A project that needs a registry's own API (for example Harbor's `/api/v2.0/` in harbor-operator's e2e tests) doesn't intercept that host: its pods reach the registry directly with their own credentials, and network policy decides who may. The proxy serves only the registry API.
 
 **Reference behaviour.** Where this spec doesn't decide a behaviour, decide it in this order:
-1. What `ghcr.io` itself does for the same request, so a client can't tell the proxy apart from GHCR except for what policy denies. The proxy follows the OCI Distribution Specification v1.1 and the Docker Registry HTTP API v2 as GHCR implements them.
+1. What the upstream registry itself does for the same request, so a client can't tell the proxy apart from the upstream except for what policy denies. The proxy follows the OCI Distribution Specification v1.1 and the Docker Registry HTTP API v2.
 2. What well-behaved registry front ends do (Harbor's proxy, distribution's proxy mode, Zot): error bodies in the registry JSON error format, standard status codes.
 3. The simplest behaviour that keeps the principles.
 
 Record the choice on the issue.
 
 **Users:**
-- **Admins** install the proxy with Helm, give it the PAT, the TLS certificate and the namespace grants, and set up CI pods (hostAliases, CA, helper, projected token).
-- **Chart authors** (the owner's CI chart, `cluster/charts/ci/project` in the owner's infra repo) create a `GHCRAccessPolicy` in each CI namespace.
+- **Admins** install the proxy with Helm, create `UpstreamRegistry` objects with their serving certificates, shared `UpstreamCredential` and `RegistryMirror` objects, and set up CI pods.
+- **Chart authors** (the owner's CI chart, `cluster/charts/ci/project` in the owner's infra repo) create each project's `RegistryAccessPolicy`, its own `RegistryMirror` objects and the Role that lets the proxy read their Secrets.
 - **The owner** is both.
 
 ## 2. Principles
 
 Non-negotiable. Tests enforce them, and only the owner can change them.
 
-1. **The PAT never leaves the proxy.** It is read from a Secret and sent only to `ghcr.io`'s token endpoint (or the configured upstream), and for the delete fallback to the GitHub REST API host (`upstream.apiURL`). It is never logged, never returned to a client, never put in status, events, metrics or errors, and never sent to a mirror.
-2. **A caller gets no more than its policy, and a policy no more than its grant.** A request uses the PAT only when a `GHCRAccessPolicy` in the caller's own namespace names the caller's ServiceAccount and allows that action on that repository, and the proxy's grant for that namespace covers it. Everything else is either forwarded with no credential (pulls) or denied.
-3. **Fail closed.** If the proxy can't decide (token review unavailable, policies not yet synced, config invalid) it denies or forwards anonymously; it never falls back to the PAT.
-4. **Transparent to Docker.** A Docker client set up as in "How it is used" can push, pull and delete exactly as against `ghcr.io`, with no changes to image references, Dockerfiles or commands.
+1. **Every credential goes only to its own endpoint.** An `UpstreamCredential`'s Secret is sent only to its upstream's registry and token endpoint. A `RegistryMirror`'s Secret is sent only to that mirror. No credential is ever logged, returned to a client, or put in status, events, metrics or errors.
+2. **A caller gets no more than its policy, and a policy no more than what it references allows.** A request uses a credential or a mirror only when a `RegistryAccessPolicy` in the caller's own namespace names the caller's ServiceAccount, has a rule that matches the repository and action, and that rule is inside the referenced credential's ceiling and admitted by every referenced object's `allowedNamespaces`. Everything else is forwarded anonymously (pulls) or denied.
+3. **Fail closed.** If the proxy can't decide (token review unavailable, objects not yet synced, a Secret missing or invalid, rules that disagree) it denies, or forwards a pull anonymously. It never guesses which credential or mirror to use.
+4. **Transparent to Docker.** A Docker client set up as in "How it is used" can push, pull and delete exactly as against the upstream, with no changes to image references, Dockerfiles or commands.
 5. **Done means the owner's checklist passes.** Nobody raises the bar beyond the checklist and principles 1–4.
 
 ## 3. Target environment
 
 - Kubernetes 1.33 or later with the `ImageVolume` feature on (needed only for mounting the credential helper). The `TokenReview` API must be reachable from the proxy.
-- Clients: Docker CLI and daemon 25 or later (including BuildKit through `docker build` and `docker buildx`). Other OCI clients (crane, oras, skopeo, containerd) should work but aren't tested.
-- Upstream: `ghcr.io`. The upstream URL is configurable so tests can use a fake.
-- Optional pull mirrors: any registry that serves GHCR's content under a path prefix, for example a Harbor proxy-cache project for `ghcr.io` (phase 2).
+- Clients: Docker CLI and daemon 25 or later, including BuildKit through `docker build` and `docker buildx`. Other OCI clients (crane, oras, skopeo) should work but aren't tested.
+- Upstreams: any registry that implements the Distribution API with anonymous access, Basic auth, or the Docker token flow (Bearer challenge, token endpoint taking Basic credentials). Tested: `ghcr.io` (live, by hand), a fake GHCR, a second fake registry, and Harbor 2.15. `quay.io` and `mirror.gcr.io` are expected to work; Docker Hub isn't tested.
+- Mirrors: any registry that serves an upstream's content under a path prefix, for example a Harbor proxy-cache project. **Public content only:** a mirror must reach its upstream anonymously (see "Security model").
 
 ## 4. Architecture
 
-One Go binary, `ghcr-proxy`, plus the credential helper binary `docker-credential-ghcr-proxy`.
+One Go binary, `registryproxy`, plus the credential helper binary `docker-credential-registryproxy`.
 
 The proxy runs several stateless replicas behind a Service. Each replica:
 
-1. **Serves TLS** on port 8443 with the certificate and key from a mounted Secret (`tls.crt`, `tls.key`), reloaded when the files change. Also serves `/healthz`, `/readyz` and `/metrics` on a separate plain-HTTP port.
+1. **Serves TLS** on port 8443, choosing the certificate by the TLS server name (SNI) from the `UpstreamRegistry` that claims that host. Serves `/healthz`, `/readyz` and `/metrics` on a separate plain-HTTP port.
 2. **Authenticates** each request (see "Authentication").
-3. **Authorizes** it against an in-memory view of every `GHCRAccessPolicy`, kept by a controller-runtime informer, and the static grants from its config file (see "Authorization").
-4. **Forwards** it upstream with the right credential (see "Forwarding"), and rewrites what the client must see (see "Rewrites").
+3. **Resolves** the request to a rule, credential or mirror from in-memory informer caches of the four kinds and their Secrets (see "Resolution").
+4. **Forwards** it to the upstream or a mirror (see "Forwarding") and rewrites what the client must see (see "Rewrites").
 5. **Writes one audit log line** per request (see "Audit").
 
-A leader-elected controller in the same binary writes `GHCRAccessPolicy` status (which rules are inside the grant). Serving doesn't need the leader: every replica authorizes from its own informer cache. A replica isn't ready until its cache has synced.
+A leader-elected controller in the same binary writes status for all four kinds. Serving doesn't need the leader: every replica decides from its own caches. A replica isn't ready until its caches have synced.
+
+### Custom resources
+
+API group `registryproxy.soliddowant.dev`, version `v1alpha1`. All kinds are namespaced and in the category `registryproxy` (`kubectl get registryproxy -A`).
+
+**References and admission** follow harbor-operator's pattern. Every reference is `{namespace, name}`, with `namespace` defaulting to the referring object's own. Every object that others point at has `allowedNamespaces`:
+
+```yaml
+allowedNamespaces:
+  names:                 # explicit list
+    - ci-foo
+  selector:              # metav1.LabelSelector on Namespace labels
+    matchLabels:
+      registryproxy.soliddowant.dev/tenant: "true"
+```
+
+A namespace is admitted when it is the object's own namespace, is in `names`, or matches `selector`. A reference that isn't admitted is treated as absent and reported as `NotAllowed`. Every Secret reference is to a Secret in the referring object's own namespace.
+
+| Kind | Who writes it, where | Spec |
+|---|---|---|
+| `UpstreamRegistry` | admin, **admin namespaces only** | `hosts` (DNS names the proxy answers for), `url` (where requests go), `caSecretRef` (optional, to trust the upstream), `tls.secretRef` (serving certificate: `tls.crt`, `tls.key`; its SANs must cover every host), `tokenRealmHosts` (optional; hosts allowed as the token endpoint besides the `url` host), `defaultMirrorRef` (optional), `allowedMirrorURLs` (URL prefixes a mirror of this upstream may use), `timeouts`, `allowedNamespaces` (who may point credentials, mirrors and policies at it) |
+| `UpstreamCredential` | admin or tenant, any namespace | `upstreamRef`, `secretRef` (`name`; keys `username` and `password` by default, or `usernameKey` / `passwordKey`), `ceiling` (list of `{repositories, actions}`: the most any policy may do with it), `allowedNamespaces` |
+| `RegistryMirror` | admin or tenant, any namespace | `upstreamRef`, `url`, `pathPrefix`, `secretRef` (optional, same key rules), `caSecretRef` (optional), `fallbackToUpstream` (default `true`), `timeouts`, `allowedNamespaces` |
+| `RegistryAccessPolicy` | tenant, its own namespace | `serviceAccounts` (in this namespace only), `rules` (below) |
+
+**Admin namespaces** are set by the proxy flag `--admin-namespaces` (default: the proxy's own namespace). The proxy reads `UpstreamRegistry` objects only from these, because an `UpstreamRegistry` decides which hosts the proxy impersonates for everyone. The admission webhook rejects one created elsewhere.
+
+**Hosts.** Each host belongs to at most one `UpstreamRegistry`. When two claim the same host, both are `Ready=False, reason=HostConflict` for it and the host isn't served. A TLS handshake for a server name that no ready `UpstreamRegistry` claims fails; there is no default certificate.
+
+**Rules.** `rules` is a list keyed by `name` (`+listType=map`; names unique within the policy). Each rule has exactly one of:
+- `credentialRef` with `repositories` and `actions` (any of `pull`, `push`, `delete`): requests go to the credential's upstream with that credential;
+- `mirrorRef` with `repositories` and `actions: [pull]`: pulls go to that mirror with the mirror's own credential.
+
+Repository patterns are globs: `*` matches within one path segment, `**` across segments. A rule's upstream is the one its credential or mirror points at. A credential rule is **accepted** only if every repository pattern for every action is contained in the credential's ceiling for that action (the existing containment check; when in doubt, not contained). Rules have no order.
+
+**Status.** Every kind has `observedGeneration` and a `Ready` condition with a reason (`Ready`, `NotAllowed`, `RefNotFound`, `SecretUnavailable`, `SecretInvalid`, `HostConflict`, `CertificateMismatch`, `URLNotAllowed`). `RegistryAccessPolicy` status also has `rules[]`, keyed by `name`, each with conditions: `Accepted` (`True`, or `False` with `OutsideCeiling`, `NotAllowed`, `RefNotFound`, `RefNotReady`). An unaccepted rule is ignored; the rest of the policy still applies.
+
+### Secrets
+
+- The proxy watches every Secret that an object references, and applies a change without a restart: cached upstream tokens for that credential are dropped (the token cache key includes the Secret's `resourceVersion`), mirror clients are rebuilt, serving certificates and CAs are reloaded.
+- **Admin namespaces:** the chart gives the proxy `get`, `list` and `watch` on Secrets there.
+- **Tenant namespaces:** the tenant (or its chart) creates a Role with `resourceNames: [<secret>]` and verbs `get`, `list`, `watch`, bound to the proxy's ServiceAccount. The proxy watches each such Secret by name (field selector `metadata.name`). It never needs cluster-wide read access to Secrets.
+- A Secret that is missing, unreadable or lacks its keys makes the referring object `Ready=False`, and requests that need it fail closed (see "Resolution").
 
 ### Authentication
 
-- The proxy answers unauthenticated `/v2/` requests with `401` and `WWW-Authenticate: Basic realm="ghcr-proxy"`, so Docker sends HTTP Basic credentials on every request. The username is ignored; the password is a Kubernetes ServiceAccount token.
-- Tokens are checked with the `TokenReview` API, with `audiences: [<configured audience>]` (default `ghcr-proxy`). The audience must be in the review's result. This also rejects tokens of deleted pods and ServiceAccounts. Definite results (authenticated or rejected, never errors) are cached for at most 30 seconds, keyed by a SHA-256 of the token; the cache never stores the token itself.
-- The identity is the ServiceAccount's namespace and name (`system:serviceaccount:<ns>:<name>`), plus the bound pod name if the review reports one (audit only).
-- A request with no `Authorization` header is **anonymous**. A request with a Basic credential that fails review gets `401 UNAUTHORIZED`: it is never downgraded to anonymous, so a broken setup is visible.
-- A `Bearer` credential is rejected with `401`; the proxy never issues or accepts bearer tokens of its own (it needs none, see "Won't do").
+- The proxy answers unauthenticated `/v2/` requests with `401` and `WWW-Authenticate: Basic realm="registryproxy"`, so Docker sends HTTP Basic credentials. The username is ignored; the password is a Kubernetes ServiceAccount token.
+- Tokens are checked with the `TokenReview` API, with `audiences: [<configured audience>]` (default `registryproxy`). The audience must be in the result. Definite results are cached for at most 30 seconds, keyed by a SHA-256 of the token; the cache never stores the token.
+- The identity is the ServiceAccount's namespace and name, plus the bound pod name if the review reports one (audit only).
+- A request with no `Authorization` header is **anonymous**. A Basic credential that fails review gets `401 UNAUTHORIZED`; it is never downgraded to anonymous. A `Bearer` credential is rejected with `401`.
 
-### Authorization
+### Requests
 
-**Actions.** `pull`, `push`, `delete`. The proxy derives the action from the request, never from anything the client claims:
+**Paths.** Before anything else, a request whose path isn't in canonical form gets `400` and nothing is sent anywhere: `.` or `..` segments, empty segments, percent-encoded `/` or unreserved characters, or a first segment that is `v2` in another case or encoding. Requests outside `/v2` get `404`.
+
+**Actions.** The proxy derives the action from the request:
 
 | Request | Action |
 |---|---|
 | `GET`/`HEAD` on `/v2/<name>/manifests/<ref>`, `/blobs/<digest>`, `/tags/list`, `/referrers/<digest>` | `pull` on `<name>` |
-| `POST`/`PATCH`/`PUT` on `/v2/<name>/blobs/uploads/…`, `PUT` on `/v2/<name>/manifests/<ref>` | `push` on `<name>` |
+| `POST /v2/<name>/blobs/uploads/`, requests on an upload session (below), `PUT` on `/v2/<name>/manifests/<ref>` | `push` on `<name>` |
 | `POST /v2/<name>/blobs/uploads/?mount=<digest>&from=<other>` | `push` on `<name>` **and** `pull` on `<other>` |
 | `DELETE` on `/v2/<name>/manifests/<ref>` or `/blobs/<digest>` | `delete` on `<name>` |
 | `GET /v2/` | none (version check) |
-| anything else (`/v2/_catalog`, unknown paths) | denied with `404` |
+| anything else (`/v2/_catalog`, unknown paths) | `404` |
 
-Repository names are parsed with the distribution reference grammar (multi-segment names allowed) and compared lower-cased, as GHCR does.
+Repository names are parsed with the distribution reference grammar and compared lower-cased.
 
-**Policies.** `GHCRAccessPolicy` (API group `ghcr-proxy.soliddowant.dev`, version `v1alpha1`, namespaced):
+**Upload sessions.** The upload `Location` an upstream returns is opaque and differs between registries (GHCR uses `/v2/<name>/blobs/upload/<session>`). The proxy gives the client its own session URL, `/v2/<name>/blobs/uploads/<token>`, where `<token>` encodes the upstream's `Location` path and query. When a request comes in on such a URL, the proxy decodes it and refuses it (`404 BLOB_UPLOAD_UNKNOWN`) unless the upstream URL has the upstream's origin and a path under `/v2/<name>/blobs/` for the same `<name>`. The session is checked against policy as `push` on `<name>`.
 
-```yaml
-apiVersion: ghcr-proxy.soliddowant.dev/v1alpha1
-kind: GHCRAccessPolicy
-metadata:
-  namespace: ci-foo
-  name: builds
-spec:
-  serviceAccounts:          # in this namespace only
-    - default
-  rules:
-    - repositories:          # glob: `*` matches within one path segment, `**` across segments
-        - soliddowant/foo
-        - soliddowant/foo/**
-      actions:
-        - pull
-        - push
-status:
-  observedGeneration: 1
-  conditions:
-    - type: Ready           # False with reason OutsideGrant when any repository pattern is outside the grant
-  rejected:                 # the repository patterns ignored, per rule
-    - rule: 0
-      repositories: []
-```
+### Resolution
 
-A request is allowed when **some** policy in the caller's namespace lists the caller's ServiceAccount and has a rule that matches the repository and the action, **and** the namespace's grant covers that repository and action. Policies only ever add access; there are no deny rules.
+For a request to host `H`, repository `R` and action `A`:
 
-**Grants.** The proxy's config file (rendered from chart values) lists which namespaces may grant what. A namespace that matches no grant can grant nothing.
+1. The upstream `U` is the ready `UpstreamRegistry` that claims `H`.
+2. If the caller is a ServiceAccount, the **candidates** are the accepted rules, in policies in the caller's namespace that name its ServiceAccount, whose upstream is `U`, whose repositories match `R`, and whose actions include `A`. A credential rule is a candidate only if its credential is ready; a mirror rule only if its mirror is ready.
+3. **Precedence:** for a pull, credential rules win over mirror rules (private content needs the credential; mirrors are for public content).
+4. **Ambiguity:** if the remaining candidates name more than one distinct credential, or more than one distinct mirror, the request is denied: `403 DENIED` with a message naming the policies and rules. Candidates that name the same credential or mirror simply combine.
+5. **One candidate target:**
+   - credential: forwarded to `U` with that credential (pulls too: credentialed pulls never go to a mirror);
+   - mirror: a pull of a manifest or blob goes to the mirror; a tag list or referrers request goes to `U` anonymously.
+6. **No candidate:**
+   - pull: to `U`'s `defaultMirrorRef` if it is set and ready, else to `U` anonymously;
+   - push or delete by a ServiceAccount: `403 DENIED` naming the namespace, ServiceAccount, repository and action; nothing is sent;
+   - push or delete by an anonymous caller: `401` with the Basic challenge, so Docker retries with its credential.
+7. **Mounts** use the credential chosen for `push` on `<name>`. If `pull` on `<other>` doesn't resolve to that same credential, or the parameters are malformed or repeated, `mount` and `from` are dropped and the upstream answers with an ordinary upload session.
 
-```yaml
-grants:
-  - namespaces: "ci-(?P<repo>[a-z0-9-]+)"   # RE2, matched against the whole namespace name
-    repositories:                            # globs; ${name} expands to a named capture
-      - soliddowant/${repo}
-      - soliddowant/${repo}/**
-    actions: [pull, push, delete]
-```
-
-A policy repository pattern is inside a grant only if every name it can match is matched by one of the grant's patterns (pattern containment is decided segment by segment on the glob syntax; when in doubt, the pattern is rejected). Rejected patterns are dropped from the policy, listed in `status.rejected`, and set `Ready=False, reason=OutsideGrant`. The rest of the policy still applies.
-
-**Who may write policies** is decided by Kubernetes RBAC, outside the proxy. The grant is the ceiling a namespace can't exceed even if it can write any policy in its own namespace. Status is written only by the proxy.
+A credential or mirror that becomes not ready while serving (Secret removed, admission withdrawn) stops being used on the next request.
 
 ### Forwarding
 
-- **Allowed by policy:** forwarded to the upstream with a bearer token the proxy gets from the upstream's token endpoint using the PAT, scoped to exactly the repositories and actions this request needs. The proxy uses `github.com/google/go-containerregistry/pkg/v1/remote/transport` only for the token exchange, sends tokens with its own round tripper (never widening scopes or resending), and caches one token per credential kind and scope set until it expires.
-- **Pull not allowed by policy, or anonymous pull:** forwarded with **no credential** (an anonymous token, never the PAT), so public images work. When GHCR refuses it, the client gets the proxy's own `401` Basic challenge, so clients that try anonymously first (BuildKit, containerd) retry with their credential.
-- **Push or delete not allowed:** for a ServiceAccount, `403` with registry error code `DENIED` and a message naming the namespace, ServiceAccount, repository and action; for an anonymous request, `401` with the Basic challenge, so Docker retries with its credential. Nothing is sent upstream.
-- **Mount (`?mount=&from=`) where `from` isn't pullable by policy, or the parameters are malformed or repeated:** the `mount` and `from` parameters are dropped, so the registry answers with an ordinary upload session (the client then uploads the blob, as the spec allows).
-- Request and response bodies are streamed, never buffered whole. Client and upstream timeouts are configurable; uploads of several GB must work.
+- **Upstream auth.** The proxy pings the upstream's `/v2/` and follows its challenge: none, Basic (sends the credential), or Bearer (gets a token from the token endpoint, with the credential as Basic auth, or anonymously). It uses `github.com/google/go-containerregistry/pkg/v1/remote/transport` only for the ping and token exchange, sends tokens with its own round tripper (never widening scopes or resending), and caches one token per (credential, Secret `resourceVersion`, scope set) until it expires, or 60 seconds when the endpoint gives no lifetime. A token endpoint on a host other than the `url` host or `tokenRealmHosts` is refused (`502`).
+- **Anonymous pulls** use the same flow with no credential. When the upstream refuses one, the client gets the proxy's own `401` Basic challenge, so clients that try anonymously first (BuildKit, containerd) retry with their credential.
+- **Upstream `401`** on a request with a credential is retried once with a fresh token when the request can be replayed, then returned as `502` with a clear error: the credential is wrong or lacks a scope.
+- **Delete** is the OCI `DELETE` on manifests (by digest, or by tag where the registry supports it) and blobs, forwarded with the credential. The upstream's answer, including `405 UNSUPPORTED` (GHCR answers that to every delete), is passed through. There are no registry-specific delete paths.
+- The upstream path and query are rebuilt from what the proxy parsed and resolved; nothing from the client's URL is forwarded verbatim.
+- Request and response bodies are streamed, never buffered whole. Uploads of several GB must work.
+
+### Mirrors
+
+- A mirror pull goes to `<mirror url>/v2/<pathPrefix>/<R>/…` with the mirror's own credential (the same challenge handling as upstreams).
+- A `RegistryMirror` whose `url` doesn't start with one of its upstream's `allowedMirrorURLs` is `Ready=False, reason=URLNotAllowed` and is never contacted. An empty list allows no mirrors.
+- When a mirror fails (connection error, no response headers within its timeout, `5xx`, or `404`; a blob only before response headers) and `fallbackToUpstream` is true, the pull goes to `U` anonymously; otherwise a `404` is returned as is and any other failure gives `502 "mirror unavailable"`. A `401` or `403` from the mirror is a mirror credential problem: `502 "mirror unavailable"`, never a fallback.
+- A blob `HEAD` always goes to `U` anonymously.
 
 ### Rewrites
 
-- `Location` headers that point at the upstream host are rewritten to the host the client used. Upload session URLs keep their path and query.
-- `Location` headers that point anywhere else (GHCR's blob storage, signed URLs) are passed through untouched, so blob downloads go straight to storage.
-- `WWW-Authenticate` challenges from the upstream are never passed to the client; the client only ever sees the proxy's Basic challenge.
-- Upstream `401`s on a request the proxy authorized are retried once with a fresh token (when the request can be replayed), then returned as `502` with a clear error: they mean the PAT is wrong or lacks a scope.
-- The upstream path and query are rebuilt from what the proxy parsed and authorized; nothing from the client's URL is forwarded verbatim.
-
-### Delete
-
-GHCR answers `405 UNSUPPORTED` to every OCI `DELETE` endpoint (`docs/dev/ghcr-behaviour.md`). So the proxy implements `DELETE /v2/<name>/manifests/<digest>` through the GitHub REST API (`upstream.apiURL`, default `https://api.github.com/`): it lists the package's versions (`orgs` first, then `users`), finds the version whose name is the digest, and deletes it (`DELETE /users/{user}/packages/container/{package}/versions/{id}` or the `orgs` equivalent). No registry `DELETE` is sent for it. A `204` is answered `202 Accepted`; the other answers are mapped as in `docs/design/phase-2.md`, section 2. Deleting by tag and deleting a blob are passed through as is; GHCR refuses them, and the client gets GHCR's error.
-
-### Pull mirrors (phase 2)
-
-The config may name a **policy mirror** and an **anonymous mirror**, each `{url, pathPrefix, credentialsFile, caFile, fallbackToUpstream, responseHeaderTimeout}`. Allowed pulls of manifests and blobs go to the policy mirror; anonymous and not-allowed pulls go to the anonymous mirror. Tag lists, referrers, pushes, deletes and mounts always go to the upstream. The PAT is never sent to a mirror; a mirror uses its own credentials. When a mirror fails (connection error, no response headers within `responseHeaderTimeout`, `5xx`, or `404`; a blob only before response headers) and `fallbackToUpstream` is true (default), the request goes to the upstream as above; otherwise a `404` is returned as is and any other failure gives `502 "mirror unavailable"`. A `401` or `403` from the policy mirror is a mirror credential problem: `502 "mirror unavailable"`, never a fallback. A blob `HEAD` always goes to the upstream.
-
-Admins must configure the anonymous mirror with **no upstream credentials**; otherwise anonymous callers could read private images through it. The proxy can't check this; the admin docs say so prominently.
+- `Location` headers that point at the upstream or mirror host are rewritten to the host the client used. Upload sessions are rewritten as above.
+- `Location` headers that point anywhere else (blob storage, signed URLs) are passed through untouched, so blob downloads go straight to storage.
+- `WWW-Authenticate` challenges from the upstream or a mirror are never passed to the client.
 
 ### Audit
 
-One JSON log line per request to stdout: time, client IP, namespace, ServiceAccount, pod, repository, action, decision (`allowed`, `anonymous`, `denied`, `unauthenticated`, `unavailable`, `notfound`, `invalid`), the policy that allowed it, upstream status, bytes, duration, and for manifest pushes and deletes the digest. Never any header values or tokens.
+One JSON log line per request to stdout: time, client IP, host, upstream, namespace, ServiceAccount, pod, repository, action, decision (`allowed`, `mirror`, `anonymous`, `denied`, `ambiguous`, `unauthenticated`, `unavailable`, `notfound`, `invalid`), the policy and rule, the credential or mirror used, upstream or mirror status, bytes, duration, and for manifest pushes and deletes the digest. Never any header values, credentials or tokens.
+
+### Metrics
+
+Request counts by upstream, action, decision and status class; upstream and mirror latency histograms; token review results and cache hits; mirror fallbacks. The only object-name label is `upstream` (`<namespace>/<name>` of the `UpstreamRegistry`; admins create few). No repository, namespace, ServiceAccount, credential or mirror labels.
+
+### Admission webhook
+
+Optional, served by the proxy (`--webhook`). It rejects:
+- an `UpstreamRegistry` outside the admin namespaces;
+- a rule with both or neither of `credentialRef` and `mirrorRef`, or a mirror rule with an action other than `pull`;
+- a credential rule outside its credential's ceiling (message names the patterns).
+
+References that don't exist yet are allowed (they may be created later) and show in status.
 
 ### Credential helper
 
-`docker-credential-ghcr-proxy` implements the Docker credential helper protocol:
-- `get`: for server `ghcr.io` (with or without scheme or path), reads the token file (`GHCR_PROXY_TOKEN_FILE`, default `/var/run/secrets/ghcr-proxy/token`) fresh on every call and prints `{"ServerURL":…,"Username":"ghcr-proxy","Secret":<token>}`. Any other server: the protocol's "credentials not found" answer.
-- `store`, `erase`: succeed and do nothing.
-- `list`: `{}`.
+`docker-credential-registryproxy` implements the Docker credential helper protocol, plus one subcommand:
+- `get`: for a server whose host is in `REGISTRYPROXY_HOSTS` (comma-separated; with or without scheme or path), reads the token file (`REGISTRYPROXY_TOKEN_FILE`, default `/var/run/secrets/registryproxy/token`) fresh on every call and prints `{"ServerURL":…,"Username":"registryproxy","Secret":<token>}`. Any other server: the protocol's "credentials not found" answer.
+- `store`, `erase`: succeed and do nothing. `list`: `{}`.
+- `configure`: merges `"credHelpers": {"<host>": "registryproxy"}` for each host in `REGISTRYPROXY_HOSTS` into `$DOCKER_CONFIG/config.json` (default `~/.docker`), creating it if needed and keeping every other key. `DOCKER_CONFIG` must be writable (buildx keeps state there), so it is never a ConfigMap mount.
 
-It is a static Go binary (`CGO_ENABLED=0`) shipped alone in the image `ghcr.io/soliddowant/ghcr-proxy-credential-helper` (`FROM scratch`, binary at `/docker-credential-ghcr-proxy`), for amd64 and arm64.
+It is a static Go binary (`CGO_ENABLED=0`) shipped alone in the image `ghcr.io/soliddowant/registryproxy-credential-helper` (`FROM scratch`, binary at `/docker-credential-registryproxy`), for amd64 and arm64.
 
 ## 5. Security model
 
-- The proxy's Kubernetes RBAC: create `TokenReview`; get, list and watch `GHCRAccessPolicy`; update `GHCRAccessPolicy/status`; leases for leader election. Nothing else (no events); it reads the PAT and TLS Secrets as mounted files.
-- A caller's reach is the intersection of its namespace's policies and its namespace's grant. A caller in a namespace with no grant gets only anonymous pulls.
-- ServiceAccount tokens for the proxy should use their own audience (`ghcr-proxy`) and a short lifetime (the docs recommend 1–6 hours; the kubelet rotates them). A token with the default API server audience is rejected unless the admin configures that audience, which the docs advise against.
-- The CA that signs the proxy's `ghcr.io` certificate is the admin's. The docs require name constraints limiting it to `ghcr.io` and trusting it only through Docker's per-registry `certs.d` directory, never the system trust store.
-- The PAT should belong to a dedicated machine-user account with only `read:packages`, `write:packages` and `delete:packages`.
-- All callers share one GitHub identity and its rate limits. The audit log is how the owner tells who did what.
+- **RBAC:** create `TokenReview`; get, list and watch the four kinds cluster-wide; update their status; Secrets as in "Secrets"; leases for leader election. Nothing else: no pods, no cluster-wide Secrets.
+- **Mirrors are public-content only.** A Harbor proxy-cache project fetches from its upstream with its registry endpoint's credential. If that credential can read private images, anyone holding the project's robot can read them through Harbor directly, bypassing the proxy's policy. So a mirror's Harbor registry endpoint must have **no upstream credential**. The proxy can't check this; the admin docs say so prominently. Private content is pulled with an `UpstreamCredential`, which never uses a mirror.
+- **Tenant-written objects** can only affect their own namespace's requests: a tenant's credential or mirror is used only by policies in namespaces it admits, and its Secret goes only to its own endpoint. A tenant mirror's URL is limited by the upstream's `allowedMirrorURLs`. The proxy's NetworkPolicy should also limit its egress to the upstreams and mirrors.
+- **ServiceAccount tokens** for the proxy use their own audience (`registryproxy`) and a short lifetime (the docs recommend 1–6 hours).
+- **Serving CAs** are the admin's. The docs require one CA per `UpstreamRegistry`, name-constrained to exactly its hosts, trusted only through Docker's per-registry `certs.d` directory, never the system trust store.
+- **Shared credentials** (for example one GHCR PAT behind many `UpstreamCredential` objects, each with its own ceiling) share one upstream identity and its rate limits. The audit log is how the owner tells who did what.
 
 ## 6. Won't do
 
-- Minting or managing GitHub PATs, GitHub App tokens, or any GitHub-side setup.
-- Issuing credentials of its own (bearer tokens, robot accounts). Kubernetes ServiceAccount tokens are the only client credential.
-- Proxying registries other than `ghcr.io`, or more than one upstream.
-- Pull-through caching inside the proxy (use a mirror, phase 2), or storing any image data.
-- Deny rules, cluster-scoped policies, or policies that name ServiceAccounts in other namespaces.
-- `/v2/_catalog`, the GitHub packages REST API beyond the version listing and version delete calls above, package visibility or settings.
-- Untagging a tag without deleting the version it points to, when GHCR itself doesn't support it.
-- Issuing or rotating the TLS certificate (the admin uses cert-manager or similar).
+- Caching or storing image data in the proxy (mirrors do that).
+- Pulling private content through a mirror.
+- Passing through anything outside the registry API (`/v2`): a project that needs a registry's own API doesn't intercept that host.
+- Registry-specific APIs (the GitHub packages REST API, Harbor's API): only the standard registry protocol.
+- Identifying callers by anything but their ServiceAccount token (no source-IP identity).
+- Cluster-scoped kinds, deny rules, rule ordering, or policies that name ServiceAccounts in other namespaces.
+- Minting or managing upstream credentials, robot accounts or PATs; issuing or rotating TLS certificates (the admin uses cert-manager).
+- Node-level (containerd/CRI) image pulls.
+- `/v2/_catalog`.
+- Migrating `GHCRAccessPolicy` objects or the 0.2.x config file: 0.2.x was never deployed.
 - Hand-written cryptography or registry protocol code where a maintained library exists (see `CLAUDE.md`).
 - Formal verification, or fuzz or simulation runs that define done.
 
 ## 7. Phases
 
-Each phase ends with a release an admin can deploy: images `ghcr.io/soliddowant/ghcr-proxy:<version>` and `ghcr.io/soliddowant/ghcr-proxy-credential-helper:<version>`, chart `oci://ghcr.io/soliddowant/charts/ghcr-proxy`. The owner deploys it in their own time; deploying never blocks a phase.
+Each phase ends with a release an admin can deploy. The owner deploys it in their own time; deploying never blocks a phase.
 
-1. **Push and pull through the proxy** (`docs/acceptance/phase-1.md`). TLS serving, ServiceAccount authentication, `GHCRAccessPolicy` with grants and status, forwarding and rewrites, anonymous pulls, audit log, credential helper, images, chart, and the admin guide for setting up a CI pod. This is everything the owner's CI needs.
-2. **Delete, mirrors and operations** (`docs/acceptance/phase-2.md`). Delete verified against real GHCR (with the REST fallback if needed), policy and anonymous pull mirrors, metrics, an optional validating admission webhook served by the proxy (the same containment code) that rejects policies outside the grant at apply time, PodDisruptionBudget and NetworkPolicy options.
+1. **Done (0.1.x, as ghcr-proxy).** Push and pull through the proxy for `ghcr.io`.
+2. **Done (0.2.0, as ghcr-proxy).** Delete, mirrors and operations.
+3. **registryproxy** (`docs/acceptance/phase-3.md`). The rename, the four custom resources, several upstreams by SNI, upstream auth by challenge, credentials with ceilings, per-namespace mirrors with tenant-owned Secrets, Secret watching, generic upload sessions and delete, path canonicalization, the credential helper's host list and `configure`, status, webhook, metrics, audit, chart and docs. Release 0.3.0: images `ghcr.io/soliddowant/registryproxy:<version>` and `ghcr.io/soliddowant/registryproxy-credential-helper:<version>`, chart `oci://ghcr.io/soliddowant/charts/registryproxy`.
 
 Each phase's design (`docs/design/phase-N.md`) is reviewed before its issues are scheduled.
 
 ## 8. Testing
 
-- **Unit:** Go `testing` + `testify`, table-driven. Path parsing and action mapping, glob matching and containment, grant expansion, rewrites and the credential helper are unit-tested.
-- **Fake GHCR** (`test/fakeghcr`): an in-process registry built from `github.com/google/go-containerregistry/pkg/registry`, wrapped to behave like GHCR where it matters: bearer-token challenge with a `/token` endpoint that checks a PAT and enforces scopes, absolute `Location` URLs for uploads, `307` redirects for blob downloads to a separate storage host, public and private repositories, and the GitHub REST endpoints that list and delete container package versions for users and organizations. It is a test double, not product code.
-- **Integration** (`//go:build integration`): envtest plus the proxy and the fake GHCR in-process; real `TokenReview` from envtest's API server.
-- **e2e** (`//go:build e2e`): kind with `ImageVolume` on, the proxy installed from the chart with a locally built image, the fake GHCR in the cluster, and a pod set up exactly as the admin guide says (hostAliases, `certs.d` CA, helper image volume, projected token, dind) running real `docker build`, `docker push` and `docker pull`.
-- **Live** (`//go:build live`): the same client flows against the real `ghcr.io`. **Never in CI.** The only PAT available belongs to the owner's main GitHub account, so the operator runs `make test-live` by hand outside CI, with `GHCR_LIVE_PAT_FILE` pointing at the token file; agents never get the token. Without the variable the tests skip. The tests touch only packages they create themselves (section 1 of `docs/design/phase-2.md`). Phase 2 uses them to settle the delete question.
+- **Unit:** Go `testing` + `testify`, table-driven. Path canonicalization and classification, glob matching and containment, resolution (candidates, precedence, ambiguity), upload session tokens, rewrites and the credential helper are unit-tested.
+- **Fake registries** (`test/fakeregistry`): in-process registries built from `github.com/google/go-containerregistry/pkg/registry`, with options for the behaviours that matter: Bearer challenge with a token endpoint that checks credentials and enforces scopes, or Basic, or anonymous; absolute upload `Location`s with a configurable path shape (GHCR's singular `blobs/upload/`); `307` redirects for blobs to a separate storage host; public and private repositories; `DELETE` supported or answered `405`. The fake GHCR is one configuration of it. They are test doubles, not product code.
+- **Integration** (`//go:build integration`): envtest plus the proxy and fake registries in-process; real `TokenReview` from envtest's API server.
+- **e2e** (`//go:build e2e`): kind with `ImageVolume` on, the proxy from the chart with a locally built image, two fake registries and Harbor in the cluster, and pods set up exactly as the admin guide says, running real `docker build`, `docker push` and `docker pull`.
+- **Live** (`//go:build live`): the same client flows against the real `ghcr.io`. **Never in CI.** Only the operator runs `make test-live` by hand, with `GHCR_LIVE_PAT_FILE`; agents never get the token. The tests touch only packages they create.
 - **Acceptance:** each checklist scenario lists its tests on a `Tests:` line. `make acceptance` prints passing scenarios out of the total.
 - Tests never depend on wall-clock speed. Wait on conditions with deadlines. Timing-sensitive tests pass `-count=50 -race`.
 
 ## 9. Repository layout
 
 ```
-cmd/ghcr-proxy/                     proxy main
-cmd/docker-credential-ghcr-proxy/   credential helper main
-api/v1alpha1/                       GHCRAccessPolicy Go types (controller-gen)
-internal/server/                    TLS listener, routing, health and metrics endpoints
-internal/authn/                     TokenReview with cache
-internal/authz/                     policy index, grants, glob matching and containment
-internal/registry/                  request classification (path, action), forwarding, rewrites, upstream transports
-internal/controller/                GHCRAccessPolicy status controller
-internal/audit/                     audit log lines
-internal/credhelper/                credential helper logic
-config/crd/bases/, config/rbac/     generated
-deploy/charts/ghcr-proxy            Helm chart
-test/fakeghcr/, test/e2e/,          fake GHCR, e2e harness and fixtures,
-test/live/                          live tests against ghcr.io
-docs/                               user/ admin/ dev/ agents/ design/ acceptance/
-scripts/                            dev and agent scripts
+cmd/registryproxy/                     proxy main
+cmd/docker-credential-registryproxy/   credential helper main
+api/v1alpha1/                          the four kinds (controller-gen)
+internal/server/                       TLS listener and SNI, path canonicalization, health and metrics endpoints
+internal/authn/                        TokenReview with cache
+internal/authz/                        object index, admission, rule acceptance, resolution, glob matching and containment
+internal/registry/                     request classification, forwarding, upload sessions, rewrites, upstream transports
+internal/mirror/                       mirror clients and fallback
+internal/secrets/                      Secret watching
+internal/controller/                   status controllers
+internal/webhook/                      admission webhook
+internal/audit/, internal/metrics/
+internal/credhelper/                   credential helper logic
+config/crd/bases/, config/rbac/        generated
+deploy/charts/registryproxy            Helm chart
+test/fakeregistry/, test/e2e/,         fake registries, e2e harness and fixtures,
+test/live/                             live tests against ghcr.io
+docs/                                  user/ admin/ dev/ agents/ design/ acceptance/
+scripts/                               dev and agent scripts
 ```
 
 ## 10. Documentation plan
 
 | Audience | Knows | Needs | Pages |
 |---|---|---|---|
-| Chart authors (users) | Kubernetes YAML, Helm, Docker | How to write a `GHCRAccessPolicy`, what its status means, why a push is denied | `docs/user/` |
-| Admins | Kubernetes, Helm, Flux, cert-manager, Tekton | Install, the PAT, the certificate and CA, grants, setting up a CI pod (hostAliases, certs.d, helper, token), security limits, troubleshooting | `docs/admin/` (CRD and chart value references generated) |
-| Developers | Go, controller-runtime, the registry API | Architecture, packages, the fake GHCR, test tiers, releasing | `docs/dev/` |
+| Chart authors (users) | Kubernetes YAML, Helm, Docker | How to write a `RegistryAccessPolicy`, set up a project's own mirror and the Role for its Secret, read status, and why a request is denied or ambiguous | `docs/user/` |
+| Admins | Kubernetes, Helm, Flux, cert-manager, Tekton, Harbor | Install, `UpstreamRegistry` and its certificate and CA, shared credentials with ceilings, mirrors (public content only), setting up a CI pod (hostAliases, certs.d, helper, `configure`, token), projects that don't intercept, security limits, troubleshooting | `docs/admin/` (CRD and chart value references generated) |
+| Developers | Go, controller-runtime, the registry API | Architecture, packages, the fake registries, test tiers, releasing | `docs/dev/` |
 | Agents | This repo | Playbooks | `docs/agents/`, `.claude/`, `CLAUDE.md` |
 
 ## 11. Open questions
 
-1. Does GHCR support the OCI `DELETE` endpoints for manifests by digest and by tag? Settled in phase 2 with the live tests.
-2. How long do GHCR's registry bearer tokens live, and does GHCR enforce their scopes? The proxy doesn't rely on either (it caches by the `expires_in` it is given, else 60 seconds, and never hands tokens to clients), but the live tests record the answer in `docs/dev/`.
+1. Do `quay.io` and `mirror.gcr.io` answer the anonymous token flow as expected, and where do they redirect blobs? Checked by hand by the operator during phase 3; recorded in `docs/dev/`.
