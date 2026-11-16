@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.1.1
+
+ghcr-proxy is a proxy for the GitHub container registry, `ghcr.io`. It runs in a Kubernetes cluster and holds one GitHub personal access token (PAT). CI pods push and pull images through the proxy with the token of their own ServiceAccount, and they never see the PAT. This patch release fixes pushes to `ghcr.io`, which did not work in 0.1.0. It also includes the first parts of the next phase of work. These parts are off by default. Install it with the Helm chart `oci://ghcr.io/soliddowant/charts/ghcr-proxy`, version `0.1.1`. [Install ghcr-proxy](https://github.com/solidDoWant/ghcr-proxy/blob/v0.1.1/docs/admin/install.md) tells you how.
+
+### Upgrade notes for admins
+
+- If you run 0.1.0, upgrade to 0.1.1. With 0.1.0, every push to `ghcr.io` through the proxy fails. You do not have to change your chart values. All new chart values are off by default.
+
+### Pushing and pulling
+
+- Pushes through the proxy to `ghcr.io` work. In 0.1.0, they failed with `404 NOT_FOUND`. The reason is that `ghcr.io` gives upload paths of the form `/v2/<name>/blobs/upload/<session>` (singular `upload`), and the proxy accepted only the plural form of the registry specification. The proxy now accepts both forms ([#76](https://github.com/solidDoWant/ghcr-proxy/pull/76), [#79](https://github.com/solidDoWant/ghcr-proxy/pull/79)).
+
+### Mirrors
+
+This work is part of the next phase and is still in progress.
+
+- The proxy can send pulls to a pull mirror, which is a registry that keeps copies of GHCR images (for example a Harbor proxy-cache project). Set the chart values `mirrors.policy` and `mirrors.anonymous`. Allowed pulls of manifests and blobs go to the policy mirror. Anonymous and not-allowed pulls go to the anonymous mirror. If a mirror fails, the pull goes to `ghcr.io`, unless you set `fallbackToUpstream: false`. Each mirror has its own credentials Secret and CA Secret. The proxy never sends the PAT to a mirror. [Configure pull mirrors](https://github.com/solidDoWant/ghcr-proxy/blob/v0.1.1/docs/admin/install.md#configure-pull-mirrors) tells you how ([#71](https://github.com/solidDoWant/ghcr-proxy/pull/71), [#75](https://github.com/solidDoWant/ghcr-proxy/pull/75)).
+
+### Access policies and grants
+
+This work is part of the next phase and is still in progress.
+
+- An optional admission webhook rejects a `GHCRAccessPolicy` at `kubectl apply` when a repository pattern or an action is outside the grants of its namespace. The proxy enforces the grants with or without the webhook. Set `webhook.enabled=true` and give the webhook a certificate, from cert-manager or from your own Secret. [Turn on the admission webhook](https://github.com/solidDoWant/ghcr-proxy/blob/v0.1.1/docs/admin/install.md#turn-on-the-admission-webhook) tells you how ([#70](https://github.com/solidDoWant/ghcr-proxy/pull/70)).
+
+### Deployment
+
+This work is part of the next phase and is still in progress.
+
+- The chart can create a PodDisruptionBudget, a NetworkPolicy and a Prometheus Operator ServiceMonitor. Each one is off by default. Set `podDisruptionBudget.enabled`, `networkPolicy.enabled` or `serviceMonitor.enabled` to `true`. [Optional chart objects](https://github.com/solidDoWant/ghcr-proxy/blob/v0.1.1/docs/admin/install.md#optional-chart-objects) tells you about them ([#72](https://github.com/solidDoWant/ghcr-proxy/pull/72)).
+- The admin guides have full commands that you can copy and run, from an empty cluster to a CI pod that pushes an image. Tests run these commands ([#74](https://github.com/solidDoWant/ghcr-proxy/pull/74)).
+
+Internal work: the design for the next phase, tests against the real `ghcr.io` that the operator runs by hand, test fixes, scheduler fixes and dependency updates ([#60](https://github.com/solidDoWant/ghcr-proxy/pull/60), [#61](https://github.com/solidDoWant/ghcr-proxy/pull/61), [#64](https://github.com/solidDoWant/ghcr-proxy/pull/64), [#73](https://github.com/solidDoWant/ghcr-proxy/pull/73), [#80](https://github.com/solidDoWant/ghcr-proxy/pull/80), [#83](https://github.com/solidDoWant/ghcr-proxy/pull/83)).
+
+### Known issues
+
+- Deleting images through the proxy is not yet tested with `ghcr.io`, and it can fail. The next phase finishes it ([#65](https://github.com/solidDoWant/ghcr-proxy/issues/65)).
+- The proxy has no registry metrics yet. The next phase adds them ([#21](https://github.com/solidDoWant/ghcr-proxy/issues/21)).
+- The pull mirrors are not yet tested with Harbor ([#68](https://github.com/solidDoWant/ghcr-proxy/issues/68)).
+
 ## 0.1.0
 
 ghcr-proxy is a proxy for the GitHub container registry, `ghcr.io`. It runs in a Kubernetes cluster and holds one GitHub personal access token (PAT). CI pods push and pull images through the proxy with the token of their own ServiceAccount, and they never see the PAT. This is the first release. It covers pushing and pulling through the proxy. Install it with the Helm chart `oci://ghcr.io/soliddowant/charts/ghcr-proxy`, version `0.1.0`. [Install ghcr-proxy](https://github.com/solidDoWant/ghcr-proxy/blob/v0.1.0/docs/admin/install.md) tells you how, and [Set up CI pods](https://github.com/solidDoWant/ghcr-proxy/blob/v0.1.0/docs/admin/ci-pods.md) tells you how to connect Docker in your CI pods to the proxy.
