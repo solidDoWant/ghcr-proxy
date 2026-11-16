@@ -40,4 +40,4 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/solidDoWant/ghcr-proxy
+        - github.com/solidDoWant/registrygate

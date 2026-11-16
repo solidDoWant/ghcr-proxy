@@ -229,7 +229,7 @@ func Parse(data []byte) (*Config, error) {
 
 	cfg.Upstream.TokenHosts = up.TokenHosts
 
-	cfg.Upstream.PATFile = orDefault(up.PATFile, "/var/run/ghcr-proxy/pat/token")
+	cfg.Upstream.PATFile = orDefault(up.PATFile, "/var/run/registrygate/pat/token")
 	if info, err := os.Stat(cfg.Upstream.PATFile); err != nil || info.IsDir() {
 		addf("upstream.patFile: %q is not a readable file", cfg.Upstream.PATFile)
 	}
@@ -248,7 +248,7 @@ func Parse(data []byte) (*Config, error) {
 	cfg.Upstream.APITimeout = duration("upstream.apiTimeout", up.APITimeout, "30s", positive, "must be positive")
 
 	au := raw.Authentication
-	cfg.Authentication.Audience = orDefault(au.Audience, "ghcr-proxy")
+	cfg.Authentication.Audience = orDefault(au.Audience, "registrygate")
 	cfg.Authentication.CacheTTL = duration("authentication.cacheTTL", au.CacheTTL, "30s",
 		func(d time.Duration) bool { return d >= minCacheTTL && d <= maxCacheTTL }, "must be between 1s and 30s")
 	cfg.Authentication.ReviewTimeout = duration("authentication.reviewTimeout", au.ReviewTimeout, "5s", positive, "must be positive")
@@ -258,15 +258,15 @@ func Parse(data []byte) (*Config, error) {
 
 	errs = append(errs, grantErrs...)
 
-	cfg.TLS.CertFile = orDefault(raw.TLS.CertFile, "/var/run/ghcr-proxy/tls/tls.crt")
-	cfg.TLS.KeyFile = orDefault(raw.TLS.KeyFile, "/var/run/ghcr-proxy/tls/tls.key")
+	cfg.TLS.CertFile = orDefault(raw.TLS.CertFile, "/var/run/registrygate/tls/tls.crt")
+	cfg.TLS.KeyFile = orDefault(raw.TLS.KeyFile, "/var/run/registrygate/tls/tls.key")
 	cfg.Listen.HTTPS = orDefault(raw.Listen.HTTPS, ":8443")
 	cfg.Listen.Health = orDefault(raw.Listen.Health, ":8080")
 
 	cfg.Webhook.Enabled = raw.Webhook.Enabled
 	cfg.Webhook.Listen = orDefault(raw.Webhook.Listen, ":9443")
-	cfg.Webhook.CertFile = orDefault(raw.Webhook.CertFile, "/var/run/ghcr-proxy/webhook-tls/tls.crt")
-	cfg.Webhook.KeyFile = orDefault(raw.Webhook.KeyFile, "/var/run/ghcr-proxy/webhook-tls/tls.key")
+	cfg.Webhook.CertFile = orDefault(raw.Webhook.CertFile, "/var/run/registrygate/webhook-tls/tls.crt")
+	cfg.Webhook.KeyFile = orDefault(raw.Webhook.KeyFile, "/var/run/registrygate/webhook-tls/tls.key")
 
 	sv := raw.Server
 	cfg.Server.ReadHeaderTimeout = duration("server.readHeaderTimeout", sv.ReadHeaderTimeout, "10s", positive, "must be positive")

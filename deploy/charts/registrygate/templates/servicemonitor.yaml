@@ -2,16 +2,16 @@
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: {{ include "ghcr-proxy.fullname" . }}
+  name: {{ include "registrygate.fullname" . }}
   labels:
-    {{- include "ghcr-proxy.labels" . | nindent 4 }}
+    {{- include "registrygate.labels" . | nindent 4 }}
     {{- with .Values.serviceMonitor.labels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
 spec:
   selector:
     matchLabels:
-      {{- include "ghcr-proxy.selectorLabels" . | nindent 6 }}
+      {{- include "registrygate.selectorLabels" . | nindent 6 }}
   endpoints:
     - port: metrics
       path: /metrics

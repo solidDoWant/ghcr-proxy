@@ -1,4 +1,4 @@
-// Command docker-credential-ghcr-proxy is the Docker credential helper that hands the pod's ServiceAccount token to
+// Command docker-credential-registrygate is the Docker credential helper that hands the pod's ServiceAccount token to
 // Docker for ghcr.io.
 package main
 
@@ -7,7 +7,7 @@ import (
 
 	"github.com/docker/docker-credential-helpers/credentials"
 
-	"github.com/solidDoWant/ghcr-proxy/internal/credhelper"
+	"github.com/solidDoWant/registrygate/internal/credhelper"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".

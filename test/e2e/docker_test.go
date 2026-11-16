@@ -221,13 +221,13 @@ func TestPodIsTheOneInTheAdminGuide(t *testing.T) {
 
 	for _, volume := range pod.Spec.Volumes {
 		if volume.Projected != nil {
-			projected = volume.Projected.Sources[0].ServiceAccountToken.Audience == "ghcr-proxy"
+			projected = volume.Projected.Sources[0].ServiceAccountToken.Audience == "registrygate"
 		}
 
 		helper = helper || volume.Image != nil
 	}
 
-	assert.True(t, projected, "projected token with audience ghcr-proxy")
+	assert.True(t, projected, "projected token with audience registrygate")
 	assert.True(t, helper, "image volume for the credential helper")
 
 	live, err := cluster.kubectl(t.Context(), "", "-n", ciNamespace, "get", "pod", "build", "-o", "yaml")

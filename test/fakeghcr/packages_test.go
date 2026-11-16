@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/solidDoWant/ghcr-proxy/test/fakeghcr"
+	"github.com/solidDoWant/registrygate/test/fakeghcr"
 )
 
 type listedVersion struct {

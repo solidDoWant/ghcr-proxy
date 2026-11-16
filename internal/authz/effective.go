@@ -5,9 +5,9 @@ package authz
 import (
 	"fmt"
 
-	"github.com/solidDoWant/ghcr-proxy/api/v1alpha1"
-	"github.com/solidDoWant/ghcr-proxy/internal/config"
-	"github.com/solidDoWant/ghcr-proxy/internal/glob"
+	"github.com/solidDoWant/registrygate/api/v1alpha1"
+	"github.com/solidDoWant/registrygate/internal/config"
+	"github.com/solidDoWant/registrygate/internal/glob"
 )
 
 // Ready condition reasons, highest precedence first.

@@ -2,7 +2,7 @@
 replicas: 2
 image:
   # -- Proxy image repository.
-  repository: ghcr.io/soliddowant/ghcr-proxy
+  repository: ghcr.io/soliddowant/registrygate
   # -- Image tag. Defaults to the chart's appVersion.
   tag: ""
   # -- Image pull policy.
@@ -99,7 +99,7 @@ mirrors:
     responseHeaderTimeout: 10s
 authentication:
   # -- Audience that ServiceAccount tokens must carry.
-  audience: ghcr-proxy
+  audience: registrygate
   # -- How long a token review result is cached (1s to 30s).
   cacheTTL: 30s
   # -- Timeout of one token review.

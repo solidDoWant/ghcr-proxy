@@ -11,7 +11,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
-	"github.com/solidDoWant/ghcr-proxy/internal/metrics"
+	"github.com/solidDoWant/registrygate/internal/metrics"
 )
 
 // certRestatInterval is how often the certificate files are re-read in case a change event is missed.

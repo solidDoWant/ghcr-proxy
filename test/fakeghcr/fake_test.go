@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/solidDoWant/ghcr-proxy/test/fakeghcr"
+	"github.com/solidDoWant/registrygate/test/fakeghcr"
 )
 
 func ref(t *testing.T, fake *fakeghcr.Fake, repo string) name.Reference {

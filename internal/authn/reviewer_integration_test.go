@@ -18,11 +18,11 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
-	"github.com/solidDoWant/ghcr-proxy/internal/authn"
+	"github.com/solidDoWant/registrygate/internal/authn"
 )
 
 const (
-	proxyAudience = "ghcr-proxy"
+	proxyAudience = "registrygate"
 	// The pod is never scheduled in envtest; the image is never pulled.
 	unusedPodImage = "ghcr.io/soliddowant/unused@sha256:0000000000000000000000000000000000000000000000000000000000000000"
 )

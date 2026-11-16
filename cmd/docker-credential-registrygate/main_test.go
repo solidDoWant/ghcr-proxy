@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/solidDoWant/ghcr-proxy/internal/credhelper"
+	"github.com/solidDoWant/registrygate/internal/credhelper"
 )
 
 func TestTokenFileDefaultsAndOverrides(t *testing.T) {

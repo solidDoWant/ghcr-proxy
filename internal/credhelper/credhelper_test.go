@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/solidDoWant/ghcr-proxy/internal/credhelper"
+	"github.com/solidDoWant/registrygate/internal/credhelper"
 )
 
 func writeToken(t *testing.T, content string) string {
@@ -63,7 +63,7 @@ func TestGetAnswersOnlyForGHCR(t *testing.T) {
 			}
 
 			require.NoError(t, err)
-			assert.JSONEq(t, `{"ServerURL":"`+test.server+`","Username":"ghcr-proxy","Secret":"tok-1"}`, out)
+			assert.JSONEq(t, `{"ServerURL":"`+test.server+`","Username":"registrygate","Secret":"tok-1"}`, out)
 		})
 	}
 }
@@ -98,7 +98,7 @@ func TestGetFailsOnMissingOrEmptyTokenFile(t *testing.T) {
 	for name, path := range tests {
 		t.Run(name, func(t *testing.T) {
 			out, err := get(t, credhelper.Helper{TokenFile: path}, "ghcr.io")
-			require.EqualError(t, err, "ghcr-proxy credential helper: token file "+path+" is missing or empty")
+			require.EqualError(t, err, "registrygate credential helper: token file "+path+" is missing or empty")
 			assert.Empty(t, out)
 		})
 	}

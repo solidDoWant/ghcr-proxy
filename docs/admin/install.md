@@ -1,6 +1,6 @@
-# Install ghcr-proxy
+# Install registrygate
 
-For: admins who install ghcr-proxy in a cluster. You know Kubernetes, Helm and cert-manager.
+For: admins who install registrygate in a cluster. You know Kubernetes, Helm and cert-manager.
 
 This page covers the PAT, the TLS certificate and its CA, the grants, the chart install and the audit log. To set up a CI pod after the install, read [CI pod setup](ci-pods.md).
 
@@ -21,12 +21,12 @@ The proxy holds one GitHub classic personal access token (PAT). GitHub has no AP
 
 <!-- e2e -->
 ```sh
-kubectl create namespace ghcr-proxy
+kubectl create namespace registrygate
 ```
 
 <!-- e2e -->
 ```sh
-kubectl -n ghcr-proxy create secret generic ghcr-proxy-pat --from-file=token=./pat.txt
+kubectl -n registrygate create secret generic registrygate-pat --from-file=token=./pat.txt
 ```
 
 All callers share this one GitHub identity and its rate limits. The [audit log](#audit-log) tells you who did what.
@@ -63,19 +63,19 @@ apiVersion: cert-manager.io/v1
 kind: Issuer
 metadata:
   name: selfsigned
-  namespace: ghcr-proxy
+  namespace: registrygate
 spec:
   selfSigned: {}
 ---
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
-  name: ghcr-proxy-ca
-  namespace: ghcr-proxy
+  name: registrygate-ca
+  namespace: registrygate
 spec:
   isCA: true
-  commonName: ghcr-proxy-ca
-  secretName: ghcr-proxy-ca
+  commonName: registrygate-ca
+  secretName: registrygate-ca
   privateKey:
     algorithm: ECDSA
     size: 256
@@ -89,25 +89,25 @@ spec:
 apiVersion: cert-manager.io/v1
 kind: Issuer
 metadata:
-  name: ghcr-proxy-ca
-  namespace: ghcr-proxy
+  name: registrygate-ca
+  namespace: registrygate
 spec:
   ca:
-    secretName: ghcr-proxy-ca
+    secretName: registrygate-ca
 ---
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
-  name: ghcr-proxy-tls
-  namespace: ghcr-proxy
+  name: registrygate-tls
+  namespace: registrygate
 spec:
-  secretName: ghcr-proxy-tls
+  secretName: registrygate-tls
   dnsNames: [ghcr.io]
   privateKey:
     algorithm: ECDSA
     size: 256
   issuerRef:
-    name: ghcr-proxy-ca
+    name: registrygate-ca
 EOF
 ```
 
@@ -115,14 +115,14 @@ Wait until cert-manager has issued the certificate:
 
 <!-- e2e -->
 ```sh
-kubectl -n ghcr-proxy wait --for=condition=Ready certificate/ghcr-proxy-tls --timeout=120s
+kubectl -n registrygate wait --for=condition=Ready certificate/registrygate-tls --timeout=120s
 ```
 
 The `nameConstraints` field needs the `NameConstraints` feature gate of cert-manager. Make sure that it is on in your cert-manager version. If you use another tool, make sure that the CA certificate carries a permitted DNS name of `ghcr.io` and no other.
 
-The Secret `ghcr-proxy-tls` has the type `kubernetes.io/tls`. The chart mounts it. The proxy reloads the certificate when the files change. If a reload fails, the proxy keeps the old certificate and logs an error.
+The Secret `registrygate-tls` has the type `kubernetes.io/tls`. The chart mounts it. The proxy reloads the certificate when the files change. If a reload fails, the proxy keeps the old certificate and logs an error.
 
-The file `ca.crt` in the Secret `ghcr-proxy-tls` is the CA that CI pods must trust. [CI pod setup](ci-pods.md) shows where it goes.
+The file `ca.crt` in the Secret `registrygate-tls` is the CA that CI pods must trust. [CI pod setup](ci-pods.md) shows where it goes.
 
 ## Plan the grants
 
@@ -158,10 +158,10 @@ Create the Secrets first. Then install the chart in the namespace that holds the
 
 <!-- e2e -->
 ```sh
-helm install ghcr-proxy oci://ghcr.io/soliddowant/charts/ghcr-proxy \
-  --namespace ghcr-proxy \
-  --set pat.existingSecret=ghcr-proxy-pat \
-  --set tls.existingSecret=ghcr-proxy-tls \
+helm install registrygate oci://ghcr.io/soliddowant/charts/registrygate \
+  --namespace registrygate \
+  --set pat.existingSecret=registrygate-pat \
+  --set tls.existingSecret=registrygate-tls \
   --set service.clusterIP=10.96.0.50 \
   --values grants.yaml
 ```
@@ -176,7 +176,7 @@ Make sure that the install works:
 
    <!-- e2e -->
    ```sh
-   kubectl -n ghcr-proxy rollout status deploy/ghcr-proxy
+   kubectl -n registrygate rollout status deploy/registrygate
    ```
 
 2. Make sure that `/readyz` on port 8080 of a proxy pod answers `200`. The proxy is ready when it loaded the PAT and the certificate and synced the policies.
@@ -229,7 +229,7 @@ mirrors:
     url: https://harbor.example.com
     pathPrefix: ghcr
     credentials:
-      existingSecret: ghcr-proxy-mirror-policy
+      existingSecret: registrygate-mirror-policy
 ```
 
 A mirror fails when the proxy cannot connect to it, when its response headers do not arrive in `responseHeaderTimeout`, or when it answers `5xx` or `404`. If `fallbackToUpstream` is `true`, the pull then goes to the upstream. If it is `false`, the client gets `502` with the message `mirror unavailable`, except for a `404`, which the client gets as is. A blob goes to the upstream only if the mirror failed before it sent the response headers.
@@ -251,13 +251,13 @@ The webhook has its own Service and its own certificate. Every proxy replica ser
 Choose one way to give the webhook a certificate:
 
 1. With cert-manager, set `webhook.certManager.issuerRef.name` to an Issuer in the namespace of the proxy. The chart makes the certificate, and cainjector adds the CA bundle to the webhook. Make sure that cainjector runs.
-2. Without cert-manager, make a `kubernetes.io/tls` Secret for the name `ghcr-proxy-webhook.ghcr-proxy.svc` (use the name of your Service and namespace). Set `webhook.existingSecret` to the Secret and `webhook.caBundle` to the base64 text of the CA certificate.
+2. Without cert-manager, make a `kubernetes.io/tls` Secret for the name `registrygate-webhook.registrygate.svc` (use the name of your Service and namespace). Set `webhook.existingSecret` to the Secret and `webhook.caBundle` to the base64 text of the CA certificate.
 
 Then set `webhook.enabled=true`. For example:
 
 ```
-helm upgrade ghcr-proxy oci://ghcr.io/soliddowant/charts/ghcr-proxy \
-  --namespace ghcr-proxy --reuse-values \
+helm upgrade registrygate oci://ghcr.io/soliddowant/charts/registrygate \
+  --namespace registrygate --reuse-values \
   --set webhook.enabled=true \
   --set webhook.certManager.issuerRef.name=webhook-issuer
 ```
@@ -270,7 +270,7 @@ The API server must reach port `9443` of the proxy pods. If you use a NetworkPol
 - The proxy caches a token review for up to 30 seconds (`authentication.cacheTTL`). A deleted ServiceAccount can keep working for that time.
 - All callers share one GitHub identity and its rate limits.
 - A delete by digest uses the PAT with the GitHub REST API at `upstream.apiURL` (default `https://api.github.com/`). The PAT needs the `delete:packages` scope for it. If you use a NetworkPolicy, allow the proxy to connect to that host on port 443.
-- ServiceAccount tokens must use the audience `ghcr-proxy` and a short life of 1 to 6 hours. Do not accept the default API server audience.
+- ServiceAccount tokens must use the audience `registrygate` and a short life of 1 to 6 hours. Do not accept the default API server audience.
 
 ## Audit log
 

@@ -1,8 +1,8 @@
-{{- define "ghcr-proxy.name" -}}
+{{- define "registrygate.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
-{{- define "ghcr-proxy.fullname" -}}
+{{- define "registrygate.fullname" -}}
 {{- if .Values.fullnameOverride }}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
 {{- else }}
@@ -15,34 +15,34 @@
 {{- end }}
 {{- end }}
 
-{{- define "ghcr-proxy.labels" -}}
+{{- define "registrygate.labels" -}}
 helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
-{{ include "ghcr-proxy.selectorLabels" . }}
+{{ include "registrygate.selectorLabels" . }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 
-{{- define "ghcr-proxy.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "ghcr-proxy.name" . }}
+{{- define "registrygate.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "registrygate.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
-{{- define "ghcr-proxy.serviceAccountName" -}}
+{{- define "registrygate.serviceAccountName" -}}
 {{- if .Values.serviceAccount.create }}
-{{- default (include "ghcr-proxy.fullname" .) .Values.serviceAccount.name }}
+{{- default (include "registrygate.fullname" .) .Values.serviceAccount.name }}
 {{- else }}
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
 
-{{/* The rendered proxy config file. The Secrets are mounted as directories under /var/run/ghcr-proxy. */}}
-{{- define "ghcr-proxy.config" -}}
+{{/* The rendered proxy config file. The Secrets are mounted as directories under /var/run/registrygate. */}}
+{{- define "registrygate.config" -}}
 upstream:
   url: {{ .Values.upstream.url | quote }}
   tokenHosts: {{ .Values.upstream.tokenHosts | toJson }}
-  patFile: /var/run/ghcr-proxy/pat/token
+  patFile: /var/run/registrygate/pat/token
   {{- if .Values.upstream.ca.existingSecret }}
-  caFile: /var/run/ghcr-proxy/upstream-ca/ca.crt
+  caFile: /var/run/registrygate/upstream-ca/ca.crt
   {{- end }}
   timeout: {{ .Values.upstream.timeout | quote }}
   tokenTimeout: {{ .Values.upstream.tokenTimeout | quote }}
@@ -53,8 +53,8 @@ authentication:
   reviewTimeout: {{ .Values.authentication.reviewTimeout | quote }}
 grants: {{ .Values.grants | toJson }}
 tls:
-  certFile: /var/run/ghcr-proxy/tls/tls.crt
-  keyFile: /var/run/ghcr-proxy/tls/tls.key
+  certFile: /var/run/registrygate/tls/tls.crt
+  keyFile: /var/run/registrygate/tls/tls.key
 listen:
   https: ":8443"
   health: ":8080"
@@ -74,10 +74,10 @@ mirrors:
     url: {{ $mirror.url | quote }}
     pathPrefix: {{ $mirror.pathPrefix | quote }}
     {{- if $mirror.credentials.existingSecret }}
-    credentialsFile: /var/run/ghcr-proxy/mirror-{{ $name }}/credentials
+    credentialsFile: /var/run/registrygate/mirror-{{ $name }}/credentials
     {{- end }}
     {{- if $mirror.ca.existingSecret }}
-    caFile: /var/run/ghcr-proxy/mirror-{{ $name }}-ca/ca.crt
+    caFile: /var/run/registrygate/mirror-{{ $name }}-ca/ca.crt
     {{- end }}
     fallbackToUpstream: {{ $mirror.fallbackToUpstream }}
     responseHeaderTimeout: {{ $mirror.responseHeaderTimeout | quote }}
@@ -88,22 +88,22 @@ mirrors:
 webhook:
   enabled: true
   listen: ":9443"
-  certFile: /var/run/ghcr-proxy/webhook-tls/tls.crt
-  keyFile: /var/run/ghcr-proxy/webhook-tls/tls.key
+  certFile: /var/run/registrygate/webhook-tls/tls.crt
+  keyFile: /var/run/registrygate/webhook-tls/tls.key
 {{- end }}
 {{- end }}
 
 {{/* Name of the Secret with the webhook certificate. */}}
-{{- define "ghcr-proxy.webhookSecretName" -}}
+{{- define "registrygate.webhookSecretName" -}}
 {{- if .Values.webhook.certManager.issuerRef.name -}}
-{{- printf "%s-webhook-tls" (include "ghcr-proxy.fullname" .) -}}
+{{- printf "%s-webhook-tls" (include "registrygate.fullname" .) -}}
 {{- else -}}
 {{- required "webhook.existingSecret (or webhook.certManager.issuerRef.name) is required when webhook.enabled" .Values.webhook.existingSecret -}}
 {{- end -}}
 {{- end }}
 
 {{/* Grace period: shutdownGracePeriod plus 30 seconds. Accepts one number and a unit: 90s, 10m or 1h. */}}
-{{- define "ghcr-proxy.terminationGracePeriodSeconds" -}}
+{{- define "registrygate.terminationGracePeriodSeconds" -}}
 {{- $d := toString .Values.server.shutdownGracePeriod -}}
 {{- $m := regexFindAll "^[0-9]+[smh]$" $d 1 -}}
 {{- if not $m -}}{{- fail "server.shutdownGracePeriod must be a whole number and one unit: s, m or h (for example 10m)" -}}{{- end -}}

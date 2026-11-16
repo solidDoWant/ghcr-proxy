@@ -18,10 +18,10 @@ import (
 	authenticationv1 "k8s.io/api/authentication/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/solidDoWant/ghcr-proxy/internal/metrics"
+	"github.com/solidDoWant/registrygate/internal/metrics"
 )
 
-const testAudience = "ghcr-proxy"
+const testAudience = "registrygate"
 
 // fakeTokenReviews stands in for the API server's TokenReview endpoint.
 type fakeTokenReviews struct {
@@ -404,11 +404,11 @@ func TestReviewsCountResultAndCacheUse(t *testing.T) {
 	require.ErrorIs(t, err, ErrUnavailable)
 
 	require.NoError(t, testutil.GatherAndCompare(proxyMetrics.Gatherer(), strings.NewReader(`
-# HELP ghcr_proxy_token_reviews_total ServiceAccount token reviews, by result and cache use.
-# TYPE ghcr_proxy_token_reviews_total counter
-ghcr_proxy_token_reviews_total{cache="hit",result="authenticated"} 1
-ghcr_proxy_token_reviews_total{cache="miss",result="authenticated"} 1
-ghcr_proxy_token_reviews_total{cache="miss",result="error"} 1
-ghcr_proxy_token_reviews_total{cache="miss",result="rejected"} 1
-`), "ghcr_proxy_token_reviews_total"))
+# HELP registrygate_token_reviews_total ServiceAccount token reviews, by result and cache use.
+# TYPE registrygate_token_reviews_total counter
+registrygate_token_reviews_total{cache="hit",result="authenticated"} 1
+registrygate_token_reviews_total{cache="miss",result="authenticated"} 1
+registrygate_token_reviews_total{cache="miss",result="error"} 1
+registrygate_token_reviews_total{cache="miss",result="rejected"} 1
+`), "registrygate_token_reviews_total"))
 }

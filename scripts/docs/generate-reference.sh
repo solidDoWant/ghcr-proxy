@@ -8,7 +8,7 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
-./scripts/docs/chart_values.py deploy/charts/ghcr-proxy/values.yaml >docs/admin/chart-values.md
+./scripts/docs/chart_values.py deploy/charts/registrygate/values.yaml >docs/admin/chart-values.md
 echo "generate-reference: wrote docs/admin/chart-values.md"
 go run ./scripts/docs/crdref config/crd/bases >docs/user/crd-reference.md
 echo "generate-reference: wrote docs/user/crd-reference.md"

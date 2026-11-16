@@ -5,12 +5,12 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
-chart=deploy/charts/ghcr-proxy
+chart=deploy/charts/registrygate
 required=(--set pat.existingSecret=pat --set tls.existingSecret=tls)
 
 helm lint --strict "$chart" "${required[@]}"
 
-render() { helm template ghcr-proxy "$chart" --namespace ghcr-proxy "${required[@]}" "$@"; }
+render() { helm template registrygate "$chart" --namespace registrygate "${required[@]}" "$@"; }
 fail() { echo "chart-lint: $1" >&2; exit 1; }
 
 default=$(render)
@@ -20,7 +20,7 @@ done
 # Memory request equals limit, and there is no CPU limit.
 mem=$(grep -E '^ +memory:' <<<"$default" | sort -u | wc -l)
 [ "$mem" -eq 1 ] || fail "memory request and limit differ"
-helm template ghcr-proxy "$chart" "${required[@]}" --show-only templates/deployment.yaml |
+helm template registrygate "$chart" "${required[@]}" --show-only templates/deployment.yaml |
 	awk '/limits:/{f=1;next} f&&/cpu:/{exit 1} /requests:/{f=0}' || fail "a CPU limit is set"
 
 sum() { render "$@" --show-only templates/deployment.yaml | grep 'checksum/config'; }
@@ -40,7 +40,7 @@ for want in 'port: 8443' 'port: 8080' 'port: 9443' 'port: 6443' 'team: ci' '10.0
 	grep -qF -- "$want" <<<"$np" || fail "network policy lacks: $want"
 done
 
-if helm template ghcr-proxy "$chart" >/dev/null 2>&1; then
+if helm template registrygate "$chart" >/dev/null 2>&1; then
 	fail "render without the Secret names must fail"
 fi
 echo "chart-lint: passed"

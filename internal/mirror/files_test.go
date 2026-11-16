@@ -22,8 +22,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/solidDoWant/ghcr-proxy/internal/config"
-	"github.com/solidDoWant/ghcr-proxy/internal/mirror"
+	"github.com/solidDoWant/registrygate/internal/config"
+	"github.com/solidDoWant/registrygate/internal/mirror"
 )
 
 func caPEM(t *testing.T) []byte {
@@ -222,7 +222,7 @@ func TestMirrorPackageDoesNotImportThePATReader(t *testing.T) {
 		require.NoError(t, err)
 
 		for _, spec := range file.Imports {
-			assert.NotEqual(t, `"github.com/solidDoWant/ghcr-proxy/internal/upstream"`, spec.Path.Value, source)
+			assert.NotEqual(t, `"github.com/solidDoWant/registrygate/internal/upstream"`, spec.Path.Value, source)
 		}
 	}
 }

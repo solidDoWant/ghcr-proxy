@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/solidDoWant/ghcr-proxy/api/v1alpha1"
-	"github.com/solidDoWant/ghcr-proxy/internal/registry"
+	"github.com/solidDoWant/registrygate/api/v1alpha1"
+	"github.com/solidDoWant/registrygate/internal/registry"
 )
 
 const (

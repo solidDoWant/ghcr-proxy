@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/solidDoWant/ghcr-proxy/internal/metrics"
+	"github.com/solidDoWant/registrygate/internal/metrics"
 )
 
 func TestRecordedEventsAppearWithFixedLabels(t *testing.T) {
@@ -30,45 +30,45 @@ func TestRecordedEventsAppearWithFixedLabels(t *testing.T) {
 	proxyMetrics.SetPolicyCounts(func() (int, int) { return 3, 1 })
 
 	expectations := map[string]string{
-		"ghcr_proxy_requests_total": `
-# HELP ghcr_proxy_requests_total Requests served, by action, decision and status class.
-# TYPE ghcr_proxy_requests_total counter
-ghcr_proxy_requests_total{action="none",code="4xx",decision="unauthenticated"} 1
-ghcr_proxy_requests_total{action="pull",code="2xx",decision="allowed"} 2
+		"registrygate_requests_total": `
+# HELP registrygate_requests_total Requests served, by action, decision and status class.
+# TYPE registrygate_requests_total counter
+registrygate_requests_total{action="none",code="4xx",decision="unauthenticated"} 1
+registrygate_requests_total{action="pull",code="2xx",decision="allowed"} 2
 `,
-		"ghcr_proxy_upstream_requests_total": `
-# HELP ghcr_proxy_upstream_requests_total Requests sent to the upstream or a mirror, by status class.
-# TYPE ghcr_proxy_upstream_requests_total counter
-ghcr_proxy_upstream_requests_total{code="5xx",target="upstream"} 1
-ghcr_proxy_upstream_requests_total{code="error",target="policy_mirror"} 1
+		"registrygate_upstream_requests_total": `
+# HELP registrygate_upstream_requests_total Requests sent to the upstream or a mirror, by status class.
+# TYPE registrygate_upstream_requests_total counter
+registrygate_upstream_requests_total{code="5xx",target="upstream"} 1
+registrygate_upstream_requests_total{code="error",target="policy_mirror"} 1
 `,
-		"ghcr_proxy_mirror_fallbacks_total": `
-# HELP ghcr_proxy_mirror_fallbacks_total Pulls that fell back from a mirror to the upstream.
-# TYPE ghcr_proxy_mirror_fallbacks_total counter
-ghcr_proxy_mirror_fallbacks_total{mirror="policy"} 1
+		"registrygate_mirror_fallbacks_total": `
+# HELP registrygate_mirror_fallbacks_total Pulls that fell back from a mirror to the upstream.
+# TYPE registrygate_mirror_fallbacks_total counter
+registrygate_mirror_fallbacks_total{mirror="policy"} 1
 `,
-		"ghcr_proxy_token_reviews_total": `
-# HELP ghcr_proxy_token_reviews_total ServiceAccount token reviews, by result and cache use.
-# TYPE ghcr_proxy_token_reviews_total counter
-ghcr_proxy_token_reviews_total{cache="hit",result="authenticated"} 1
-ghcr_proxy_token_reviews_total{cache="miss",result="error"} 1
+		"registrygate_token_reviews_total": `
+# HELP registrygate_token_reviews_total ServiceAccount token reviews, by result and cache use.
+# TYPE registrygate_token_reviews_total counter
+registrygate_token_reviews_total{cache="hit",result="authenticated"} 1
+registrygate_token_reviews_total{cache="miss",result="error"} 1
 `,
-		"ghcr_proxy_upstream_token_fetches_total": `
-# HELP ghcr_proxy_upstream_token_fetches_total Registry token fetches, by target and result.
-# TYPE ghcr_proxy_upstream_token_fetches_total counter
-ghcr_proxy_upstream_token_fetches_total{result="ok",target="upstream"} 1
+		"registrygate_upstream_token_fetches_total": `
+# HELP registrygate_upstream_token_fetches_total Registry token fetches, by target and result.
+# TYPE registrygate_upstream_token_fetches_total counter
+registrygate_upstream_token_fetches_total{result="ok",target="upstream"} 1
 `,
-		"ghcr_proxy_credential_reloads_total": `
-# HELP ghcr_proxy_credential_reloads_total Credential file reloads, by kind and result.
-# TYPE ghcr_proxy_credential_reloads_total counter
-ghcr_proxy_credential_reloads_total{kind="pat",result="ok"} 1
-ghcr_proxy_credential_reloads_total{kind="tls",result="error"} 1
+		"registrygate_credential_reloads_total": `
+# HELP registrygate_credential_reloads_total Credential file reloads, by kind and result.
+# TYPE registrygate_credential_reloads_total counter
+registrygate_credential_reloads_total{kind="pat",result="ok"} 1
+registrygate_credential_reloads_total{kind="tls",result="error"} 1
 `,
-		"ghcr_proxy_policies": `
-# HELP ghcr_proxy_policies GHCRAccessPolicy objects in the local index, by whether they are inside the grants.
-# TYPE ghcr_proxy_policies gauge
-ghcr_proxy_policies{ready="false"} 1
-ghcr_proxy_policies{ready="true"} 3
+		"registrygate_policies": `
+# HELP registrygate_policies GHCRAccessPolicy objects in the local index, by whether they are inside the grants.
+# TYPE registrygate_policies gauge
+registrygate_policies{ready="false"} 1
+registrygate_policies{ready="true"} 3
 `,
 	}
 
@@ -78,7 +78,7 @@ ghcr_proxy_policies{ready="true"} 3
 		})
 	}
 
-	count, err := testutil.GatherAndCount(proxyMetrics.Gatherer(), "ghcr_proxy_upstream_request_duration_seconds")
+	count, err := testutil.GatherAndCount(proxyMetrics.Gatherer(), "registrygate_upstream_request_duration_seconds")
 	require.NoError(t, err)
 	assert.Equal(t, 2, count, "one histogram per target seen")
 }

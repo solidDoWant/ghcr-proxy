@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/solidDoWant/ghcr-proxy/api/v1alpha1"
-	"github.com/solidDoWant/ghcr-proxy/internal/metrics"
-	"github.com/solidDoWant/ghcr-proxy/internal/mirror"
-	"github.com/solidDoWant/ghcr-proxy/internal/upstream"
+	"github.com/solidDoWant/registrygate/api/v1alpha1"
+	"github.com/solidDoWant/registrygate/internal/metrics"
+	"github.com/solidDoWant/registrygate/internal/mirror"
+	"github.com/solidDoWant/registrygate/internal/upstream"
 )
 
 // maxManifestBytes is the largest manifest the proxy buffers for a push.

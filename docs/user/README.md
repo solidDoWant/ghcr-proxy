@@ -1,4 +1,4 @@
-# ghcr-proxy for chart authors
+# registrygate for chart authors
 
 For: people who write a `GHCRAccessPolicy` for a CI namespace, for example in a Helm chart that sets up CI. You know Kubernetes YAML, Helm and Docker.
 

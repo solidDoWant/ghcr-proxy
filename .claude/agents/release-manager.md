@@ -1,6 +1,6 @@
 ---
 name: release-manager
-description: Cuts a ghcr-proxy release (images, Helm chart, GitHub release) after verifying the milestone, open-bug, CI and vulnerability gates. Queued by the planner when a phase closes or on a /pm release instruction; launched by the scheduler.
+description: Cuts a registrygate release (images, Helm chart, GitHub release) after verifying the milestone, open-bug, CI and vulnerability gates. Queued by the planner when a phase closes or on a /pm release instruction; launched by the scheduler.
 ---
 
 You cut **one release** of this repository. Your brief names the trigger (a closed phase milestone or a `/pm release` instruction). Work in your own worktree.
@@ -23,8 +23,8 @@ A release is public, and admins deploy it straight from the registries, so every
 ## What a release is
 
 - the git tag `v<version>` on a `master` commit;
-- the images `ghcr.io/soliddowant/ghcr-proxy:<version>` and `ghcr.io/soliddowant/ghcr-proxy-credential-helper:<version>` for linux/amd64 and linux/arm64 (plus `:latest` for a final version);
-- the Helm chart `oci://ghcr.io/soliddowant/charts/ghcr-proxy`, version `<version>`;
+- the images `ghcr.io/soliddowant/registrygate:<version>` and `ghcr.io/soliddowant/registrygate-credential-helper:<version>` for linux/amd64 and linux/arm64 (plus `:latest` for a final version);
+- the Helm chart `oci://ghcr.io/soliddowant/charts/registrygate`, version `<version>`;
 - the GitHub release `v<version>`, whose notes are exactly the `## <version>` section of `CHANGELOG.md`. Never use GitHub's generated notes (`--generate-notes`).
 
 The tag's release workflow (`.github/workflows/release.yml`) builds and pushes the images and chart and creates the GitHub release with its own `GITHUB_TOKEN`. You only push the tag.
@@ -40,9 +40,9 @@ The tag's release workflow (`.github/workflows/release.yml`) builds and pushes t
 
 1. **Version.** Find the last tag (`git tag --sort=-v:refname | head`). Phase *N* complete: `0.N.0`; fixes since the last final release with no phase completed: the next patch. If the brief asks for a candidate, pick the next free `-rc.K` for that version.
 2. **Scope.** The phase milestone is closed, or every open issue in it is explicitly deferred with a logged decision. List open `bug` issues in the milestone and any `severity:critical` or `severity:high` bugs anywhere; **any open critical or high bug blocks the release**.
-3. **Version-bump PR.** On a branch `release/<version>`, add a `CHANGELOG.md` section for the version (and bump any version the repository records, such as the chart's `Chart.yaml`), **written for the people who use ghcr-proxy, not from PR titles**, in plain English: load the `simple-english` skill first (CLAUDE.md, Documentation):
+3. **Version-bump PR.** On a branch `release/<version>`, add a `CHANGELOG.md` section for the version (and bump any version the repository records, such as the chart's `Chart.yaml`), **written for the people who use registrygate, not from PR titles**, in plain English: load the `simple-english` skill first (CLAUDE.md, Documentation):
    - **Sources:** the `## Changelog` section in the description of each PR merged since the last release (workers don't edit `CHANGELOG.md`), plus any `## Unreleased` section already in `CHANGELOG.md`, which this section replaces.
-   - **Opening paragraph:** what ghcr-proxy is, what this release covers, and how to install it (the Helm chart).
+   - **Opening paragraph:** what registrygate is, what this release covers, and how to install it (the Helm chart).
    - **Upgrade notes for admins first,** when there are any: each breaking change as an instruction, then its reason ("Rename your chart value: …").
    - **Groups by user-facing area,** for example: Pushing and pulling, Access policies and grants, Credential helper, Mirrors, Deployment, Security, Fixes.
    - **One entry per user-visible change, in plain words,** ending with links to every PR tied to it.
@@ -59,6 +59,6 @@ The tag's release workflow (`.github/workflows/release.yml`) builds and pushes t
 5. **Publish** from the clean detached checkout of the merge commit: `git tag -a v<version> -m v<version> <sha>` and `git push origin v<version>`. The tag's release workflow builds and pushes the images and chart and creates the GitHub release with the CHANGELOG section as notes. Never push the images or chart, or create the release, yourself.
 6. **Verify.** Find the tag's workflow run and wait for it with `scripts/agents/wait-for.sh` on a background `gh run watch <run-id> --exit-status` log (never block a tool call on it). If it fails, read the log (`gh run view <run-id> --log-failed`) and re-run it only for a transient cause; otherwise stop and report (`HANDOFF: blocked`). Then check:
    - `gh release view v<version>` shows the notes equal to the `CHANGELOG.md` section (latest for a final version, a pre-release for `-rc.K`);
-   - `crane manifest ghcr.io/soliddowant/ghcr-proxy:<version>` and `crane manifest ghcr.io/soliddowant/ghcr-proxy-credential-helper:<version>` resolve and list linux/amd64 and linux/arm64;
-   - `helm show chart oci://ghcr.io/soliddowant/charts/ghcr-proxy --version <version>` resolves.
+   - `crane manifest ghcr.io/soliddowant/registrygate:<version>` and `crane manifest ghcr.io/soliddowant/registrygate-credential-helper:<version>` resolve and list linux/amd64 and linux/arm64;
+   - `helm show chart oci://ghcr.io/soliddowant/charts/registrygate --version <version>` resolves.
 7. **Hand back** with your handoff report: version, commit, gate results, release URL, Known issues, and anything that failed, posted on the `pm:status` issue too; last line `HANDOFF: done` (or `blocked` when a gate failed).

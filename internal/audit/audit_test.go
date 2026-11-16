@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/solidDoWant/ghcr-proxy/internal/audit"
+	"github.com/solidDoWant/registrygate/internal/audit"
 )
 
 func TestLogWritesOneJSONLineWithTheDocumentedFields(t *testing.T) {

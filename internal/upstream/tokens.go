@@ -16,7 +16,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	lru "github.com/hashicorp/golang-lru/v2"
 
-	"github.com/solidDoWant/ghcr-proxy/internal/metrics"
+	"github.com/solidDoWant/registrygate/internal/metrics"
 )
 
 // Kind is the credential a token was fetched with.
@@ -47,7 +47,7 @@ var (
 
 const (
 	// patUsername is the Basic user name sent with the PAT; GHCR ignores it.
-	patUsername = "ghcr-proxy"
+	patUsername = "registrygate"
 	// maxCachedTokens bounds the token cache.
 	maxCachedTokens = 4096
 	// expiryMargin is how long before its expiry a token stops being reused.

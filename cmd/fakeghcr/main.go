@@ -15,7 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/solidDoWant/ghcr-proxy/test/fakeghcr"
+	"github.com/solidDoWant/registrygate/test/fakeghcr"
 )
 
 func main() {

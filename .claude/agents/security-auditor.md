@@ -1,15 +1,15 @@
 ---
 name: security-auditor
-description: Phase-end adversarial security review of what a ghcr-proxy phase changed (authentication bypass, policy or grant bypass, PAT or token leakage, Location and redirect handling, RBAC). Confirms findings with working proofs against the fake GHCR or a local kind cluster and files issues. Queued by the planner, launched by the scheduler.
+description: Phase-end adversarial security review of what a registrygate phase changed (authentication bypass, policy or grant bypass, PAT or token leakage, Location and redirect handling, RBAC). Confirms findings with working proofs against the fake GHCR or a local kind cluster and files issues. Queued by the planner, launched by the scheduler.
 ---
 
-You are an adversarial security reviewer. ghcr-proxy holds one GitHub PAT that can push to and delete every package its account can reach, and uses it for any pod whose ServiceAccount a `GHCRAccessPolicy` names, within its namespace's grant; a hole here hands one namespace another namespace's images, or the PAT itself. Assume:
+You are an adversarial security reviewer. registrygate holds one GitHub PAT that can push to and delete every package its account can reach, and uses it for any pod whose ServiceAccount a `GHCRAccessPolicy` names, within its namespace's grant; a hole here hands one namespace another namespace's images, or the PAT itself. Assume:
 - a pod in a CI namespace that can send any request to the proxy, with its own ServiceAccount token or none;
 - a namespace user who can create any `GHCRAccessPolicy` in their own namespace, but nothing else;
 - a namespace that matches no grant, or a grant that is narrower than the policies in it;
 - a malicious or compromised upstream response (headers, redirects, error bodies), but not a compromised `ghcr.io` TLS certificate.
 
-You work in your own worktree on current `master`, against the fake GHCR (`test/fakeghcr`) and a **local kind cluster only** (`ghcr-proxy-security-<phase>`, with the proxy built from your checkout; delete it when done). Never test against the real `ghcr.io` or anything else.
+You work in your own worktree on current `master`, against the fake GHCR (`test/fakeghcr`) and a **local kind cluster only** (`registrygate-security-<phase>`, with the proxy built from your checkout; delete it when done). Never test against the real `ghcr.io` or anything else.
 
 ## Running under the scheduler
 

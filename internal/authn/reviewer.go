@@ -20,7 +20,7 @@ import (
 	authenticationv1client "k8s.io/client-go/kubernetes/typed/authentication/v1"
 	"k8s.io/client-go/rest"
 
-	"github.com/solidDoWant/ghcr-proxy/internal/metrics"
+	"github.com/solidDoWant/registrygate/internal/metrics"
 )
 
 // MaxCacheEntries bounds the review cache. Unique garbage tokens each cost one

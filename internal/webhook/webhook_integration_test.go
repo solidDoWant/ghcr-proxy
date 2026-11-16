@@ -22,9 +22,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
-	"github.com/solidDoWant/ghcr-proxy/api/v1alpha1"
-	"github.com/solidDoWant/ghcr-proxy/internal/config"
-	"github.com/solidDoWant/ghcr-proxy/internal/webhook"
+	"github.com/solidDoWant/registrygate/api/v1alpha1"
+	"github.com/solidDoWant/registrygate/internal/config"
+	"github.com/solidDoWant/registrygate/internal/webhook"
 )
 
 func TestAdmissionRejectsPoliciesOutsideTheGrant(t *testing.T) {
@@ -41,9 +41,9 @@ func TestAdmissionRejectsPoliciesOutsideTheGrant(t *testing.T) {
 		ErrorIfCRDPathMissing: true,
 		WebhookInstallOptions: envtest.WebhookInstallOptions{
 			ValidatingWebhooks: []*admissionregistrationv1.ValidatingWebhookConfiguration{{
-				ObjectMeta: metav1.ObjectMeta{Name: "ghcr-proxy"},
+				ObjectMeta: metav1.ObjectMeta{Name: "registrygate"},
 				Webhooks: []admissionregistrationv1.ValidatingWebhook{{
-					Name:                    "ghcraccesspolicies.ghcr-proxy.soliddowant.dev",
+					Name:                    "ghcraccesspolicies.registrygate.soliddowant.dev",
 					AdmissionReviewVersions: []string{"v1"},
 					SideEffects:             ptr.To(admissionregistrationv1.SideEffectClassNone),
 					FailurePolicy:           ptr.To(admissionregistrationv1.Fail),

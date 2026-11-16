@@ -11,9 +11,9 @@ printf '# Changelog\n\n## 0.0.0-test\n\n- A change.\n\n## 0.0.0-other\n\n- Other
 
 out=$(CHANGELOG_FILE="$dir/changelog.md" SKIP_BUILD=true VERSION=0.0.0-test ./scripts/release.sh 2>&1) ||
 	fail "dry run failed: $out"
-grep -q "would push chart oci://ghcr.io/soliddowant/charts/ghcr-proxy:0.0.0-test" <<<"$out" || fail "no chart line: $out"
-grep -q "would push image ghcr.io/soliddowant/ghcr-proxy:0.0.0-test" <<<"$out" || fail "no image line: $out"
-grep -q "would push image ghcr.io/soliddowant/ghcr-proxy-credential-helper:0.0.0-test" <<<"$out" || fail "no helper image line: $out"
+grep -q "would push chart oci://ghcr.io/soliddowant/charts/registrygate:0.0.0-test" <<<"$out" || fail "no chart line: $out"
+grep -q "would push image ghcr.io/soliddowant/registrygate:0.0.0-test" <<<"$out" || fail "no image line: $out"
+grep -q "would push image ghcr.io/soliddowant/registrygate-credential-helper:0.0.0-test" <<<"$out" || fail "no helper image line: $out"
 grep -q "A change" <<<"$out" || fail "no notes: $out"
 grep -q "Other" <<<"$out" && fail "notes include the next section"
 

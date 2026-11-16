@@ -10,7 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrlwebhook "sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	"github.com/solidDoWant/ghcr-proxy/internal/config"
+	"github.com/solidDoWant/registrygate/internal/config"
 )
 
 // NewServer returns the webhook server for cfg with the validator registered. Its certificate watcher reloads the

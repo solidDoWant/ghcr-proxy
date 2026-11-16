@@ -1,15 +1,15 @@
 # Set up a CI pod
 
-For: admins who set up the pods that run Docker builds. You know Kubernetes and Tekton. You already installed ghcr-proxy (see [Install ghcr-proxy](install.md)).
+For: admins who set up the pods that run Docker builds. You know Kubernetes and Tekton. You already installed registrygate (see [Install registrygate](install.md)).
 
 A CI pod pushes and pulls with the normal image name `ghcr.io/<owner>/<image>`. The pod sends the requests to the proxy because of the setup on this page. Docker finds its credential through the credential helper. The helper returns the ServiceAccount token of the pod, so the pod never sees the PAT.
 
 ## What each pod needs
 
 - A `hostAliases` entry that maps `ghcr.io` to the fixed ClusterIP of the proxy Service (the value of `service.clusterIP`).
-- A projected volume `ghcr-proxy-token`. It holds a ServiceAccount token with the audience `ghcr-proxy` and `expirationSeconds: 3600`, in the file `token`. Mount it at `/var/run/secrets/ghcr-proxy` in the container that runs the Docker CLI.
-- An image volume from `ghcr.io/soliddowant/ghcr-proxy-credential-helper`, mounted at `/opt/ghcr-proxy/bin` in the same container. Add that directory to `PATH` of the container.
-- The file `~/.docker/config.json` with `{"credHelpers":{"ghcr.io":"ghcr-proxy"}}`. The setup of the step writes it.
+- A projected volume `registrygate-token`. It holds a ServiceAccount token with the audience `registrygate` and `expirationSeconds: 3600`, in the file `token`. Mount it at `/var/run/secrets/registrygate` in the container that runs the Docker CLI.
+- An image volume from `ghcr.io/soliddowant/registrygate-credential-helper`, mounted at `/opt/registrygate/bin` in the same container. Add that directory to `PATH` of the container.
+- The file `~/.docker/config.json` with `{"credHelpers":{"ghcr.io":"registrygate"}}`. The setup of the step writes it.
 - The CA certificate at `/etc/docker/certs.d/ghcr.io/ca.crt` in the Docker daemon container (dind). The daemon makes the registry connections, so the CA belongs there and not in the CLI container.
 - A `GHCRAccessPolicy` in the namespace of the pod that names the ServiceAccount of the pod. See [how to write a policy](../user/policies.md).
 
@@ -17,18 +17,18 @@ Pin the image digests of the helper and dind images in your own manifests.
 
 ## Pod example
 
-This pod runs the Docker CLI against a dind sidecar. The Secret `ghcr-proxy-ca` in the pod namespace holds the CA certificate in the key `ca.crt`. Copy it from the `ca.crt` of the proxy certificate Secret (see [Install ghcr-proxy](install.md#make-the-tls-certificate)).
+This pod runs the Docker CLI against a dind sidecar. The Secret `registrygate-ca` in the pod namespace holds the CA certificate in the key `ca.crt`. Copy it from the `ca.crt` of the proxy certificate Secret (see [Install registrygate](install.md#make-the-tls-certificate)).
 
-First make the namespace, the Secret with the CA certificate, the ServiceAccount and the policy. The policy lets the ServiceAccount push to `soliddowant/foo`. The grant in [Install ghcr-proxy](install.md#plan-the-grants) covers that repository for the namespace `ci-foo`.
+First make the namespace, the Secret with the CA certificate, the ServiceAccount and the policy. The policy lets the ServiceAccount push to `soliddowant/foo`. The grant in [Install registrygate](install.md#plan-the-grants) covers that repository for the namespace `ci-foo`.
 
 <!-- e2e -->
 ```sh
 kubectl create namespace ci-foo
-kubectl -n ghcr-proxy get secret ghcr-proxy-tls -o jsonpath='{.data.ca\.crt}' | base64 -d > ca.crt
-kubectl -n ci-foo create secret generic ghcr-proxy-ca --from-file=ca.crt=./ca.crt
+kubectl -n registrygate get secret registrygate-tls -o jsonpath='{.data.ca\.crt}' | base64 -d > ca.crt
+kubectl -n ci-foo create secret generic registrygate-ca --from-file=ca.crt=./ca.crt
 kubectl -n ci-foo create serviceaccount builder
 kubectl apply -f - <<'EOF'
-apiVersion: ghcr-proxy.soliddowant.dev/v1alpha1
+apiVersion: registrygate.soliddowant.dev/v1alpha1
 kind: GHCRAccessPolicy
 metadata:
   name: builder
@@ -45,7 +45,7 @@ Set these variables to the images that you use. The pod below reads them. In you
 
 - `DOCKER_CLI_IMAGE`: an image with the Docker CLI.
 - `DOCKER_DIND_IMAGE`: an image with the Docker daemon.
-- `HELPER_IMAGE`: `ghcr.io/soliddowant/ghcr-proxy-credential-helper:<version>`, where `<version>` is a release of the proxy.
+- `HELPER_IMAGE`: `ghcr.io/soliddowant/registrygate-credential-helper:<version>`, where `<version>` is a release of the proxy.
 
 The pod waits for the daemon, builds a small image and pushes it.
 
@@ -70,7 +70,7 @@ spec:
       args:
         - |
           mkdir -p ~/.docker
-          echo '{"credHelpers":{"ghcr.io":"ghcr-proxy"}}' > ~/.docker/config.json
+          echo '{"credHelpers":{"ghcr.io":"registrygate"}}' > ~/.docker/config.json
           until docker info >/dev/null 2>&1; do sleep 1; done
           printf 'FROM scratch\nLABEL built-by=ci\n' | docker build -t ghcr.io/soliddowant/foo:latest -
           docker push ghcr.io/soliddowant/foo:latest
@@ -78,13 +78,13 @@ spec:
         - name: DOCKER_HOST
           value: tcp://localhost:2375
         - name: PATH
-          value: /opt/ghcr-proxy/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          value: /opt/registrygate/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       volumeMounts:
-        - name: ghcr-proxy-token
-          mountPath: /var/run/secrets/ghcr-proxy
+        - name: registrygate-token
+          mountPath: /var/run/secrets/registrygate
           readOnly: true
         - name: credential-helper
-          mountPath: /opt/ghcr-proxy/bin
+          mountPath: /opt/registrygate/bin
           readOnly: true
     - name: dind
       image: ${DOCKER_DIND_IMAGE}
@@ -94,24 +94,24 @@ spec:
       securityContext:
         privileged: true
       volumeMounts:
-        - name: ghcr-proxy-ca
+        - name: registrygate-ca
           mountPath: /etc/docker/certs.d/ghcr.io
           readOnly: true
   volumes:
-    - name: ghcr-proxy-token
+    - name: registrygate-token
       projected:
         sources:
           - serviceAccountToken:
-              audience: ghcr-proxy
+              audience: registrygate
               expirationSeconds: 3600
               path: token
     - name: credential-helper
       image:
         reference: ${HELPER_IMAGE}
         pullPolicy: IfNotPresent
-    - name: ghcr-proxy-ca
+    - name: registrygate-ca
       secret:
-        secretName: ghcr-proxy-ca
+        secretName: registrygate-ca
 EOF
 ```
 
@@ -122,9 +122,9 @@ The push worked when the `docker` container ends with exit code 0:
 kubectl -n ci-foo wait --for=jsonpath='{.status.containerStatuses[?(@.name=="docker")].state.terminated.reason}'=Completed pod/build --timeout=600s
 ```
 
-The helper image holds one file, `/docker-credential-ghcr-proxy`. Docker finds the helper by the name `docker-credential-ghcr-proxy` on `PATH`, and the config entry `ghcr-proxy` selects it.
+The helper image holds one file, `/docker-credential-registrygate`. Docker finds the helper by the name `docker-credential-registrygate` on `PATH`, and the config entry `registrygate` selects it.
 
-The helper reads the token file on every call, so token rotation by the kubelet needs no action. To use another path, set `GHCR_PROXY_TOKEN_FILE`.
+The helper reads the token file on every call, so token rotation by the kubelet needs no action. To use another path, set `REGISTRYGATE_TOKEN_FILE`.
 
 The Docker daemon runs in a privileged container here. Run it in a sandbox, for example a kata VM, as your own setup requires.
 
@@ -145,20 +145,20 @@ spec:
   workspaces:
     - name: source
   volumes:
-    - name: ghcr-proxy-token
+    - name: registrygate-token
       projected:
         sources:
           - serviceAccountToken:
-              audience: ghcr-proxy
+              audience: registrygate
               expirationSeconds: 3600
               path: token
     - name: credential-helper
       image:
-        reference: ghcr.io/soliddowant/ghcr-proxy-credential-helper:<version>
+        reference: ghcr.io/soliddowant/registrygate-credential-helper:<version>
         pullPolicy: IfNotPresent
-    - name: ghcr-proxy-ca
+    - name: registrygate-ca
       secret:
-        secretName: ghcr-proxy-ca
+        secretName: registrygate-ca
   sidecars:
     - name: dind
       image: quay.io/example/docker-dind@sha256:...
@@ -168,7 +168,7 @@ spec:
       securityContext:
         privileged: true
       volumeMounts:
-        - name: ghcr-proxy-ca
+        - name: registrygate-ca
           mountPath: /etc/docker/certs.d/ghcr.io
           readOnly: true
   steps:
@@ -179,17 +179,17 @@ spec:
         - name: DOCKER_HOST
           value: tcp://localhost:2375
         - name: PATH
-          value: /opt/ghcr-proxy/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          value: /opt/registrygate/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       volumeMounts:
-        - name: ghcr-proxy-token
-          mountPath: /var/run/secrets/ghcr-proxy
+        - name: registrygate-token
+          mountPath: /var/run/secrets/registrygate
           readOnly: true
         - name: credential-helper
-          mountPath: /opt/ghcr-proxy/bin
+          mountPath: /opt/registrygate/bin
           readOnly: true
       script: |
         mkdir -p ~/.docker
-        echo '{"credHelpers":{"ghcr.io":"ghcr-proxy"}}' > ~/.docker/config.json
+        echo '{"credHelpers":{"ghcr.io":"registrygate"}}' > ~/.docker/config.json
         docker build -t $(params.image) .
         docker push $(params.image)
 ---
@@ -225,6 +225,6 @@ Check your Tekton version for support of `volumes` with image sources and of `po
 Common causes:
 
 - `x509: certificate signed by unknown authority`: The CA is not at `/etc/docker/certs.d/ghcr.io/ca.crt` in the dind container.
-- `401` from the proxy: The token file is missing, or the audience is not `ghcr-proxy`.
+- `401` from the proxy: The token file is missing, or the audience is not `registrygate`.
 - `403 DENIED`: No policy and grant allow the push. See [why a push is denied](../user/policies.md#why-a-push-is-denied).
 - `503`: The proxy is not ready or cannot review tokens. Try again.

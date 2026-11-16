@@ -14,11 +14,11 @@ runs:
     - shell: bash
       run: |
         dir=~/.cache/go-build
-        if [[ -z "${GHCR_PROXY_JOB_START:-}" || ! -d "$dir" ]]; then
+        if [[ -z "${REGISTRYGATE_JOB_START:-}" || ! -d "$dir" ]]; then
           echo "::warning::no job start time or build cache; saving the build cache untrimmed"
           exit 0
         fi
-        mins=$(( ( $(date +%s) - GHCR_PROXY_JOB_START ) / 60 + 75 ))
+        mins=$(( ( $(date +%s) - REGISTRYGATE_JOB_START ) / 60 + 75 ))
         echo "build cache before trim: $(du -sh "$dir" | cut -f1)"
         find "$dir" -type f -mmin "+$mins" -delete
         echo "build cache after trim: $(du -sh "$dir" | cut -f1)"
@@ -27,7 +27,7 @@ runs:
         path: ~/.cache/go-build
         key: gobuild-${{ runner.os }}-${{ github.job }}-${{ github.sha }}
     # Every Go job downloads the same modules: only `unit` saves them.
-    - if: github.job == 'unit' && env.GHCR_PROXY_GOMOD_CACHE_HIT != 'true'
+    - if: github.job == 'unit' && env.REGISTRYGATE_GOMOD_CACHE_HIT != 'true'
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/go/pkg/mod

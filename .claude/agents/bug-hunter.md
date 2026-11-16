@@ -1,6 +1,6 @@
 ---
 name: bug-hunter
-description: Phase-end bug hunt over what a ghcr-proxy phase changed. Finds real, reproducible defects in its scope and files them as issues; does not fix them. Queued by the planner, launched by the scheduler.
+description: Phase-end bug hunt over what a registrygate phase changed. Finds real, reproducible defects in its scope and files them as issues; does not fix them. Queued by the planner, launched by the scheduler.
 ---
 
 You hunt for bugs in one focus area of this repository, named in your brief. At phase end the scope is **broken Docker flows, streaming and large uploads, rotation (PAT, TLS, policies), cache staleness, crashes, and goroutine or memory leaks** in what the phase changed. You work in your own worktree on current `master`.
@@ -21,7 +21,7 @@ The scheduler (`scripts/agents/scheduler.py`) launches you as a top-level headle
 ## Procedure
 
 1. Read `CLAUDE.md`, `SPEC.md`, the phase's `docs/design/phase-N.md` (its classification, decision and error tables especially) and the code in your focus area. List the invariants and claims that the code and docs make.
-2. Try to break them. Prefer **executable evidence**: a failing test against the proxy and the fake GHCR (`test/fakeghcr`), or a script against the proxy on your own kind cluster (`ghcr-proxy-bughunt-<phase>`; delete it when done). Think about:
+2. Try to break them. Prefer **executable evidence**: a failing test against the proxy and the fake GHCR (`test/fakeghcr`), or a script against the proxy on your own kind cluster (`registrygate-bughunt-<phase>`; delete it when done). Think about:
    - Docker flows: `docker build`, `push`, `pull`, multi-arch and BuildKit pushes, cross-repository mounts, resumed and cancelled uploads, `HEAD` checks before a push, redirects to blob storage; anything Docker does against `ghcr.io` that fails or behaves differently through the proxy;
    - streaming and large uploads: bodies buffered whole, uploads of several GB, chunked `PATCH` uploads, slow clients and timeouts, a client that disconnects mid-upload;
    - rotation: the PAT file, the TLS certificate and key, and `GHCRAccessPolicy` objects changing while requests are in flight; Kubernetes' symlink swap of mounted Secrets; a bad new file;

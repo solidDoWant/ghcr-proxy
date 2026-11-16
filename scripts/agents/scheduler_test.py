@@ -86,8 +86,8 @@ class VerdictTest(unittest.TestCase):
 
 
 class DefaultsTest(unittest.TestCase):
-    def test_ghcr_proxy_defaults(self):
-        self.assertEqual(CFG["repo"], "solidDoWant/ghcr-proxy")
+    def test_registrygate_defaults(self):
+        self.assertEqual(CFG["repo"], "solidDoWant/registrygate")
         self.assertFalse(CFG["reviews"])
         self.assertFalse(CFG["later_phase_work"])
         self.assertTrue(CFG["renovate_prs"])

@@ -2,9 +2,9 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ include "ghcr-proxy.fullname" . }}
+  name: {{ include "registrygate.fullname" . }}
   labels:
-    {{- include "ghcr-proxy.labels" . | nindent 4 }}
+    {{- include "registrygate.labels" . | nindent 4 }}
 rules:
 - apiGroups:
   - authentication.k8s.io
@@ -13,7 +13,7 @@ rules:
   verbs:
   - create
 - apiGroups:
-  - ghcr-proxy.soliddowant.dev
+  - registrygate.soliddowant.dev
   resources:
   - ghcraccesspolicies
   verbs:
@@ -21,7 +21,7 @@ rules:
   - list
   - watch
 - apiGroups:
-  - ghcr-proxy.soliddowant.dev
+  - registrygate.soliddowant.dev
   resources:
   - ghcraccesspolicies/status
   verbs:

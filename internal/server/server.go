@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/solidDoWant/ghcr-proxy/internal/metrics"
+	"github.com/solidDoWant/registrygate/internal/metrics"
 )
 
 // endpointRemovalDelay is how long the HTTPS listener keeps serving after SIGTERM with /readyz failing, so the

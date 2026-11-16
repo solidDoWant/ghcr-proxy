@@ -6,7 +6,7 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
-chart=deploy/charts/ghcr-proxy
+chart=deploy/charts/registrygate
 rm -rf "$chart/templates/crds"
 mkdir -p "$chart/templates/crds"
 for crd in config/crd/bases/*.yaml; do
@@ -24,9 +24,9 @@ done
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ include "ghcr-proxy.fullname" . }}
+  name: {{ include "registrygate.fullname" . }}
   labels:
-    {{- include "ghcr-proxy.labels" . | nindent 4 }}
+    {{- include "registrygate.labels" . | nindent 4 }}
 HEADER
 	sed -n '/^rules:/,$p' config/rbac/role.yaml
 } >"$chart/templates/clusterrole.yaml"

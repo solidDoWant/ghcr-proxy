@@ -2,12 +2,12 @@
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: {{ include "ghcr-proxy.fullname" . }}
+  name: {{ include "registrygate.fullname" . }}
   labels:
-    {{- include "ghcr-proxy.labels" . | nindent 4 }}
+    {{- include "registrygate.labels" . | nindent 4 }}
 spec:
   maxUnavailable: {{ .Values.podDisruptionBudget.maxUnavailable }}
   selector:
     matchLabels:
-      {{- include "ghcr-proxy.selectorLabels" . | nindent 6 }}
+      {{- include "registrygate.selectorLabels" . | nindent 6 }}
 {{- end }}

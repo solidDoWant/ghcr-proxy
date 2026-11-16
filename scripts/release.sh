@@ -31,13 +31,13 @@ make --no-print-directory chart-lint
 
 # The workflow packages the chart with --version and --app-version set to the
 # release version; check that the result is what a user would install.
-chart=deploy/charts/ghcr-proxy
+chart=deploy/charts/registrygate
 outdir=$(mktemp -d)
 trap 'rm -rf "$outdir"' EXIT
 helm package "$chart" --version "$version" --app-version "$version" --destination "$outdir" >/dev/null
-package="$outdir/ghcr-proxy-$version.tgz"
+package="$outdir/registrygate-$version.tgz"
 if [[ ! -f "$package" ]]; then
-	echo "release: helm did not produce ghcr-proxy-$version.tgz" >&2
+	echo "release: helm did not produce registrygate-$version.tgz" >&2
 	exit 1
 fi
 chart_version=$(helm show chart "$package" | awk '$1 == "version:" { print $2 }')
@@ -46,24 +46,24 @@ if [[ "$chart_version" != "$version" || "$app_version" != "$version" ]]; then
 	echo "release: chart version '$chart_version' and appVersion '$app_version' must both be '$version'" >&2
 	exit 1
 fi
-image="ghcr.io/soliddowant/ghcr-proxy:$version"
-if ! helm template ghcr-proxy "$package" --namespace ghcr-proxy --set pat.existingSecret=pat --set tls.existingSecret=tls | grep -Fq "image: \"$image\"" &&
-	! helm template ghcr-proxy "$package" --namespace ghcr-proxy --set pat.existingSecret=pat --set tls.existingSecret=tls | grep -Fq "image: $image"; then
+image="ghcr.io/soliddowant/registrygate:$version"
+if ! helm template registrygate "$package" --namespace registrygate --set pat.existingSecret=pat --set tls.existingSecret=tls | grep -Fq "image: \"$image\"" &&
+	! helm template registrygate "$package" --namespace registrygate --set pat.existingSecret=pat --set tls.existingSecret=tls | grep -Fq "image: $image"; then
 	echo "release: the chart does not deploy the image $image by default" >&2
 	exit 1
 fi
 
-helper_image="ghcr.io/soliddowant/ghcr-proxy-credential-helper:$version"
+helper_image="ghcr.io/soliddowant/registrygate-credential-helper:$version"
 
 echo "release: would push image $image (linux/amd64, linux/arm64)"
 echo "release: would push image $helper_image (linux/amd64, linux/arm64)"
 case "$version" in
 *-*) ;;
 *)
-	echo "release: would tag image ghcr.io/soliddowant/ghcr-proxy:latest"
-	echo "release: would tag image ghcr.io/soliddowant/ghcr-proxy-credential-helper:latest"
+	echo "release: would tag image ghcr.io/soliddowant/registrygate:latest"
+	echo "release: would tag image ghcr.io/soliddowant/registrygate-credential-helper:latest"
 	;;
 esac
-echo "release: would push chart oci://ghcr.io/soliddowant/charts/ghcr-proxy:$version"
+echo "release: would push chart oci://ghcr.io/soliddowant/charts/registrygate:$version"
 echo "release: would create GitHub release v$version with the notes above"
 echo "release: dry run of v$version passed; push the tag v$version to publish"

@@ -27,7 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
-	"github.com/solidDoWant/ghcr-proxy/test/fakeghcr"
+	"github.com/solidDoWant/registrygate/test/fakeghcr"
 )
 
 type syncBuffer struct {
@@ -175,7 +175,7 @@ func (p *proxyUnderTest) ready() bool {
 
 func (p *proxyUnderTest) leaseHolder(t *testing.T) string {
 	var lease coordinationv1.Lease
-	if err := p.k8s.Get(t.Context(), types.NamespacedName{Namespace: "default", Name: "ghcr-proxy-status"}, &lease); err != nil {
+	if err := p.k8s.Get(t.Context(), types.NamespacedName{Namespace: "default", Name: "registrygate-status"}, &lease); err != nil {
 		return "error: " + err.Error()
 	}
 

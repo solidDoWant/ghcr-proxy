@@ -11,7 +11,7 @@ import (
 	"github.com/distribution/reference"
 	"github.com/opencontainers/go-digest"
 
-	"github.com/solidDoWant/ghcr-proxy/api/v1alpha1"
+	"github.com/solidDoWant/registrygate/api/v1alpha1"
 )
 
 // Route identifies which registry API endpoint a request addresses.

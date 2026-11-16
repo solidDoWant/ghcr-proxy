@@ -14,14 +14,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	"github.com/solidDoWant/ghcr-proxy/api/v1alpha1"
-	"github.com/solidDoWant/ghcr-proxy/internal/authz"
-	"github.com/solidDoWant/ghcr-proxy/internal/config"
+	"github.com/solidDoWant/registrygate/api/v1alpha1"
+	"github.com/solidDoWant/registrygate/internal/authz"
+	"github.com/solidDoWant/registrygate/internal/config"
 )
 
 const (
 	// LeaseName is the leader-election lease of the status controller.
-	LeaseName = "ghcr-proxy-status"
+	LeaseName = "registrygate-status"
 	// ConditionReady is the condition type the controller writes.
 	ConditionReady = "Ready"
 )

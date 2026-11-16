@@ -29,7 +29,7 @@ func TestDeleteByDigestWithTheDeleteActionRemovesTheManifest(t *testing.T) {
 
 	// remote.Delete is what crane delete runs.
 	options := []remote.Option{
-		remote.WithAuth(&authn.Basic{Username: "ghcr-proxy", Password: builderToken}),
+		remote.WithAuth(&authn.Basic{Username: "registrygate", Password: builderToken}),
 		remote.WithTransport(proxy.server.Client().Transport),
 	}
 	require.NoError(t, remote.Delete(ref, options...))

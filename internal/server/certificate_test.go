@@ -19,7 +19,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/solidDoWant/ghcr-proxy/internal/server"
+	"github.com/solidDoWant/registrygate/internal/server"
 )
 
 // writeKeyPair writes a fresh self-signed pair for name into dir as tls.crt and tls.key and returns the certificate.

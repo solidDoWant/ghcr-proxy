@@ -18,8 +18,8 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	lru "github.com/hashicorp/golang-lru/v2"
 
-	"github.com/solidDoWant/ghcr-proxy/internal/config"
-	"github.com/solidDoWant/ghcr-proxy/internal/metrics"
+	"github.com/solidDoWant/registrygate/internal/config"
+	"github.com/solidDoWant/registrygate/internal/metrics"
 )
 
 // Failures of a mirror request before the mirror answered it.

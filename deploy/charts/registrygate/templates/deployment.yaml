@@ -1,30 +1,30 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "ghcr-proxy.fullname" . }}
+  name: {{ include "registrygate.fullname" . }}
   labels:
-    {{- include "ghcr-proxy.labels" . | nindent 4 }}
+    {{- include "registrygate.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicas }}
   selector:
     matchLabels:
-      {{- include "ghcr-proxy.selectorLabels" . | nindent 6 }}
+      {{- include "registrygate.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       annotations:
-        checksum/config: {{ include "ghcr-proxy.config" . | sha256sum }}
+        checksum/config: {{ include "registrygate.config" . | sha256sum }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
       labels:
-        {{- include "ghcr-proxy.selectorLabels" . | nindent 8 }}
+        {{- include "registrygate.selectorLabels" . | nindent 8 }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "ghcr-proxy.serviceAccountName" . }}
-      terminationGracePeriodSeconds: {{ include "ghcr-proxy.terminationGracePeriodSeconds" . }}
+      serviceAccountName: {{ include "registrygate.serviceAccountName" . }}
+      terminationGracePeriodSeconds: {{ include "registrygate.terminationGracePeriodSeconds" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
@@ -32,7 +32,7 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
-            - --config=/etc/ghcr-proxy/config.yaml
+            - --config=/etc/registrygate/config.yaml
           env:
             - name: POD_NAMESPACE
               valueFrom:
@@ -57,34 +57,34 @@ spec:
               port: health
           volumeMounts:
             - name: config
-              mountPath: /etc/ghcr-proxy
+              mountPath: /etc/registrygate
               readOnly: true
             - name: pat
-              mountPath: /var/run/ghcr-proxy/pat
+              mountPath: /var/run/registrygate/pat
               readOnly: true
             - name: tls
-              mountPath: /var/run/ghcr-proxy/tls
+              mountPath: /var/run/registrygate/tls
               readOnly: true
             {{- if .Values.webhook.enabled }}
             - name: webhook-tls
-              mountPath: /var/run/ghcr-proxy/webhook-tls
+              mountPath: /var/run/registrygate/webhook-tls
               readOnly: true
             {{- end }}
             {{- if .Values.upstream.ca.existingSecret }}
             - name: upstream-ca
-              mountPath: /var/run/ghcr-proxy/upstream-ca
+              mountPath: /var/run/registrygate/upstream-ca
               readOnly: true
             {{- end }}
             {{- range $name := list "policy" "anonymous" }}
             {{- $mirror := index $.Values.mirrors $name }}
             {{- if and $mirror.url $mirror.credentials.existingSecret }}
             - name: mirror-{{ $name }}
-              mountPath: /var/run/ghcr-proxy/mirror-{{ $name }}
+              mountPath: /var/run/registrygate/mirror-{{ $name }}
               readOnly: true
             {{- end }}
             {{- if and $mirror.url $mirror.ca.existingSecret }}
             - name: mirror-{{ $name }}-ca
-              mountPath: /var/run/ghcr-proxy/mirror-{{ $name }}-ca
+              mountPath: /var/run/registrygate/mirror-{{ $name }}-ca
               readOnly: true
             {{- end }}
             {{- end }}
@@ -95,7 +95,7 @@ spec:
       volumes:
         - name: config
           configMap:
-            name: {{ include "ghcr-proxy.fullname" . }}
+            name: {{ include "registrygate.fullname" . }}
         - name: pat
           secret:
             secretName: {{ required "pat.existingSecret is required" .Values.pat.existingSecret }}
@@ -108,7 +108,7 @@ spec:
         {{- if .Values.webhook.enabled }}
         - name: webhook-tls
           secret:
-            secretName: {{ include "ghcr-proxy.webhookSecretName" . }}
+            secretName: {{ include "registrygate.webhookSecretName" . }}
         {{- end }}
         {{- if .Values.upstream.ca.existingSecret }}
         - name: upstream-ca

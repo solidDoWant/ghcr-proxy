@@ -7,7 +7,7 @@ import (
 )
 
 // BasicChallenge is the only challenge the proxy ever sends to clients.
-const BasicChallenge = `Basic realm="ghcr-proxy"`
+const BasicChallenge = `Basic realm="registrygate"`
 
 // Fixed client-facing messages for upstream failures.
 const (
@@ -16,7 +16,7 @@ const (
 	messageRealmNotAllowed    = "upstream token endpoint not allowed"
 	messageUnavailable        = "upstream unavailable"
 	messageMirrorUnavailable  = "mirror unavailable"
-	messageNotReady           = "ghcr-proxy is not ready"
+	messageNotReady           = "registrygate is not ready"
 	messageManifestTooLarge   = "manifest too large"
 )
 

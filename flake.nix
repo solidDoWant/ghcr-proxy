@@ -1,5 +1,5 @@
 {
-  description = "ghcr-proxy development environment";
+  description = "registrygate development environment";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -21,7 +21,7 @@
             value
           else
             throw ''
-              ghcr-proxy: this flake was evaluated as a path flake, so Nix copied the whole directory to ${self.outPath}.
+              registrygate: this flake was evaluated as a path flake, so Nix copied the whole directory to ${self.outPath}.
               Run `nix develop` inside the checkout or worktree instead, or use builtins.getFlake "git+file://''${toString ./.}".
               Reclaim the space with: nix store delete ${self.outPath}
             '';
@@ -36,14 +36,14 @@
         minimumGoVersion =
           if goModToolchain != null then builtins.head goModToolchain
           else if goModGo != null then builtins.head goModGo
-          else throw "ghcr-proxy: go.mod has neither a `toolchain goX.Y.Z` nor a `go X.Y.Z` line";
+          else throw "registrygate: go.mod has neither a `toolchain goX.Y.Z` nor a `go X.Y.Z` line";
         # Pinned to Go 1.26 (1.26.11 or later has the net/http fix from
         # GO-2026-6859). Return to the default `pkgs.go` once nixpkgs has
         # go1.27.4 or later.
         nixpkgsGo = pkgs.go_1_26;
         go =
           if pkgs.lib.versionAtLeast nixpkgsGo.version minimumGoVersion then nixpkgsGo
-          else throw "ghcr-proxy: go.mod asks for Go ${minimumGoVersion}, but nixpkgs has Go ${nixpkgsGo.version}; update flake.lock (nix flake update nixpkgs) or lower go.mod.";
+          else throw "registrygate: go.mod asks for Go ${minimumGoVersion}, but nixpkgs has Go ${nixpkgsGo.version}; update flake.lock (nix flake update nixpkgs) or lower go.mod.";
 
         # The control plane binaries for envtest
         # (sigs.k8s.io/controller-runtime/pkg/envtest): the dev shell points
@@ -54,7 +54,7 @@
         etcdServer = pkgs.etcd_3_6.passthru.deps.etcdserver.overrideAttrs (_: {
           doCheck = false;
         });
-        envtestAssets = pkgs.linkFarm "ghcr-proxy-envtest-assets" [
+        envtestAssets = pkgs.linkFarm "registrygate-envtest-assets" [
           { name = "kube-apiserver"; path = "${pkgs.kubernetes}/bin/kube-apiserver"; }
           { name = "etcd"; path = "${etcdServer}/bin/etcd"; }
           { name = "kubectl"; path = "${pkgs.kubectl}/bin/kubectl"; }

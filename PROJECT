@@ -6,15 +6,15 @@ cliVersion: 4.6.0
 domain: soliddowant.dev
 layout:
   - go.kubebuilder.io/v4
-projectName: ghcr-proxy
-repo: github.com/solidDoWant/ghcr-proxy
+projectName: registrygate
+repo: github.com/solidDoWant/registrygate
 version: "3"
 resources:
   - api:
       crdVersion: v1
       namespaced: true
     domain: soliddowant.dev
-    group: ghcr-proxy
+    group: registrygate
     kind: GHCRAccessPolicy
-    path: github.com/solidDoWant/ghcr-proxy/api/v1alpha1
+    path: github.com/solidDoWant/registrygate/api/v1alpha1
     version: v1alpha1

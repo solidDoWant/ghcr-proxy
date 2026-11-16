@@ -1,6 +1,6 @@
 # How GHCR behaves
 
-For: people who change the ghcr-proxy code.
+For: people who change the registrygate code.
 
 This page records what the real `ghcr.io` answers to the questions that the delete design depends on. The live tests in `test/live` ask these questions. Only the operator runs them, by hand, with `make test-live`. The operator then fills in each section below and amends the delete section of the [design](../design/phase-2.md) with the result.
 
@@ -14,7 +14,7 @@ The live tests need three environment variables:
 
 If one of them is not set, every live test skips.
 
-The tests start envtest and the proxy in one process. The proxy forwards to `https://ghcr.io`. Each run picks a random run ID. The only grant of the proxy is `<owner>/ghcr-proxy-live-<run id>` and `<owner>/ghcr-proxy-live-<run id>/**`. At the end, the tests delete the packages that the run pushed, through the GitHub REST API at `https://api.github.com/`. They never delete a package outside the run prefix. If a run stops before the cleanup, remove its packages by hand. A later run does not remove them.
+The tests start envtest and the proxy in one process. The proxy forwards to `https://ghcr.io`. Each run picks a random run ID. The only grant of the proxy is `<owner>/registrygate-live-<run id>` and `<owner>/registrygate-live-<run id>/**`. At the end, the tests delete the packages that the run pushed, through the GitHub REST API at `https://api.github.com/`. They never delete a package outside the run prefix. If a run stops before the cleanup, remove its packages by hand. A later run does not remove them.
 
 The test output shows status codes, registry error codes and `expires_in` only. It never shows the PAT or a token.
 

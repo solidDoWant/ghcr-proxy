@@ -16,11 +16,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache/informertest"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllertest"
 
-	"github.com/solidDoWant/ghcr-proxy/api/v1alpha1"
-	"github.com/solidDoWant/ghcr-proxy/internal/authn"
-	"github.com/solidDoWant/ghcr-proxy/internal/authz"
-	"github.com/solidDoWant/ghcr-proxy/internal/config"
-	"github.com/solidDoWant/ghcr-proxy/internal/registry"
+	"github.com/solidDoWant/registrygate/api/v1alpha1"
+	"github.com/solidDoWant/registrygate/internal/authn"
+	"github.com/solidDoWant/registrygate/internal/authz"
+	"github.com/solidDoWant/registrygate/internal/config"
+	"github.com/solidDoWant/registrygate/internal/registry"
 )
 
 const (
