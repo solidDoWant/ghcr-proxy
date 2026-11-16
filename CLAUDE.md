@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Operating manual for this repository. ghcr-proxy is an authenticating reverse proxy for `ghcr.io` that runs in a Kubernetes cluster. It holds one GitHub classic personal access token (PAT) and lets CI pods push, pull and delete GHCR images without ever seeing it: pods authenticate with their own ServiceAccount token, `GHCRAccessPolicy` custom resources say what each ServiceAccount may do, and the proxy's configuration caps each namespace with a grant. A static Docker credential helper, `docker-credential-ghcr-proxy`, hands the pod's token to Docker. Read `SPEC.md` first. The current phase's behaviour is decided by `docs/design/phase-N.md`, and the phase is done when `docs/acceptance/phase-N.md` passes.
+Operating manual for this repository. registrygate (formerly ghcr-proxy) is an authenticating, transparent reverse proxy for container registries that runs in a Kubernetes cluster. CI pods resolve registry hosts such as `ghcr.io` to it and authenticate with their own ServiceAccount token; they never see an upstream or mirror credential. Four namespaced custom resources configure it: `UpstreamRegistry` (a host the proxy stands in for), `UpstreamCredential` (a credential and its ceiling), `RegistryMirror` (a pull-through cache, for example one Harbor project per CI namespace) and `RegistryAccessPolicy` (what each ServiceAccount may do). A static Docker credential helper, `docker-credential-registrygate`, hands the pod's token to Docker. Read `SPEC.md` first. The current phase's behaviour is decided by `docs/design/phase-N.md`, and the phase is done when `docs/acceptance/phase-N.md` passes.
 
 ## Things to Remember
 
@@ -30,31 +30,31 @@ Call out any change touching these in the PR description.
 
 ## Tech Stack
 
-- **Go**, single module at the repo root (`github.com/solidDoWant/ghcr-proxy`). Two binaries: `cmd/ghcr-proxy` (the proxy) and `cmd/docker-credential-ghcr-proxy` (the credential helper, static, `CGO_ENABLED=0`).
-- **Kubernetes:** `sigs.k8s.io/controller-runtime` with the kubebuilder layout (`PROJECT`, `api/v1alpha1`, `config/`) for the `GHCRAccessPolicy` CRD, its informer and the status controller; `client-go` for `TokenReview`. API group `ghcr-proxy.soliddowant.dev`, version `v1alpha1`. CRDs, RBAC and deepcopy are generated with `controller-gen` (`make generate`) from kubebuilder markers. Generated code is committed and never hand-edited. Validation that can be static is CEL on the types.
+- **Go**, single module at the repo root (`github.com/solidDoWant/registrygate`). Two binaries: `cmd/registrygate` (the proxy) and `cmd/docker-credential-registrygate` (the credential helper, static, `CGO_ENABLED=0`).
+- **Kubernetes:** `sigs.k8s.io/controller-runtime` with the kubebuilder layout (`PROJECT`, `api/v1alpha1`, `config/`) for the custom resources, their informers and the status controller; `client-go` for `TokenReview`. API group `registrygate.soliddowant.dev`, version `v1alpha1`. CRDs, RBAC and deepcopy are generated with `controller-gen` (`make generate`) from kubebuilder markers. Generated code is committed and never hand-edited. Validation that can be static is CEL on the types.
 - **Registry:** `github.com/google/go-containerregistry` (`pkg/v1/remote/transport` for upstream authentication and the token dance, `pkg/registry` for the fake GHCR); `net/http/httputil.ReverseProxy` for forwarding. Parsing with `github.com/distribution/reference` and `github.com/opencontainers/go-digest`. Glob matching with `github.com/bmatcuk/doublestar/v4`.
 - **Credential helper:** `github.com/docker/docker-credential-helpers` for the helper protocol (its `credentials.Serve` and types).
 - **Other libraries:** `golang.org/x/sync/singleflight` (collapsing concurrent token reviews), `github.com/fsnotify/fsnotify` (PAT and TLS file reloads), `log/slog` (audit log).
 - **Tests:** Go `testing` with `testify`; `sigs.k8s.io/controller-runtime/pkg/envtest` for integration tests (binaries from the dev shell's `KUBEBUILDER_ASSETS`); the fake GHCR in `test/fakeghcr`; kind (with the `ImageVolume` feature gate) for e2e.
-- **Helm** chart in `deploy/charts/ghcr-proxy` (CRDs included from `config/crd/bases`).
+- **Helm** chart in `deploy/charts/registrygate` (CRDs included from `config/crd/bases`).
 - **Nix flake** dev shell; **golangci-lint**.
 
 ## Project Structure
 
-See the layout section of `SPEC.md`: `cmd/ghcr-proxy` (proxy main), `cmd/docker-credential-ghcr-proxy` (credential helper main), `api/v1alpha1` (`GHCRAccessPolicy` Go types), `internal/config` (config file), `internal/server` (TLS listener, health and metrics), `internal/authn` (`TokenReview` with cache), `internal/authz` (policy index, grants, glob matching and containment), `internal/registry` (request classification, forwarding, rewrites, upstream transports), `internal/controller` (status controller), `internal/audit`, `internal/credhelper`, `config/crd/bases` and `config/rbac` (generated), `deploy/charts/ghcr-proxy`, `test/` (`fakeghcr`, e2e harness and fixtures), `docs/` (`user/`, `admin/`, `dev/`, `design/`, `acceptance/`, `agents/`; see `docs/README.md`), `scripts/`.
+See the layout section of `SPEC.md`: `cmd/registrygate` (proxy main), `cmd/docker-credential-registrygate` (credential helper main), `api/v1alpha1` (custom resource Go types), `internal/config` (config file), `internal/server` (TLS listener, health and metrics), `internal/authn` (`TokenReview` with cache), `internal/authz` (policy index, grants, glob matching and containment), `internal/registry` (request classification, forwarding, rewrites, upstream transports), `internal/controller` (status controller), `internal/audit`, `internal/credhelper`, `config/crd/bases` and `config/rbac` (generated), `deploy/charts/registrygate`, `test/` (`fakeghcr`, e2e harness and fixtures), `docs/` (`user/`, `admin/`, `dev/`, `design/`, `acceptance/`, `agents/`; see `docs/README.md`), `scripts/`.
 
 ## Commands
 
 Run `make help` for the full list, and keep it and this section current as targets are added:
 
-- `make build`: build `bin/ghcr-proxy` and `bin/docker-credential-ghcr-proxy`.
-- `make build-fakeghcr-image`: build the e2e-only GHCR double image `ghcr.io/soliddowant/ghcr-proxy-fakeghcr:dev` (host arch, never pushed).
-- `make build-images`: build the images `ghcr.io/soliddowant/ghcr-proxy` and `ghcr.io/soliddowant/ghcr-proxy-credential-helper` for amd64 and arm64; `PUSH_ALL=true` also pushes (releases only).
+- `make build`: build `bin/registrygate` and `bin/docker-credential-registrygate`.
+- `make build-fakeghcr-image`: build the e2e-only GHCR double image `ghcr.io/soliddowant/registrygate-fakeghcr:dev` (host arch, never pushed).
+- `make build-images`: build the images `ghcr.io/soliddowant/registrygate` and `ghcr.io/soliddowant/registrygate-credential-helper` for amd64 and arm64; `PUSH_ALL=true` also pushes (releases only).
 - `make fmt` / `make lint` (`lint-fix`): format; run every linter and check, reporting all failures before exiting non-zero.
 - `make test`: unit tests with `-race`, plus the tests of the agent and CI scripts.
 - `make generate` / `make check-generate`: regenerate CRDs, RBAC, deepcopy and the generated docs references, or fail on drift.
 - `make test-integration`: `integration`-tagged tests: envtest with the proxy and the fake GHCR in-process.
-- `make test-e2e`: `e2e`-tagged tests on the kind cluster `E2E_CLUSTER` (`ImageVolume` on) with the fake GHCR and the chart (`KEEP_CLUSTER=1` keeps it). Agents set `E2E_CLUSTER=ghcr-proxy-<issue>`.
+- `make test-e2e`: `e2e`-tagged tests on the kind cluster `E2E_CLUSTER` (`ImageVolume` on) with the fake GHCR and the chart (`KEEP_CLUSTER=1` keeps it). Agents set `E2E_CLUSTER=registrygate-<issue>`.
 - `make test-live`: `live`-tagged tests against the real `ghcr.io`. **Operator only, by hand, never in CI.** The PAT is the owner's main account's: agents never run these tests, never ask for the token, and never add a workflow, secret or variable for them. Workers check the tests skip cleanly without `GHCR_LIVE_PAT_FILE` (`docs/design/phase-2.md`, section 1).
 - `make acceptance`: run every test named on a checklist `Tests:` line and print the scoreboard for `PHASE` (default 1).
 - `make chart-lint`, `make docs-check`, `make release VERSION=x.y.z` (dry run only; releasing is the release-manager's job).
@@ -69,7 +69,7 @@ Provisioned through `flake.nix` (Go, golangci-lint, controller-gen, envtest bina
 - The dev shell is already loaded into every Bash call. Run `go`, `golangci-lint`, `make`, `kind`, `helm`, `python3` directly. Don't wrap commands in `nix develop -c`.
 - **Never block a tool call for more than about 4 minutes.** Start long runs (integration, e2e, `-count=50`) in the background with output to a log, then poll with `./scripts/agents/wait-for.sh <log> '<regex>'`. Wait for CI with `./scripts/agents/wait-ci.sh <PR>`, never `gh pr checks --watch`.
 - **Hangs:** bound every test command (`timeout 15m …`). If a log hasn't grown for 5 minutes, `kill -QUIT` the Go test binary for a goroutine dump, file a `bug` issue, and move on.
-- **kind clusters:** name yours `ghcr-proxy-<issue>` and delete it when done. Never touch another agent's cluster.
+- **kind clusters:** name yours `registrygate-<issue>` and delete it when done. Never touch another agent's cluster.
 - A branch can be checked out in only one worktree. If git says it is in use, check it out detached or hand back `HANDOFF: blocked`.
 
 ## Acceptance Criteria Rules
