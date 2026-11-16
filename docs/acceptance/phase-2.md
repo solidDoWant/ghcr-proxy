@@ -7,9 +7,9 @@ Scenarios marked **(live)** run against the real `ghcr.io` through `make test-li
 ## Delete
 
 - **AC-2-01 Delete by digest.** With a policy granting `delete`, deleting a manifest by digest through the proxy (`crane delete` / `regctl manifest rm`) removes it, against the fake and against real GHCR **(live)**.
-  Tests:
+  Tests: `internal/server: TestDeleteByDigestWithTheDeleteActionRemovesTheManifest`, `internal/registry: TestDeleteByDigestDeletesThePackageVersionThroughTheRESTAPI`, `test/live: TestDeleteByDigestThroughTheProxy`
 - **AC-2-02 Delete needs the delete action.** A policy without `delete` gets `403`, and the upstream sees nothing.
-  Tests:
+  Tests: `internal/server: TestDeleteWithoutTheDeleteActionIs403AndSendsNothingUpstream`
 - **AC-2-03 GHCR's answer is recorded.** `docs/dev/ghcr-behaviour.md` records, from the live tests, whether GHCR supports OCI delete by digest and by tag, and how long its registry tokens live **(live)**.
   Tests:
 

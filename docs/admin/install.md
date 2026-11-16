@@ -269,6 +269,7 @@ The API server must reach port `9443` of the proxy pods. If you use a NetworkPol
 - A synced replica keeps the last policies it saw. During an outage of the Kubernetes API server, a revoked policy keeps working until the watch recovers.
 - The proxy caches a token review for up to 30 seconds (`authentication.cacheTTL`). A deleted ServiceAccount can keep working for that time.
 - All callers share one GitHub identity and its rate limits.
+- A delete by digest uses the PAT with the GitHub REST API at `upstream.apiURL` (default `https://api.github.com/`). The PAT needs the `delete:packages` scope for it. If you use a NetworkPolicy, allow the proxy to connect to that host on port 443.
 - ServiceAccount tokens must use the audience `ghcr-proxy` and a short life of 1 to 6 hours. Do not accept the default API server audience.
 
 ## Audit log

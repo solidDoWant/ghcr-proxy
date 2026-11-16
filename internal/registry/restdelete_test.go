@@ -300,8 +300,10 @@ func TestDeleteByDigestMapsTheRESTAnswer(t *testing.T) {
 			wantStatus: http.StatusNotFound, wantCode: "MANIFEST_UNKNOWN",
 		},
 		{
-			name:       "package 404 is MANIFEST_UNKNOWN",
-			answer:     func(*http.Request) stubAnswer { return stubAnswer{status: http.StatusNotFound, body: `{"message":"Package not found."}`} },
+			name: "package 404 is MANIFEST_UNKNOWN",
+			answer: func(*http.Request) stubAnswer {
+				return stubAnswer{status: http.StatusNotFound, body: `{"message":"Package not found."}`}
+			},
 			wantStatus: http.StatusNotFound, wantCode: "MANIFEST_UNKNOWN",
 		},
 		{
@@ -327,8 +329,10 @@ func TestDeleteByDigestMapsTheRESTAnswer(t *testing.T) {
 			wantStatus: http.StatusServiceUnavailable, wantCode: "UNAVAILABLE", wantRetryAfter: "42",
 		},
 		{
-			name:       "403 with Retry-After on the listing is 503",
-			answer:     func(*http.Request) stubAnswer { return stubAnswer{status: http.StatusForbidden, header: map[string]string{"Retry-After": "17"}, body: `{"message":"secondary rate limit"}`} },
+			name: "403 with Retry-After on the listing is 503",
+			answer: func(*http.Request) stubAnswer {
+				return stubAnswer{status: http.StatusForbidden, header: map[string]string{"Retry-After": "17"}, body: `{"message":"secondary rate limit"}`}
+			},
 			wantStatus: http.StatusServiceUnavailable, wantCode: "UNAVAILABLE", wantRetryAfter: "17",
 		},
 		{
@@ -337,8 +341,10 @@ func TestDeleteByDigestMapsTheRESTAnswer(t *testing.T) {
 			wantStatus: http.StatusBadGateway, wantCode: "UNAVAILABLE", wantMessage: "the proxy's credential can't delete packages",
 		},
 		{
-			name:       "401 is 502 credential rejected",
-			answer:     func(*http.Request) stubAnswer { return stubAnswer{status: http.StatusUnauthorized, body: `{"message":"Bad credentials"}`} },
+			name: "401 is 502 credential rejected",
+			answer: func(*http.Request) stubAnswer {
+				return stubAnswer{status: http.StatusUnauthorized, body: `{"message":"Bad credentials"}`}
+			},
 			wantStatus: http.StatusBadGateway, wantCode: "UNAVAILABLE", wantMessage: "upstream rejected the proxy's credential",
 		},
 		{
@@ -395,6 +401,7 @@ func TestDeleteByDigestMapsTheRESTAnswer(t *testing.T) {
 func TestDeleteByDigestTimeoutAndConnectionErrorsAre502(t *testing.T) {
 	t.Run("timeout", func(t *testing.T) {
 		release := make(chan struct{})
+
 		t.Cleanup(func() { close(release) })
 
 		stub := newStubAPI(t, func(req *http.Request) stubAnswer {
@@ -431,6 +438,7 @@ func TestDeleteByDigestTimeoutAndConnectionErrorsAre502(t *testing.T) {
 
 func TestDeleteByDigestPagesThroughTheVersions(t *testing.T) {
 	var stub *stubAPI
+
 	stub = newStubAPI(t, func(req *http.Request) stubAnswer {
 		switch {
 		case req.Method == http.MethodDelete:
@@ -501,4 +509,27 @@ func TestDeleteByDigestNeverCachesAFailedOwnerLookup(t *testing.T) {
 	calls := stub.recorded()
 	assert.Equal(t, "GET /orgs/someone/packages/container/app/versions?per_page=100&page=1", calls[1],
 		"the second delete looks the owner type up again")
+}
+
+func TestDeleteByDigestNeverFollowsARedirect(t *testing.T) {
+	var stub *stubAPI
+
+	stub = newStubAPI(t, func(req *http.Request) stubAnswer {
+		switch {
+		case req.URL.Path == "/redirected":
+			return stubAnswer{status: http.StatusNoContent}
+		case req.Method == http.MethodGet:
+			return stubAnswer{status: http.StatusOK, body: versionsBody(7, stubDigest)}
+		}
+
+		return stubAnswer{status: http.StatusTemporaryRedirect, header: map[string]string{"Location": stub.server.URL + "/redirected"}}
+	})
+	fake := fakeghcr.New(t, fakeghcr.Options{})
+	harness := newProxyHarness(t, fake, fake.PAT(), withPAT,
+		withAPI(stub.server.URL+"/", stub.server.Client().Transport, 10*time.Second))
+
+	status, _, body := harness.do(t, http.MethodDelete, "/v2/someorg/app/manifests/"+stubDigest)
+	assert.Equal(t, http.StatusBadGateway, status)
+	assert.Contains(t, body, "upstream unavailable")
+	assert.NotContains(t, strings.Join(stub.recorded(), "\n"), "/redirected")
 }

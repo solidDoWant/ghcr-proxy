@@ -138,7 +138,7 @@ A policy repository pattern is inside a grant only if every name it can match is
 
 ### Delete
 
-GHCR's support for the OCI `DELETE` endpoints is not documented. Phase 2 verifies it against the real `ghcr.io`. If GHCR refuses `DELETE /v2/<name>/manifests/<digest>`, the proxy implements it through the GitHub REST API (`DELETE /users/{user}/packages/container/{package}/versions/{id}` or the `orgs` equivalent), finding the version whose name is the digest. Deleting by tag is passed through as is; if GHCR refuses it, the client gets GHCR's error.
+GHCR answers `405 UNSUPPORTED` to every OCI `DELETE` endpoint (`docs/dev/ghcr-behaviour.md`). So the proxy implements `DELETE /v2/<name>/manifests/<digest>` through the GitHub REST API (`upstream.apiURL`, default `https://api.github.com/`): it lists the package's versions (`orgs` first, then `users`), finds the version whose name is the digest, and deletes it (`DELETE /users/{user}/packages/container/{package}/versions/{id}` or the `orgs` equivalent). No registry `DELETE` is sent for it. A `204` is answered `202 Accepted`; the other answers are mapped as in `docs/design/phase-2.md`, section 2. Deleting by tag and deleting a blob are passed through as is; GHCR refuses them, and the client gets GHCR's error.
 
 ### Pull mirrors (phase 2)
 
