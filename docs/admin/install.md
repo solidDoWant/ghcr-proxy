@@ -144,6 +144,43 @@ Make sure that the install works:
 
 If the proxy cannot decide, it fails closed. It denies the request or forwards it with no credential. It never uses the PAT as a fallback.
 
+## Configure pull mirrors
+
+A pull mirror is a registry that keeps copies of GHCR images, for example a Harbor proxy-cache project for `ghcr.io`. The proxy can use two mirrors. Both are optional. Set them under `mirrors` in the chart values:
+
+- `mirrors.policy`: Allowed pulls of manifests and blobs go to this mirror.
+- `mirrors.anonymous`: Anonymous and not-allowed pulls of manifests and blobs go to this mirror.
+
+Tag lists, pushes, deletes and mounts always go to the upstream.
+
+Do not give the anonymous mirror any credentials for `ghcr.io`. Anyone who can reach the proxy can pull through the anonymous mirror. If the mirror can read private images, these callers can read them too. The proxy cannot detect this.
+
+Each mirror has these fields:
+
+| Value | Meaning |
+|---|---|
+| `url` | The scheme, host and port of the mirror, for example `https://harbor.example.com`. It has no path. An empty value turns the mirror off. |
+| `pathPrefix` | The path under which the mirror serves GHCR repositories. With `ghcr`, the image `owner/image` is `ghcr/owner/image` on the mirror. |
+| `credentials.existingSecret` | A Secret that holds the credentials of the mirror as `user:password`. Leave it empty if the mirror needs no credentials. |
+| `ca.existingSecret` | A Secret with an extra CA certificate (PEM) for the mirror. |
+| `fallbackToUpstream` | If `true` (the default), a pull goes to the upstream when the mirror fails. |
+| `responseHeaderTimeout` | How long the proxy waits for the response headers of the mirror. The default is `10s`. |
+
+The proxy never sends the PAT to a mirror. The mirror credentials must be in their own Secret. The proxy does not start if the credentials file of a mirror is the PAT file.
+
+Example:
+
+```yaml
+mirrors:
+  policy:
+    url: https://harbor.example.com
+    pathPrefix: ghcr
+    credentials:
+      existingSecret: ghcr-proxy-mirror-policy
+```
+
+The proxy reads the credentials and CA files at start. It reads them again when the Secrets change. If a file is missing or not valid at start, the proxy marks that mirror as unavailable and pulls take the fallback rule. Pulls never go to the other mirror. If a file becomes not valid later, the proxy keeps the last good value and logs an error.
+
 ## Turn on the admission webhook
 
 The proxy enforces grants whether or not you use the webhook. The webhook only gives fast feedback: `kubectl apply` fails at once when a policy is outside the grants of its namespace. The webhook is off by default.

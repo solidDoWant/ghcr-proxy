@@ -30,6 +30,22 @@ For: admins who install ghcr-proxy with its Helm chart.
 | `upstream.ca.key` | `ca.crt` | Key in that Secret that holds the CA certificate. |
 | `upstream.timeout` | `30m` | Timeout of one whole upstream request. Uploads of several GB must fit. |
 | `upstream.tokenTimeout` | `10s` | Timeout of one upstream token exchange. |
+| `mirrors.policy.url` | `""` | URL of the policy pull mirror, with a scheme, a host and an optional port only. Empty turns this mirror off. Allowed pulls of manifests and blobs go to this mirror. |
+| `mirrors.policy.pathPrefix` | `""` | Path under which the mirror serves GHCR's repositories. The mirror name of `owner/image` is `<pathPrefix>/owner/image`. |
+| `mirrors.policy.credentials.existingSecret` | `""` | Name of a Secret with the mirror's own credentials as `user:password`. Empty means the proxy connects to the mirror with no credentials. Never put the PAT here. |
+| `mirrors.policy.credentials.key` | `credentials` | Key in that Secret that holds the credentials. |
+| `mirrors.policy.ca.existingSecret` | `""` | Name of a Secret with an extra CA certificate (PEM) to trust for the mirror, next to the system roots. |
+| `mirrors.policy.ca.key` | `ca.crt` | Key in that Secret that holds the CA certificate. |
+| `mirrors.policy.fallbackToUpstream` | `true` | Send the pull to the upstream when the mirror fails. |
+| `mirrors.policy.responseHeaderTimeout` | `10s` | How long the proxy waits for the mirror's response headers before it counts the mirror as failed. |
+| `mirrors.anonymous.url` | `""` | URL of the anonymous pull mirror, with a scheme, a host and an optional port only. Empty turns this mirror off. Anonymous and not-allowed pulls of manifests and blobs go to this mirror. It must have no upstream credentials, because anyone who can reach the proxy can read through it. |
+| `mirrors.anonymous.pathPrefix` | `""` | Path under which the mirror serves GHCR's repositories. The mirror name of `owner/image` is `<pathPrefix>/owner/image`. |
+| `mirrors.anonymous.credentials.existingSecret` | `""` | Name of a Secret with the mirror's own credentials as `user:password`. Empty means the proxy connects to the mirror with no credentials. Never put the PAT here. |
+| `mirrors.anonymous.credentials.key` | `credentials` | Key in that Secret that holds the credentials. |
+| `mirrors.anonymous.ca.existingSecret` | `""` | Name of a Secret with an extra CA certificate (PEM) to trust for the mirror, next to the system roots. |
+| `mirrors.anonymous.ca.key` | `ca.crt` | Key in that Secret that holds the CA certificate. |
+| `mirrors.anonymous.fallbackToUpstream` | `true` | Send the pull to the upstream when the mirror fails. |
+| `mirrors.anonymous.responseHeaderTimeout` | `10s` | How long the proxy waits for the mirror's response headers before it counts the mirror as failed. |
 | `authentication.audience` | `ghcr-proxy` | Audience that ServiceAccount tokens must carry. |
 | `authentication.cacheTTL` | `30s` | How long a token review result is cached (1s to 30s). |
 | `authentication.reviewTimeout` | `5s` | Timeout of one token review. |

@@ -142,7 +142,7 @@ GHCR's support for the OCI `DELETE` endpoints is not documented. Phase 2 verifie
 
 ### Pull mirrors (phase 2)
 
-The config may name a **policy mirror** and an **anonymous mirror**, each `{url, pathPrefix, credentialsFile, fallbackToUpstream}`. Allowed pulls of manifests and blobs go to the policy mirror; anonymous and not-allowed pulls go to the anonymous mirror. Tag lists, referrers, pushes, deletes and mounts always go to the upstream. The PAT is never sent to a mirror; a mirror uses its own credentials. When a mirror fails (connection error, `5xx`, or a `404` for a manifest) and `fallbackToUpstream` is true (default), the request goes to the upstream as above.
+The config may name a **policy mirror** and an **anonymous mirror**, each `{url, pathPrefix, credentialsFile, caFile, fallbackToUpstream, responseHeaderTimeout}`. Allowed pulls of manifests and blobs go to the policy mirror; anonymous and not-allowed pulls go to the anonymous mirror. Tag lists, referrers, pushes, deletes and mounts always go to the upstream. The PAT is never sent to a mirror; a mirror uses its own credentials. When a mirror fails (connection error, `5xx`, or a `404` for a manifest) and `fallbackToUpstream` is true (default), the request goes to the upstream as above.
 
 Admins must configure the anonymous mirror with **no upstream credentials**; otherwise anonymous callers could read private images through it. The proxy can't check this; the admin docs say so prominently.
 
