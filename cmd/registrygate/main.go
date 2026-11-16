@@ -27,6 +27,7 @@ import (
 	"github.com/solidDoWant/registrygate/internal/authn"
 	"github.com/solidDoWant/registrygate/internal/authz"
 	"github.com/solidDoWant/registrygate/internal/config"
+	"github.com/solidDoWant/registrygate/internal/controller"
 	"github.com/solidDoWant/registrygate/internal/metrics"
 	"github.com/solidDoWant/registrygate/internal/mirror"
 	"github.com/solidDoWant/registrygate/internal/model"
@@ -201,6 +202,8 @@ func serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		scheme:     scheme,
 		namespace:  os.Getenv("POD_NAMESPACE"),
 		logger:     logger,
+		// The model isn't wired in yet, so there is no snapshot and the reconcilers write nothing.
+		setup: (&controller.Status{Snapshot: func() *model.Snapshot { return nil }}).SetupWithManager,
 	}
 
 	httpsListener, err := net.Listen("tcp", cfg.Listen.HTTPS)
