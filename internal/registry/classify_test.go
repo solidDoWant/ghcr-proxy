@@ -161,6 +161,30 @@ func TestClassifyRouteTable(t *testing.T) {
 			wantURL: "/v2/owner/image/blobs/uploads/session-1",
 		},
 		{
+			name: "GET GHCR singular upload session", method: http.MethodGet,
+			target:    "/v2/owner/image/blobs/upload/19.3c730f6c-c0f8-4e04-9c9c-8864a15a4a1b",
+			wantRoute: registry.RouteUploadSession, wantAction: v1alpha1.ActionPush, wantName: "owner/image", wantSession: "19.3c730f6c-c0f8-4e04-9c9c-8864a15a4a1b",
+			wantURL: "/v2/owner/image/blobs/upload/19.3c730f6c-c0f8-4e04-9c9c-8864a15a4a1b",
+		},
+		{
+			name: "PATCH GHCR singular upload session", method: http.MethodPatch,
+			target:    "/v2/owner/image/blobs/upload/19.3c730f6c-c0f8-4e04-9c9c-8864a15a4a1b",
+			wantRoute: registry.RouteUploadSession, wantAction: v1alpha1.ActionPush, wantName: "owner/image", wantSession: "19.3c730f6c-c0f8-4e04-9c9c-8864a15a4a1b",
+			wantURL: "/v2/owner/image/blobs/upload/19.3c730f6c-c0f8-4e04-9c9c-8864a15a4a1b",
+		},
+		{
+			name: "PUT GHCR singular upload session", method: http.MethodPut,
+			target:    "/v2/owner/image/blobs/upload/19.3c730f6c-c0f8-4e04-9c9c-8864a15a4a1b?digest=" + digestA,
+			wantRoute: registry.RouteUploadSession, wantAction: v1alpha1.ActionPush, wantName: "owner/image", wantSession: "19.3c730f6c-c0f8-4e04-9c9c-8864a15a4a1b",
+			wantURL: "/v2/owner/image/blobs/upload/19.3c730f6c-c0f8-4e04-9c9c-8864a15a4a1b?digest=" + digestA,
+		},
+		{
+			name: "DELETE GHCR singular upload session", method: http.MethodDelete,
+			target:    "/v2/owner/image/blobs/upload/19.3c730f6c-c0f8-4e04-9c9c-8864a15a4a1b",
+			wantRoute: registry.RouteUploadSession, wantAction: v1alpha1.ActionPush, wantName: "owner/image", wantSession: "19.3c730f6c-c0f8-4e04-9c9c-8864a15a4a1b",
+			wantURL: "/v2/owner/image/blobs/upload/19.3c730f6c-c0f8-4e04-9c9c-8864a15a4a1b",
+		},
+		{
 			name: "PUT manifest", method: http.MethodPut, target: "/v2/owner/image/manifests/latest",
 			wantRoute: registry.RouteManifest, wantAction: v1alpha1.ActionPush, wantName: "owner/image", wantRef: "latest",
 			wantURL: "/v2/owner/image/manifests/latest",
@@ -199,6 +223,8 @@ func TestClassifyRejectsMethodsOutsideTheRouteTable(t *testing.T) {
 		{http.MethodPut, "/v2/owner/image/blobs/uploads/"},
 		{http.MethodPost, "/v2/owner/image/blobs/uploads/session-1"},
 		{http.MethodHead, "/v2/owner/image/blobs/uploads/session-1"},
+		{http.MethodPost, "/v2/owner/image/blobs/upload/session-1"},
+		{http.MethodHead, "/v2/owner/image/blobs/upload/session-1"},
 		{http.MethodOptions, "/v2/owner/image/manifests/latest"},
 	}
 	for _, testCase := range cases {
@@ -246,6 +272,54 @@ func TestClassifyNamesContainingRouteKeywords(t *testing.T) {
 			target:    "/v2/owner/manifests/blobs/uploads/uploads",
 			wantRoute: registry.RouteUploadSession, wantAction: v1alpha1.ActionPush, wantName: "owner/manifests", wantSession: "uploads",
 			wantURL: "/v2/owner/manifests/blobs/uploads/uploads",
+		},
+		{
+			name: "singular upload session of a name containing blobs and upload", method: http.MethodPatch,
+			target:    "/v2/owner/blobs/upload/blobs/upload/session-1",
+			wantRoute: registry.RouteUploadSession, wantAction: v1alpha1.ActionPush, wantName: "owner/blobs/upload", wantSession: "session-1",
+			wantURL: "/v2/owner/blobs/upload/blobs/upload/session-1",
+		},
+		{
+			name: "plural upload session of a name ending in upload", method: http.MethodPatch,
+			target:    "/v2/owner/upload/blobs/uploads/session-1",
+			wantRoute: registry.RouteUploadSession, wantAction: v1alpha1.ActionPush, wantName: "owner/upload", wantSession: "session-1",
+			wantURL: "/v2/owner/upload/blobs/uploads/session-1",
+		},
+		{
+			name: "singular upload session of a name ending in uploads", method: http.MethodPatch,
+			target:    "/v2/owner/uploads/blobs/upload/session-1",
+			wantRoute: registry.RouteUploadSession, wantAction: v1alpha1.ActionPush, wantName: "owner/uploads", wantSession: "session-1",
+			wantURL: "/v2/owner/uploads/blobs/upload/session-1",
+		},
+		{
+			name: "singular upload session named upload", method: http.MethodPut,
+			target:    "/v2/owner/image/blobs/upload/upload?digest=" + digestA,
+			wantRoute: registry.RouteUploadSession, wantAction: v1alpha1.ActionPush, wantName: "owner/image", wantSession: "upload",
+			wantURL: "/v2/owner/image/blobs/upload/upload?digest=" + digestA,
+		},
+		{
+			name: "upload start of a name ending in upload", method: http.MethodPost,
+			target:    "/v2/owner/upload/blobs/uploads/",
+			wantRoute: registry.RouteUploadStart, wantAction: v1alpha1.ActionPush, wantName: "owner/upload",
+			wantURL: "/v2/owner/upload/blobs/uploads/",
+		},
+		{
+			name: "blob of a name ending in blobs and upload", method: http.MethodGet,
+			target:    "/v2/owner/blobs/upload/blobs/" + digestA,
+			wantRoute: registry.RouteBlob, wantAction: v1alpha1.ActionPull, wantName: "owner/blobs/upload", wantDigest: digestA,
+			wantURL: "/v2/owner/blobs/upload/blobs/" + digestA,
+		},
+		{
+			name: "upload is not a blob digest", method: http.MethodGet,
+			target: "/v2/owner/image/blobs/upload", assertErr: requireNotFound,
+		},
+		{
+			name: "singular upload is not an upload start", method: http.MethodPost,
+			target: "/v2/owner/image/blobs/upload/", assertErr: requireNotFound,
+		},
+		{
+			name: "singular upload session with no name", method: http.MethodPatch,
+			target: "/v2/blobs/upload/session-1", assertErr: requireNotFound,
 		},
 		{
 			name: "manifest push of a name containing referrers", method: http.MethodPut,
@@ -342,6 +416,13 @@ func TestClassifyRejectsMalformedPaths(t *testing.T) {
 	t.Run("upload session of exactly 256 characters", func(t *testing.T) {
 		session := strings.Repeat("s", 256)
 		request, err := registry.Classify(newRequest(t, http.MethodPatch, "/v2/owner/image/blobs/uploads/"+session))
+		require.NoError(t, err)
+		assert.Equal(t, session, request.Session)
+	})
+
+	t.Run("GHCR upload session of digits, a dot and a UUID", func(t *testing.T) {
+		session := "19.3c730f6c-c0f8-4e04-9c9c-8864a15a4a1b"
+		request, err := registry.Classify(newRequest(t, http.MethodPatch, "/v2/owner/image/blobs/upload/"+session))
 		require.NoError(t, err)
 		assert.Equal(t, session, request.Session)
 	})

@@ -30,7 +30,8 @@ const (
 	RouteReferrers
 	// RouteUploadStart is /v2/<name>/blobs/uploads/.
 	RouteUploadStart
-	// RouteUploadSession is /v2/<name>/blobs/uploads/<session>.
+	// RouteUploadSession is /v2/<name>/blobs/uploads/<session>, or GHCR's
+	// /v2/<name>/blobs/upload/<session>.
 	RouteUploadSession
 )
 
@@ -71,6 +72,10 @@ type Request struct {
 	// turns the request into a plain upload start.
 	Mount *Mount
 
+	// uploadSegment is the segment before the session of an upload session
+	// route, "uploads" or GHCR's "upload". The session URL is the upstream's
+	// own, so it is forwarded in the form the client was given.
+	uploadSegment string
 	// monolithicDigest is the digest of a monolithic upload start.
 	monolithicDigest digest.Digest
 	// rawQuery is the query of a route that forwards the query as sent.
@@ -110,7 +115,7 @@ func (r Request) UpstreamURL() *url.URL {
 
 		upstream.RawQuery = query.Encode()
 	case RouteUploadSession:
-		upstream.Path += r.Name + "/blobs/uploads/" + r.Session
+		upstream.Path += r.Name + "/blobs/" + r.uploadSegment + "/" + r.Session
 		upstream.RawQuery = r.rawQuery
 	}
 
@@ -197,11 +202,13 @@ func classifyRoute(method string, segments []string) (Request, []string, bool) {
 
 	last, beforeLast := segments[count-1], segments[count-2]
 
-	if count >= 4 && segments[count-3] == "blobs" && beforeLast == "uploads" {
+	if count >= 4 && segments[count-3] == "blobs" && (beforeLast == "uploads" || beforeLast == "upload") {
 		nameSegments := segments[:count-3]
 
 		if last == "" {
-			if method != http.MethodPost {
+			// Only the plural form starts an upload; GHCR uses the
+			// singular form for session URLs alone.
+			if beforeLast != "uploads" || method != http.MethodPost {
 				return Request{}, nil, false
 			}
 
@@ -213,7 +220,9 @@ func classifyRoute(method string, segments []string) (Request, []string, bool) {
 			return Request{}, nil, false
 		}
 
-		return Request{Route: RouteUploadSession, Action: v1alpha1.ActionPush, Session: last}, nameSegments, true
+		return Request{
+			Route: RouteUploadSession, Action: v1alpha1.ActionPush, Session: last, uploadSegment: beforeLast,
+		}, nameSegments, true
 	}
 
 	nameSegments := segments[:count-2]
