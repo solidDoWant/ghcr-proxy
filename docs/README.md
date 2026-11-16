@@ -58,6 +58,7 @@ docs/acceptance/
 docs/design/
   phase-1.md               The design for phase 1: types, config, request classification and the decision table.
   phase-2.md               The design for phase 2: delete, mirrors, metrics, the webhook and chart options.
+  phase-3.md               The design for phase 3: the custom resources, the model, Secrets, resolution and forwarding.
 
 docs/agents/               Instructions for the agents (not for people).
   planner.md               The planner's playbook.
