@@ -18,6 +18,7 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/solidDoWant/ghcr-proxy/internal/config"
+	"github.com/solidDoWant/ghcr-proxy/internal/metrics"
 )
 
 // Failures of a mirror request before the mirror answered it.
@@ -43,6 +44,10 @@ type ClientConfig struct {
 	// TokenTimeout bounds one ping or token exchange.
 	TokenTimeout time.Duration
 	Logger       *slog.Logger
+	// Metrics counts token fetches under Target (metrics.TargetPolicyMirror or metrics.TargetAnonymousMirror);
+	// nil turns it off.
+	Metrics *metrics.Metrics
+	Target  string
 }
 
 // Client sends pull requests to one mirror with a token fetched with the
@@ -180,6 +185,7 @@ func (c *Client) token(ctx context.Context, roundTripper http.RoundTripper, stat
 
 	challenge, err := c.ping(ctx, roundTripper, state)
 	if err != nil {
+		c.cfg.Metrics.UpstreamTokenFetch(c.cfg.Target, metrics.ResultError)
 		return "", key, err
 	}
 
@@ -198,11 +204,16 @@ func (c *Client) token(ctx context.Context, roundTripper http.RoundTripper, stat
 		var registryErr *transport.Error
 		if errors.As(err, &registryErr) &&
 			(registryErr.StatusCode == http.StatusUnauthorized || registryErr.StatusCode == http.StatusForbidden) {
+			c.cfg.Metrics.UpstreamTokenFetch(c.cfg.Target, metrics.ResultRejected)
 			return "", key, ErrCredentialRejected
 		}
 
+		c.cfg.Metrics.UpstreamTokenFetch(c.cfg.Target, metrics.ResultError)
+
 		return "", key, ErrUnavailable
 	}
+
+	c.cfg.Metrics.UpstreamTokenFetch(c.cfg.Target, metrics.ResultOK)
 
 	value := fetched.Token
 	if value == "" {

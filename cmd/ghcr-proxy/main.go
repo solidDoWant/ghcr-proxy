@@ -27,6 +27,7 @@ import (
 	"github.com/solidDoWant/ghcr-proxy/internal/authn"
 	"github.com/solidDoWant/ghcr-proxy/internal/authz"
 	"github.com/solidDoWant/ghcr-proxy/internal/config"
+	"github.com/solidDoWant/ghcr-proxy/internal/metrics"
 	"github.com/solidDoWant/ghcr-proxy/internal/mirror"
 	"github.com/solidDoWant/ghcr-proxy/internal/registry"
 	"github.com/solidDoWant/ghcr-proxy/internal/server"
@@ -88,22 +89,28 @@ func serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		return err
 	}
 
+	proxyMetrics := metrics.New()
+
 	pat := upstream.NewPATFile(cfg.Upstream.PATFile, logger)
+	pat.Metrics = proxyMetrics
 	certificate := server.NewCertificate(cfg.TLS.CertFile, cfg.TLS.KeyFile, logger)
+	certificate.Metrics = proxyMetrics
 
 	// A mirror whose files are missing or invalid is unavailable, not fatal: its pulls take the fallback rule.
 	var mirrorFiles []*mirror.Files
 
-	newMirror := func(name string, mirrorConfig *config.Mirror) (registry.MirrorClient, error) {
+	newMirror := func(name, target string, mirrorConfig *config.Mirror) (registry.MirrorClient, error) {
 		if mirrorConfig == nil {
 			return nil, nil
 		}
 
 		files := mirror.NewFiles(name, mirrorConfig, logger)
+		files.Metrics = proxyMetrics
 		mirrorFiles = append(mirrorFiles, files)
 
 		client, err := mirror.NewClient(mirror.ClientConfig{
 			Mirror: mirrorConfig, Files: files, TokenTimeout: cfg.Upstream.TokenTimeout, Logger: logger,
+			Metrics: proxyMetrics, Target: target,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("%s mirror: %w", name, err)
@@ -112,12 +119,12 @@ func serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		return client, nil
 	}
 
-	policyMirror, err := newMirror("policy", cfg.Mirrors.Policy)
+	policyMirror, err := newMirror("policy", metrics.TargetPolicyMirror, cfg.Mirrors.Policy)
 	if err != nil {
 		return err
 	}
 
-	anonymousMirror, err := newMirror("anonymous", cfg.Mirrors.Anonymous)
+	anonymousMirror, err := newMirror("anonymous", metrics.TargetAnonymousMirror, cfg.Mirrors.Anonymous)
 	if err != nil {
 		return err
 	}
@@ -129,6 +136,7 @@ func serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		TokenTimeout: cfg.Upstream.TokenTimeout,
 		PAT:          pat,
 		Logger:       logger,
+		Metrics:      proxyMetrics,
 	})
 	if err != nil {
 		return fmt.Errorf("upstream tokens: %w", err)
@@ -143,6 +151,7 @@ func serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 
 		PolicyMirror:    policyMirror,
 		AnonymousMirror: anonymousMirror,
+		Metrics:         proxyMetrics,
 	})
 
 	restConfig, err := ctrl.GetConfig()
@@ -154,6 +163,7 @@ func serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		Audience:      cfg.Authentication.Audience,
 		CacheTTL:      cfg.Authentication.CacheTTL,
 		ReviewTimeout: cfg.Authentication.ReviewTimeout,
+		Metrics:       proxyMetrics,
 	})
 	if err != nil {
 		return err
@@ -176,6 +186,7 @@ func serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	}
 
 	index := authz.NewIndex(cfg.Grants)
+	proxyMetrics.SetPolicyCounts(index.Counts)
 	if err := index.Watch(ctx, policyCache); err != nil {
 		return err
 	}
@@ -239,6 +250,7 @@ func serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		Forwarder: forwarder,
 		Ready:     readiness.Ready,
 		Logger:    logger,
+		Metrics:   proxyMetrics,
 	}
 
 	if cfg.Audit.Enabled {
@@ -272,6 +284,7 @@ func serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		Health:              healthListener,
 		Handler:             handler,
 		Readiness:           readiness,
+		Metrics:             proxyMetrics,
 		ReadHeaderTimeout:   cfg.Server.ReadHeaderTimeout,
 		IdleTimeout:         cfg.Server.IdleTimeout,
 		MaxHeaderBytes:      cfg.Server.MaxHeaderBytes,

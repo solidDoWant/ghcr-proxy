@@ -74,6 +74,24 @@ func (i *Index) Synced() bool {
 	return hasSynced != nil && (*hasSynced)()
 }
 
+// Counts returns how many indexed policies are inside their grants (Ready) and how many are not.
+func (i *Index) Counts() (ready, notReady int) {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+
+	for _, policies := range i.byNamespace {
+		for _, policy := range policies {
+			if policy.effective.Ready() {
+				ready++
+			} else {
+				notReady++
+			}
+		}
+	}
+
+	return ready, notReady
+}
+
 // set adds or replaces a policy.
 func (i *Index) set(policy *v1alpha1.GHCRAccessPolicy) {
 	entry := indexedPolicy{

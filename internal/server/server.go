@@ -10,9 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/collectors"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/solidDoWant/ghcr-proxy/internal/metrics"
 )
 
 // endpointRemovalDelay is how long the HTTPS listener keeps serving after SIGTERM with /readyz failing, so the
@@ -50,12 +48,9 @@ func (r *Readiness) ShutDown() {
 	r.shuttingDown.Store(true)
 }
 
-// NewHealthHandler serves /healthz (the process is alive), /readyz (ready reports true) and /metrics (Go and
-// process collectors).
-func NewHealthHandler(ready func() bool) http.Handler {
-	metrics := prometheus.NewRegistry()
-	metrics.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
-
+// NewHealthHandler serves /healthz (the process is alive), /readyz (ready reports true) and /metrics (the proxy's
+// metrics, plus the trimmed Go and process collectors).
+func NewHealthHandler(ready func() bool, proxyMetrics *metrics.Metrics) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(resp http.ResponseWriter, _ *http.Request) {
 		_, _ = resp.Write([]byte("ok\n"))
@@ -68,7 +63,7 @@ func NewHealthHandler(ready func() bool) http.Handler {
 
 		_, _ = resp.Write([]byte("ok\n"))
 	})
-	mux.Handle("GET /metrics", promhttp.HandlerFor(metrics, promhttp.HandlerOpts{}))
+	mux.Handle("GET /metrics", metrics.Handler(proxyMetrics.Gatherer()))
 
 	return mux
 }
@@ -82,6 +77,8 @@ type Config struct {
 	Health    net.Listener
 	Handler   http.Handler
 	Readiness *Readiness
+	// Metrics is served at /metrics; nil serves only the Go and process collectors.
+	Metrics *metrics.Metrics
 
 	ReadHeaderTimeout   time.Duration
 	IdleTimeout         time.Duration
@@ -109,7 +106,7 @@ func Run(ctx context.Context, cfg Config) error {
 		ErrorLog:          errorLog,
 	}
 	healthServer := &http.Server{
-		Handler:           NewHealthHandler(cfg.Readiness.Ready),
+		Handler:           NewHealthHandler(cfg.Readiness.Ready, cfg.Metrics),
 		ReadHeaderTimeout: cfg.ReadHeaderTimeout,
 		ErrorLog:          errorLog,
 	}

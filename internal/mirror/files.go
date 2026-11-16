@@ -14,6 +14,7 @@ import (
 
 	"github.com/solidDoWant/ghcr-proxy/internal/config"
 	"github.com/solidDoWant/ghcr-proxy/internal/filewatch"
+	"github.com/solidDoWant/ghcr-proxy/internal/metrics"
 )
 
 const redacted = "[redacted]"
@@ -54,6 +55,8 @@ type Files struct {
 	credentialsPath string
 	caPath          string
 	logger          *slog.Logger
+	// Metrics counts reloads after construction; nil turns it off. Set it before Watch starts.
+	Metrics *metrics.Metrics
 
 	mu                sync.RWMutex
 	credentials       *Credentials
@@ -111,6 +114,8 @@ func (f *Files) Available() bool {
 func (f *Files) Reload() {
 	if f.credentialsPath != "" {
 		credentials, err := readCredentials(f.credentialsPath)
+		f.Metrics.CredentialReload(metrics.KindMirror, err)
+
 		if err != nil {
 			f.logger.Error("mirror credentials file could not be loaded; keeping the previous credentials",
 				"mirror", f.name, "path", f.credentialsPath, "error", err.Error())
@@ -121,6 +126,8 @@ func (f *Files) Reload() {
 
 	if f.caPath != "" {
 		pool, err := readCA(f.caPath)
+		f.Metrics.CredentialReload(metrics.KindMirror, err)
+
 		if err != nil {
 			f.logger.Error("mirror CA file could not be loaded; keeping the previous CA",
 				"mirror", f.name, "path", f.caPath, "error", err.Error())

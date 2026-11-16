@@ -12,10 +12,13 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/solidDoWant/ghcr-proxy/internal/metrics"
 )
 
 const testAudience = "ghcr-proxy"
@@ -373,4 +376,39 @@ func TestCacheNeverStoresTheToken(t *testing.T) {
 			assert.NotContains(t, dump, part)
 		}
 	}
+}
+
+func TestReviewsCountResultAndCacheUse(t *testing.T) {
+	proxyMetrics := metrics.New()
+	clock := newFakeClock()
+	client := &fakeTokenReviews{answer: authenticated("system:serviceaccount:ci-app:builder", []string{testAudience}, nil)}
+
+	reviewer, err := NewReviewer(client, Options{
+		Audience: testAudience, CacheTTL: 30 * time.Second, ReviewTimeout: 5 * time.Second, Now: clock.Now, Metrics: proxyMetrics,
+	})
+	require.NoError(t, err)
+
+	_, err = reviewer.Review(t.Context(), "good-token")
+	require.NoError(t, err)
+	_, err = reviewer.Review(t.Context(), "good-token")
+	require.NoError(t, err)
+
+	client.answer = authenticated("system:serviceaccount:ci-app:builder", []string{"other"}, nil)
+	_, err = reviewer.Review(t.Context(), "bad-token")
+	require.ErrorIs(t, err, ErrRejected)
+
+	client.answer = func(context.Context, *authenticationv1.TokenReview) (*authenticationv1.TokenReview, error) {
+		return nil, errors.New("api server down")
+	}
+	_, err = reviewer.Review(t.Context(), "unlucky-token")
+	require.ErrorIs(t, err, ErrUnavailable)
+
+	require.NoError(t, testutil.GatherAndCompare(proxyMetrics.Gatherer(), strings.NewReader(`
+# HELP ghcr_proxy_token_reviews_total ServiceAccount token reviews, by result and cache use.
+# TYPE ghcr_proxy_token_reviews_total counter
+ghcr_proxy_token_reviews_total{cache="hit",result="authenticated"} 1
+ghcr_proxy_token_reviews_total{cache="miss",result="authenticated"} 1
+ghcr_proxy_token_reviews_total{cache="miss",result="error"} 1
+ghcr_proxy_token_reviews_total{cache="miss",result="rejected"} 1
+`), "ghcr_proxy_token_reviews_total"))
 }

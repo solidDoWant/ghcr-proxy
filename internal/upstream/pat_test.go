@@ -5,11 +5,14 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/solidDoWant/ghcr-proxy/internal/metrics"
 	"github.com/solidDoWant/ghcr-proxy/internal/upstream"
 )
 
@@ -61,3 +64,23 @@ func TestPATFileLoading(t *testing.T) {
 }
 
 func ptr(value string) *string { return &value }
+
+func TestPATReloadsAreCountedByResult(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "token")
+	require.NoError(t, os.WriteFile(path, []byte("ghp_first"), 0o600))
+
+	proxyMetrics := metrics.New()
+	holder := upstream.NewPATFile(path, slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)))
+	holder.Metrics = proxyMetrics
+
+	holder.Reload()
+	require.NoError(t, os.Remove(path))
+	holder.Reload()
+
+	require.NoError(t, testutil.GatherAndCompare(proxyMetrics.Gatherer(), strings.NewReader(`
+# HELP ghcr_proxy_credential_reloads_total Credential file reloads, by kind and result.
+# TYPE ghcr_proxy_credential_reloads_total counter
+ghcr_proxy_credential_reloads_total{kind="pat",result="error"} 1
+ghcr_proxy_credential_reloads_total{kind="pat",result="ok"} 1
+`), "ghcr_proxy_credential_reloads_total"))
+}

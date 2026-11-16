@@ -19,6 +19,8 @@ import (
 	"k8s.io/apiserver/pkg/authentication/serviceaccount"
 	authenticationv1client "k8s.io/client-go/kubernetes/typed/authentication/v1"
 	"k8s.io/client-go/rest"
+
+	"github.com/solidDoWant/ghcr-proxy/internal/metrics"
 )
 
 // MaxCacheEntries bounds the review cache. Unique garbage tokens each cost one
@@ -67,6 +69,8 @@ type Options struct {
 	ReviewTimeout time.Duration
 	// Now returns the current time; defaults to time.Now.
 	Now func() time.Time
+	// Metrics counts review answers; nil turns it off.
+	Metrics *metrics.Metrics
 }
 
 type cacheEntry struct {
@@ -135,6 +139,7 @@ type reviewResult struct {
 func (r *Reviewer) Review(ctx context.Context, token string) (Identity, error) {
 	key := sha256.Sum256([]byte(token))
 	if identity, err, ok := r.cached(key); ok {
+		r.options.Metrics.TokenReview(reviewResultLabel(err), true)
 		return identity, err
 	}
 
@@ -156,9 +161,23 @@ func (r *Reviewer) Review(ctx context.Context, token string) (Identity, error) {
 	select {
 	case result := <-resultChannel:
 		reviewed := result.Val.(reviewResult)
+		r.options.Metrics.TokenReview(reviewResultLabel(reviewed.err), false)
+
 		return reviewed.identity, reviewed.err
 	case <-ctx.Done():
 		return Identity{}, fmt.Errorf("%w: %w", ErrUnavailable, ctx.Err())
+	}
+}
+
+// reviewResultLabel maps a review error to the metric's result label.
+func reviewResultLabel(err error) string {
+	switch {
+	case err == nil:
+		return metrics.ResultAuthenticated
+	case errors.Is(err, ErrRejected):
+		return metrics.ResultRejected
+	default:
+		return metrics.ResultError
 	}
 }
 

@@ -15,6 +15,8 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	lru "github.com/hashicorp/golang-lru/v2"
+
+	"github.com/solidDoWant/ghcr-proxy/internal/metrics"
 )
 
 // Kind is the credential a token was fetched with.
@@ -71,6 +73,8 @@ type TokensConfig struct {
 	TokenTimeout time.Duration
 	PAT          PATSource
 	Logger       *slog.Logger
+	// Metrics counts token fetches; nil turns it off.
+	Metrics *metrics.Metrics
 }
 
 // Token is a registry token for one scope set.
@@ -176,6 +180,7 @@ func (t *Tokens) Token(ctx context.Context, kind Kind, scopes []string) (Token, 
 
 	challenge, err := t.ping(ctx, generation)
 	if err != nil {
+		t.cfg.Metrics.UpstreamTokenFetch(metrics.TargetUpstream, tokenFetchResult(err))
 		return Token{}, err
 	}
 
@@ -184,8 +189,13 @@ func (t *Tokens) Token(ctx context.Context, kind Kind, scopes []string) (Token, 
 
 	fetched, err := transport.Exchange(exchangeCtx, t.registry, auth, t.cfg.Transport, sorted, challenge)
 	if err != nil {
-		return Token{}, t.exchangeFailure(kind, err)
+		failure := t.exchangeFailure(kind, err)
+		t.cfg.Metrics.UpstreamTokenFetch(metrics.TargetUpstream, tokenFetchResult(failure))
+
+		return Token{}, failure
 	}
+
+	t.cfg.Metrics.UpstreamTokenFetch(metrics.TargetUpstream, metrics.ResultOK)
 
 	value := fetched.Token
 	if value == "" {
@@ -200,6 +210,16 @@ func (t *Tokens) Token(ctx context.Context, kind Kind, scopes []string) (Token, 
 	t.store(cacheEntry{key: key, value: value, validUntil: t.timeNow().Add(lifetime - expiryMargin)})
 
 	return Token{Value: value, key: key}, nil
+}
+
+// tokenFetchResult maps a failed fetch to the metric's result label: the upstream refusing a credential is
+// rejected; anything else is an error.
+func tokenFetchResult(err error) string {
+	if errors.Is(err, ErrCredentialRejected) || errors.Is(err, ErrAnonymousRefused) {
+		return metrics.ResultRejected
+	}
+
+	return metrics.ResultError
 }
 
 // Invalidate drops token from the cache, so the next request fetches a new one.

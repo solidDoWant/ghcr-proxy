@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/solidDoWant/ghcr-proxy/internal/filewatch"
+	"github.com/solidDoWant/ghcr-proxy/internal/metrics"
 )
 
 // errPATEmpty is a PAT file holding only whitespace.
@@ -22,6 +23,9 @@ var errPATEmpty = errors.New("PAT file is empty")
 type PATFile struct {
 	path   string
 	logger *slog.Logger
+
+	// Metrics counts reloads after construction; nil turns it off. Set it before Watch starts.
+	Metrics *metrics.Metrics
 
 	mu         sync.RWMutex
 	pat        string
@@ -60,6 +64,8 @@ func (p *PATFile) Loaded() bool {
 // failed read keeps the previous PAT and logs an error without the contents.
 func (p *PATFile) Reload() {
 	pat, err := readPAT(p.path)
+	p.Metrics.CredentialReload(metrics.KindPAT, err)
+
 	if err != nil {
 		p.logger.Error("PAT file could not be loaded; keeping the previous PAT", "path", p.path, "error", err.Error())
 		return

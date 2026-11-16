@@ -15,6 +15,7 @@ import (
 	"github.com/solidDoWant/ghcr-proxy/internal/audit"
 	"github.com/solidDoWant/ghcr-proxy/internal/authn"
 	"github.com/solidDoWant/ghcr-proxy/internal/authz"
+	"github.com/solidDoWant/ghcr-proxy/internal/metrics"
 	"github.com/solidDoWant/ghcr-proxy/internal/registry"
 )
 
@@ -53,6 +54,8 @@ type Handler struct {
 	Logger *slog.Logger
 	// Audit receives one entry per request; nil turns the audit log off.
 	Audit *audit.Logger
+	// Metrics counts requests; nil turns it off.
+	Metrics *metrics.Metrics
 }
 
 // ServeHTTP runs one request through the pipeline: classify (unknown routes are 404 with nothing upstream),
@@ -71,6 +74,7 @@ func (h *Handler) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 		entry.DurationMS = time.Since(started).Milliseconds()
 
 		h.Audit.Log(entry)
+		h.Metrics.Request(entry.Action, entry.Decision, entry.Status)
 	}()
 
 	h.serve(recorder, req, &entry, recorder)
