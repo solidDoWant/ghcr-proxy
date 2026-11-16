@@ -17,9 +17,15 @@ The proxy holds one GitHub classic personal access token (PAT). GitHub has no AP
 1. Create a GitHub machine-user account that is only for this proxy.
 2. Give the machine user access to the packages that CI must push to.
 3. Create a classic PAT for that account with exactly these scopes: `read:packages`, `write:packages` and `delete:packages`.
-4. Store the PAT in a Secret in the namespace of the proxy.
+4. Store the PAT in a Secret in the namespace of the proxy. This example reads the PAT from the file `pat.txt`.
 
+<!-- e2e -->
+```sh
+kubectl create namespace ghcr-proxy
 ```
+
+<!-- e2e -->
+```sh
 kubectl -n ghcr-proxy create secret generic ghcr-proxy-pat --from-file=token=./pat.txt
 ```
 
@@ -35,9 +41,24 @@ Warning: the private CA must have a name constraint that limits it to `ghcr.io`.
 
 Warning: trust this CA only through the Docker directory `/etc/docker/certs.d/ghcr.io/ca.crt`. Never add it to the system trust store of a pod or a node. The `certs.d` directory limits the CA to one registry name. The system trust store does not.
 
-This example uses cert-manager. The CA certificate carries the name constraint through `nameConstraints`.
+This example uses cert-manager. If your cluster has no cert-manager, install it from its Helm chart. Pin the version. The `NameConstraints` feature gate must be on in the controller and in the webhook.
 
-```yaml
+<!-- e2e -->
+```sh
+helm install cert-manager oci://quay.io/jetstack/charts/cert-manager \
+  --version v1.19.2 \
+  --namespace cert-manager --create-namespace \
+  --set crds.enabled=true \
+  --set featureGates=NameConstraints=true \
+  --set webhook.featureGates=NameConstraints=true \
+  --wait
+```
+
+The CA certificate carries the name constraint through `nameConstraints`.
+
+<!-- e2e -->
+```sh
+kubectl apply -f - <<'EOF'
 apiVersion: cert-manager.io/v1
 kind: Issuer
 metadata:
@@ -87,6 +108,14 @@ spec:
     size: 256
   issuerRef:
     name: ghcr-proxy-ca
+EOF
+```
+
+Wait until cert-manager has issued the certificate:
+
+<!-- e2e -->
+```sh
+kubectl -n ghcr-proxy wait --for=condition=Ready certificate/ghcr-proxy-tls --timeout=120s
 ```
 
 The `nameConstraints` field needs the `NameConstraints` feature gate of cert-manager. Make sure that it is on in your cert-manager version. If you use another tool, make sure that the CA certificate carries a permitted DNS name of `ghcr.io` and no other.
@@ -107,13 +136,16 @@ Each grant has these fields:
 
 Example: each namespace `ci-<name>` can use the repositories `soliddowant/<name>` and everything below it.
 
-```yaml
+<!-- e2e -->
+```sh
+cat > grants.yaml <<'EOF'
 grants:
   - namespaces: "ci-(?P<repo>[a-z0-9-]+)"
     repositories:
       - soliddowant/${repo}
       - soliddowant/${repo}/**
     actions: [pull, push, delete]
+EOF
 ```
 
 A grant does not apply to a namespace if a capture is empty or expands to a value outside `[a-z0-9._-]+`. A grant that does not apply never widens anything. If several grants match a namespace, each one adds its patterns and actions.
@@ -124,7 +156,8 @@ The proxy reads the grants at start only. The chart restarts the Deployment when
 
 Create the Secrets first. Then install the chart in the namespace that holds them.
 
-```
+<!-- e2e -->
+```sh
 helm install ghcr-proxy oci://ghcr.io/soliddowant/charts/ghcr-proxy \
   --namespace ghcr-proxy \
   --set pat.existingSecret=ghcr-proxy-pat \
@@ -139,7 +172,13 @@ The chart installs the `GHCRAccessPolicy` CRD, the Deployment (two replicas), th
 
 Make sure that the install works:
 
-1. Run `kubectl -n ghcr-proxy rollout status deploy/ghcr-proxy`.
+1. Run this command:
+
+   <!-- e2e -->
+   ```sh
+   kubectl -n ghcr-proxy rollout status deploy/ghcr-proxy
+   ```
+
 2. Make sure that `/readyz` on port 8080 of a proxy pod answers `200`. The proxy is ready when it loaded the PAT and the certificate and synced the policies.
 
 If the proxy cannot decide, it fails closed. It denies the request or forwards it with no credential. It never uses the PAT as a fallback.
