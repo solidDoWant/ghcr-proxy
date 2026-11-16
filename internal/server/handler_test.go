@@ -548,6 +548,10 @@ func TestRequestsAreCountedByActionDecisionAndStatusClass(t *testing.T) {
 	proxy := newHarness(t, harnessOptions{metrics: proxyMetrics})
 	proxyMetrics.SetPolicyCounts(func() (int, int) { return 1, 0 })
 
+	image, err := random.Image(64, 1)
+	require.NoError(t, err)
+	require.NoError(t, proxy.fake.Push("soliddowant/foo/source:latest", image))
+
 	proxy.do(t, http.MethodGet, "/v2/")
 	proxy.do(t, http.MethodGet, "/v2/soliddowant/foo/source/manifests/latest", basic(rejectedToken))
 	proxy.do(t, http.MethodGet, "/v2/soliddowant/foo/source/manifests/latest", basic(unavailableToken))
@@ -562,7 +566,7 @@ ghcr_proxy_requests_total{action="none",code="4xx",decision="unauthenticated"} 1
 ghcr_proxy_requests_total{action="pull",code="4xx",decision="unauthenticated"} 1
 ghcr_proxy_requests_total{action="pull",code="5xx",decision="unavailable"} 1
 ghcr_proxy_requests_total{action="push",code="4xx",decision="denied"} 1
-ghcr_proxy_requests_total{action="pull",code="4xx",decision="allowed"} 1
+ghcr_proxy_requests_total{action="pull",code="2xx",decision="allowed"} 1
 ghcr_proxy_requests_total{action="unknown",code="4xx",decision="notfound"} 1
 `), "ghcr_proxy_requests_total"))
 }
