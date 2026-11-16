@@ -10,7 +10,7 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
 cluster="${E2E_CLUSTER:-ghcr-proxy-e2e}"
-node_image="mirror.gcr.io/kindest/node:v1.35.8@sha256:07b2536e30b803ed61d1677a79df6115f798ce64c80f9e22f6ed45afd09323c0"
+node_image="mirror.gcr.io/kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5"
 tag="e2e"
 proxy_image="ghcr.io/soliddowant/ghcr-proxy:${tag}"
 helper_image="ghcr.io/soliddowant/ghcr-proxy-credential-helper:${tag}"
