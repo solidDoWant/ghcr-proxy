@@ -26,7 +26,7 @@ Scenarios marked **(live)** run against the real `ghcr.io` through `make test-li
 - **AC-2-08 PAT never reaches a mirror.** No request to either mirror carries the PAT or a PAT-backed token.
   Tests: `internal/registry: TestForwarderNeverSendsThePATToAMirror`
 - **AC-2-09 Harbor as the mirror.** With a Harbor proxy-cache project for the fake GHCR as the policy mirror, a Docker pull in the e2e pod works and the second pull is served by Harbor.
-  Tests:
+  Tests: `test/e2e: TestSecondPullIsServedByHarborAsPolicyMirror`
 
 ## Operations
 
