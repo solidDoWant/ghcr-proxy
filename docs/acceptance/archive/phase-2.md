@@ -1,5 +1,7 @@
 # Phase 2 acceptance checklist: delete, mirrors and operations
 
+> **Superseded.** This checklist describes ghcr-proxy 0.1.x and 0.2.x. Phase 3 (registrygate) replaces it with `docs/acceptance/phase-3.md`, approved by the owner on 2026-11-16, who also approved retiring this one. It is kept for history: the test guard and the scoreboard read only `docs/acceptance/phase-N.md`, so the tests named here are no longer protected, and phase 3 deletes or ports them.
+
 Approved for the owner by the operator on 2026-11-15. Only the owner adds scenarios. Each scenario lists its tests on a `Tests:` line (`` `package/dir: TestName/subtest` ``); a scenario passes when every listed test passes on `master`. Workers add their tests to the line; that is not a new scenario. `make acceptance` prints the scoreboard.
 
 Scenarios marked **(live)** run against the real `ghcr.io` through `make test-live`, which only the operator runs, by hand and outside CI (the PAT is the owner's own). They pass when the operator's run is green and its result is posted on the issue; the scoreboard shows them as manual.

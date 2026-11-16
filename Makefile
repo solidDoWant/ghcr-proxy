@@ -8,7 +8,7 @@ VERSION ?= 0.0.0-dev
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
 # The phase whose checklist `make acceptance` scores (docs/acceptance/phase-$(PHASE).md).
-PHASE ?= 1
+PHASE ?= 3
 
 # The kind cluster `make test-e2e` and `make acceptance` use. Agents set E2E_CLUSTER=registrygate-<issue>.
 E2E_CLUSTER ?= registrygate-e2e
