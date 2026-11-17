@@ -22,7 +22,7 @@ In the e2e scenarios, "a CI pod" is a pod with a dind sidecar set up exactly as 
 - **AC-3-06 Registry API only.** A request outside `/v2` gets `404`. A non-canonical path (`..`, `//`, encoded `/`, `/V2/`, `/%76%32/`) gets `400`. Neither sends anything upstream.
   Tests: `internal/server: TestNonCanonicalPathsAre400AndNeverReachTheUpstream`, `internal/server: TestCatalogAndUnknownPathsAre404AndNeverReachTheUpstream`, `internal/registry: TestClassifyRefusesNonCanonicalPaths`
 - **AC-3-07 Upstream auth by challenge.** The proxy works with an upstream that allows anonymous access, one that challenges with Basic, and one that challenges with Bearer. A token endpoint on a host other than the `url` host or `tokenRealmHosts` is refused with `502`.
-  Tests:
+  Tests: `internal/server: TestPushAndPullWorkWithEveryUpstreamChallenge`, `internal/server: TestTokenRealmOutsideTheUpstreamIs502AndGetsNoCredential`, `internal/server: TestTokenRealmOnAnAllowedHostIsUsed`
 
 ## Authentication
 
@@ -44,11 +44,11 @@ In the e2e scenarios, "a CI pod" is a pod with a dind sidecar set up exactly as 
 - **AC-3-14 Ambiguous rules.** A request matching rules that name different credentials (or different mirrors) is denied with `403` naming both rules. Rules naming the same credential combine their actions.
   Tests: `internal/authz: TestDecideResolvesRequests/two matching rules naming different credentials are ambiguous`, `internal/authz: TestDecideResolvesRequests/two matching rules naming different mirrors are ambiguous`, `internal/authz: TestDecideResolvesRequests/rules naming the same credential combine their actions (push)`, `internal/authz: TestDecideResolvesRequests/rules naming the same credential combine their actions (delete)`, `internal/authz: TestDecideResolvesRequests/rules naming the same mirror combine`, `internal/server: TestAmbiguousRulesAre403NamingEachRule`
 - **AC-3-15 Credentialed pulls skip mirrors.** When a credential rule and a mirror rule both match a pull, the credential wins and the pull goes to the upstream with the credential; no mirror sees it.
-  Tests:
+  Tests: `internal/server: TestCredentialedPullSkipsTheMirror`
 - **AC-3-16 Delete.** With `delete` allowed, OCI `DELETE` of a manifest by digest, by tag, and of a blob is forwarded with the credential, and the upstream's answer is returned (including `405 UNSUPPORTED` from an upstream that doesn't support it). Without `delete`, `403` and nothing is sent.
-  Tests:
+  Tests: `internal/server: TestDeleteForwardsWithTheCredentialAndReturnsTheUpstreamAnswer`, `internal/server: TestDeleteByDigestWithTheDeleteActionRemovesTheManifest`, `internal/server: TestDeleteWithoutTheDeleteActionIs403AndSendsNothingUpstream`
 - **AC-3-17 Upload sessions on any registry.** Pushes work on upstream A (singular `blobs/upload/` sessions) and upstream B (plural). A session URL forged to point outside the same repository's `/v2/<name>/blobs/` on the upstream gets `404` and sends nothing.
-  Tests:
+  Tests: `internal/server: TestPushAndPullWorkWithEveryUpstreamChallenge/Bearer with singular upload sessions`, `internal/server: TestPushAndPullWorkWithEveryUpstreamChallenge/Bearer with plural upload sessions`, `internal/server: TestForgedUploadSessionTokensAre404AndSendNothing`
 - **AC-3-18 Mounts.** A cross-repository mount whose source resolves to the same credential is forwarded as a mount; otherwise `mount` and `from` are dropped and the push still succeeds.
   Tests: `internal/authz: TestDecideResolvesRequests/a mount from a repository of the same credential is kept`, `internal/authz: TestDecideResolvesRequests/a mount from a repository of a different credential is dropped`, `internal/authz: TestDecideResolvesRequests/a mount from a repository served by a mirror is dropped`, `internal/authz: TestDecideResolvesRequests/a mount from a repository with no rule is dropped`, `internal/server: TestMountFromRepositoryTheCallerCannotPullIsStripped`
 
@@ -68,13 +68,13 @@ In the e2e scenarios, "a CI pod" is a pod with a dind sidecar set up exactly as 
 - **AC-3-23 A Harbor project per namespace.** Two CI namespaces, each with its own `RegistryMirror` pointing at its own Harbor proxy-cache project for upstream A, pull the same public image; Harbor lists it in both projects, and each namespace's pulls reach only its own project.
   Tests: `test/e2e: TestEachNamespacePullsThroughItsOwnHarborProject`
 - **AC-3-24 Default mirror.** Anonymous pulls and pulls no rule matches go to the upstream's `defaultMirrorRef` when set, and to the upstream anonymously when not.
-  Tests:
+  Tests: `internal/server: TestPullsNoRuleDecidesGoToTheDefaultMirror`, `internal/server: TestPullsNoRuleDecidesGoToTheUpstreamAnonymouslyWithoutADefaultMirror`
 - **AC-3-25 Fallback.** With a mirror down or answering `5xx`, pulls fall back to the upstream; with `fallbackToUpstream: false` they fail with `502`; a mirror `401`/`403` gives `502` and never falls back.
-  Tests:
+  Tests: `internal/server: TestMirrorFailuresFollowTheFallbackRule`, `internal/server: TestMirror5xxFollowsTheFallbackRule`, `internal/server: TestMirrorRefusingTheProxyIs502AndNeverFallsBack`
 - **AC-3-26 Mirror URLs are limited.** A `RegistryMirror` whose URL doesn't match its upstream's `allowedMirrorURLs` is `Ready=False, reason=URLNotAllowed` and is never contacted.
   Tests: `internal/model: TestBuildReadiness/mirror on another host than the allowed prefix is not allowed`, `internal/model: TestBuildReadiness/mirror whose path continues the prefix without a slash is not allowed`, `internal/model: TestBuildReadiness/mirror with another scheme than the allowed prefix is not allowed`, `internal/controller: TestStatusShowsEachReadinessOutcome`, `internal/server: TestMirrorOutsideTheAllowedURLsIsNeverContacted`
 - **AC-3-27 Credentials stay with their endpoint.** No request to a mirror carries an upstream credential or a token made from one, and no request to an upstream carries a mirror credential.
-  Tests:
+  Tests: `internal/server: TestMirrorRuleServesPullsWithTheMirrorsOwnCredential`, `internal/server: TestMirrorCredentialNeverReachesTheUpstream`
 - **AC-3-28 Builds through mirrors.** A CI pod runs `docker build` with `FROM` images from upstreams A and B, and both base images come through its mirrors, with no change to the Dockerfile and no BuildKit configuration.
   Tests: `test/e2e: TestBuildWithBaseImagesFromBothUpstreamsUsesTheMirrors`
 
