@@ -7,7 +7,7 @@ In the e2e scenarios, "a CI pod" is a pod with a dind sidecar set up exactly as 
 ## Rename
 
 - **AC-3-01 New names.** The binaries, images (`ghcr.io/soliddowant/registrygate`, `ghcr.io/soliddowant/registrygate-credential-helper`), chart (`oci://ghcr.io/soliddowant/charts/registrygate`), Go module, API group (`registrygate.soliddowant.dev`), audience default and metric names use `registrygate`. `GHCRAccessPolicy` and the 0.2.x config file are gone.
-  Tests:
+  Tests: `test/chart: TestShippedArtifactsUseTheRegistrygateNames`, `api/v1alpha1: TestAddToSchemeRegistersTheAccessPolicyKinds`, `internal/config: TestParseDefaultsTheAudienceToRegistrygate`, `internal/config: TestParseRefusesSectionsReplacedByCustomResources`, `internal/metrics: TestRecordedEventsAppearWithTheUpstreamLabel`
 
 ## Upstreams and interception
 
@@ -27,22 +27,22 @@ In the e2e scenarios, "a CI pod" is a pod with a dind sidecar set up exactly as 
 ## Authentication
 
 - **AC-3-08 ServiceAccount tokens.** A valid token with the `registrygate` audience authenticates; a bad or wrong-audience token gets `401` and is never treated as anonymous; a request with no credential is anonymous; a `Bearer` credential gets `401`.
-  Tests:
+  Tests: `internal/server: TestTokenWithTheProxyAudienceAuthenticates`, `internal/authn: TestReviewReturnsServiceAccountIdentity`, `internal/authn: TestReviewRejectsTokensThatAreNotServiceAccountTokensForTheAudience`, `internal/server: TestRealReviewerKeepsUnauthenticatedRequestsAwayFromTheUpstream`, `internal/server: TestRefusedCredentialIsNeverServedAsAnonymous`, `internal/server: TestAuthenticationRefusesCredentialsItCannotAccept`, `internal/server: TestRequestWithoutCredentialIsAnonymous`
 
 ## Credentials and policies
 
 - **AC-3-09 Push with a credential.** A CI pod whose policy has a credential rule pushes to upstream A with `docker push`; the upstream sees the credential's identity.
   Tests: `test/e2e: TestPushWithCredentialReachesTheUpstream`
 - **AC-3-10 Push denied.** A push no rule allows gets `403 DENIED` naming the namespace, ServiceAccount, repository and action, for a ServiceAccount, or `401` with the Basic challenge when anonymous. Nothing is sent upstream.
-  Tests:
+  Tests: `internal/server: TestDeniedPushAnswers403NamingTheCallerAndSendsNothingUpstream`, `internal/server: TestAnonymousPushIsChallengedAndSendsNothingUpstream`
 - **AC-3-11 Ceilings.** A credential rule outside its credential's ceiling has `Accepted=False, reason=OutsideCeiling` in `status.rules`, keyed by the rule's name, and is ignored; the policy's other rules still apply.
-  Tests:
+  Tests: `internal/controller: TestStatusShowsEachReadinessOutcome`, `internal/model: TestBuildReadiness`, `internal/server: TestRuleOutsideItsCeilingIsIgnoredAndOtherRulesStillApply`
 - **AC-3-12 Admission between namespaces.** A rule referencing a credential, mirror or upstream whose `allowedNamespaces` doesn't admit the policy's namespace has `Accepted=False, reason=NotAllowed`. When admission is withdrawn, the next request no longer uses it.
-  Tests:
+  Tests: `internal/model: TestBuildReadiness`, `internal/model: TestBuildStopsOfferingWithdrawnReferences`, `internal/server: TestWithdrawnAdmissionStopsTheNextRequestUsingIt`
 - **AC-3-13 Several credentials by repository.** A policy with two credential rules for upstream A, on disjoint repositories and with different credentials, pushes each repository with its own credential.
-  Tests:
+  Tests: `internal/authz: TestDecideResolvesRequests/each of two credential rules on disjoint repositories resolves its own repository (first)`, `internal/authz: TestDecideResolvesRequests/each of two credential rules on disjoint repositories resolves its own repository (second)`, `internal/server: TestEachRepositoryIsPushedWithItsOwnCredential`
 - **AC-3-14 Ambiguous rules.** A request matching rules that name different credentials (or different mirrors) is denied with `403` naming both rules. Rules naming the same credential combine their actions.
-  Tests:
+  Tests: `internal/authz: TestDecideResolvesRequests/two matching rules naming different credentials are ambiguous`, `internal/authz: TestDecideResolvesRequests/two matching rules naming different mirrors are ambiguous`, `internal/authz: TestDecideResolvesRequests/rules naming the same credential combine their actions (push)`, `internal/authz: TestDecideResolvesRequests/rules naming the same credential combine their actions (delete)`, `internal/authz: TestDecideResolvesRequests/rules naming the same mirror combine`, `internal/server: TestAmbiguousRulesAre403NamingEachRule`
 - **AC-3-15 Credentialed pulls skip mirrors.** When a credential rule and a mirror rule both match a pull, the credential wins and the pull goes to the upstream with the credential; no mirror sees it.
   Tests:
 - **AC-3-16 Delete.** With `delete` allowed, OCI `DELETE` of a manifest by digest, by tag, and of a blob is forwarded with the credential, and the upstream's answer is returned (including `405 UNSUPPORTED` from an upstream that doesn't support it). Without `delete`, `403` and nothing is sent.
@@ -50,7 +50,7 @@ In the e2e scenarios, "a CI pod" is a pod with a dind sidecar set up exactly as 
 - **AC-3-17 Upload sessions on any registry.** Pushes work on upstream A (singular `blobs/upload/` sessions) and upstream B (plural). A session URL forged to point outside the same repository's `/v2/<name>/blobs/` on the upstream gets `404` and sends nothing.
   Tests:
 - **AC-3-18 Mounts.** A cross-repository mount whose source resolves to the same credential is forwarded as a mount; otherwise `mount` and `from` are dropped and the push still succeeds.
-  Tests:
+  Tests: `internal/authz: TestDecideResolvesRequests/a mount from a repository of the same credential is kept`, `internal/authz: TestDecideResolvesRequests/a mount from a repository of a different credential is dropped`, `internal/authz: TestDecideResolvesRequests/a mount from a repository served by a mirror is dropped`, `internal/authz: TestDecideResolvesRequests/a mount from a repository with no rule is dropped`, `internal/server: TestMountFromRepositoryTheCallerCannotPullIsStripped`
 
 ## Secrets
 
