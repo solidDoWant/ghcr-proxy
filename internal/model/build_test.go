@@ -269,14 +269,14 @@ func TestBuildReadiness(t *testing.T) {
 			status: upstreamStatus, reason: v1alpha1.ReasonInvalidSpec,
 		},
 		{
-			name:   "upstream whose alias host is one of its hosts is an invalid spec",
+			name:   "upstream whose alias host is one of its hosts is ready",
 			mutate: func(_ *testing.T, f *fixture) { f.upstream().Spec.AliasHosts = []string{"harbor.example", "ghcr.io"} },
-			status: upstreamStatus, reason: v1alpha1.ReasonInvalidSpec,
+			status: upstreamStatus, reason: v1alpha1.ReasonReady,
 		},
 		{
-			name:   "upstream whose alias host is one of its hosts with a port is an invalid spec",
+			name:   "upstream whose alias host is one of its hosts with a port is ready",
 			mutate: func(_ *testing.T, f *fixture) { f.upstream().Spec.AliasHosts = []string{"ghcr.io:443"} },
-			status: upstreamStatus, reason: v1alpha1.ReasonInvalidSpec,
+			status: upstreamStatus, reason: v1alpha1.ReasonReady,
 		},
 		{
 			name: "upstream with alias hosts apart from its hosts is ready",

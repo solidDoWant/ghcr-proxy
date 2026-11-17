@@ -230,7 +230,9 @@ CI pods still connect to the proxy over TLS with the certificate of the `Upstrea
 
 ## Harbor through its Service
 
-Harbor knows itself by its `externalURL`, for example `https://harbor.example.com`. It puts that host in its token endpoint and in its `Location` headers. If the proxy connects to Harbor through its Service (`http://harbor-core.harbor.svc`), list the `externalURL` host in `aliasHosts`. Harbor answers a request that arrives on its Service with a token endpoint on the host of that request, with the scheme `https`. So also list the Service host (`harbor-core.harbor.svc`) in `aliasHosts`. In this example, CI pods use the name `registry.example.com` for Harbor:
+Harbor knows itself by its `externalURL`, for example `https://registry.example.com`. It puts that host in its token endpoint and in its `Location` headers. Usually the `externalURL` host is also the name that CI pods use for Harbor, so it is in `hosts`. The proxy always treats a host in `hosts` as another name of `url`. You do not list it in `aliasHosts`.
+
+Harbor answers a request that arrives on its Service with a token endpoint on the host of that request, with the scheme `https`. If the proxy connects to Harbor through its Service (`http://harbor-core.harbor.svc`), list the Service host in `aliasHosts`. In this example, CI pods use the name `registry.example.com` for Harbor, and Harbor's `externalURL` is `https://registry.example.com`:
 
 ```yaml
 apiVersion: registrygate.soliddowant.dev/v1alpha1
@@ -241,7 +243,7 @@ metadata:
 spec:
   hosts: [registry.example.com]
   url: http://harbor-core.harbor.svc
-  aliasHosts: [harbor.example.com, harbor-core.harbor.svc]
+  aliasHosts: [harbor-core.harbor.svc]
   tls:
     secretRef:
       name: registry-example-com-tls
@@ -249,9 +251,9 @@ spec:
     names: [ci-foo]
 ```
 
-The proxy treats a token endpoint or a `Location` on an alias host as if it were on `url`. It keeps the path and the query and replaces the scheme and the host with those of `url`. The proxy never sends a request to an alias host. An entry is a host name, or a host name and a port. An entry without a port matches the default port of the scheme.
+The proxy treats a token endpoint or a `Location` on a host in `hosts` or `aliasHosts` as if it were on `url`. It keeps the path and the query and replaces the scheme and the host with those of `url`. The proxy never sends a request to such a host. An entry is a host name, or a host name and a port. An entry without a port matches the default port of the scheme.
 
-`aliasHosts` must not overlap `hosts`, because the proxy cannot stand in for a name and also treat it as another name of `url`. If an entry names a host in `hosts`, the object gets `Ready=False` with the reason `InvalidSpec`.
+If the `externalURL` host of Harbor is not in `hosts`, list it in `aliasHosts` too. If an entry in `aliasHosts` is also in `hosts`, nothing changes.
 
 ### Push to Harbor with a robot account that the CI pod never sees
 

@@ -45,6 +45,7 @@ type env struct {
 	// harborURL is Harbor's core Service over plain HTTP, which the proxy talks to.
 	harborURL string
 	// harborExternalURL is the externalURL Harbor knows itself by: its token endpoint and Location headers name its host.
+	// Its host is harborHostName, as in the usual setup, so the UpstreamRegistry needs no alias for it.
 	harborExternalURL string
 	// harborHostName is the name CI pods use for Harbor. The proxy stands in for it.
 	harborHostName string
@@ -56,6 +57,9 @@ type env struct {
 }
 
 var cluster *env
+
+// harborHostName is the name CI pods use for Harbor, and Harbor's externalURL host.
+const harborHostName = "registry.e2e.test"
 
 func TestMain(m *testing.M) {
 	kubeContext := os.Getenv("E2E_KUBE_CONTEXT")
@@ -86,8 +90,8 @@ func TestMain(m *testing.M) {
 		harborURL:   "http://harbor-core." + harborNamespace + ".svc",
 
 		harborTLSURL:      "https://harbor." + harborNamespace + ".svc",
-		harborExternalURL: "https://harbor.e2e.test",
-		harborHostName:    "registry.e2e.test",
+		harborExternalURL: "https://" + harborHostName,
+		harborHostName:    harborHostName,
 	}
 
 	if err := cluster.setup(context.Background()); err != nil {
