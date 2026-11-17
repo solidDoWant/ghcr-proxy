@@ -16,10 +16,10 @@ To pull private images, use an [`UpstreamCredential`](credentials.md). A credent
 
 Add the URL prefixes that mirrors of this upstream can use to the `UpstreamRegistry`:
 
-```yaml
-spec:
-  allowedMirrorURLs:
-    - https://harbor.example.com/
+<!-- e2e -->
+```sh
+kubectl -n registrygate patch upstreamregistry ghcr --type merge \
+  --patch '{"spec":{"allowedMirrorURLs":["https://harbor.example.com/"]}}'
 ```
 
 A mirror URL matches a prefix when the scheme and host are equal and the path of the prefix is a prefix of the path of the mirror on a `/` boundary. A mirror with another URL gets `Ready=False` with the reason `URLNotAllowed`, and the proxy never connects to it.
@@ -30,9 +30,48 @@ Warning: use plain HTTP only inside a network that you trust. The proxy sends th
 
 ## Create a RegistryMirror
 
-An admin creates the object, or the tenant creates it in its own namespace. This example makes a mirror for the namespace `ci-foo`. The Harbor project `ci-foo-ghcr` caches `ghcr.io`. The Secret `harbor-ci-foo` holds the keys `username` and `password` of a Harbor robot account for that project.
+An admin creates the object, or the tenant creates it in its own namespace. This example makes a mirror for the namespace `ci-foo`. The Harbor project `ci-foo-ghcr` caches `ghcr.io`. The Secret `harbor-ci-foo` holds the keys `username` and `password` of a Harbor robot account for that project. This example reads them from the variables `HARBOR_USER` and `HARBOR_PASSWORD`.
 
-```yaml
+The proxy has no read access to Secrets in the namespace `ci-foo` yet. Make the Secret, and a Role that lets the proxy read that one Secret. Use the namespace and the ServiceAccount name of your install if they differ:
+
+<!-- e2e -->
+```sh
+kubectl -n ci-foo create secret generic harbor-ci-foo \
+  --from-literal=username="${HARBOR_USER}" \
+  --from-literal=password="${HARBOR_PASSWORD}"
+kubectl apply -f - <<'EOF'
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: registrygate-mirror-secret
+  namespace: ci-foo
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [harbor-ci-foo]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: registrygate-mirror-secret
+  namespace: ci-foo
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: registrygate-mirror-secret
+subjects:
+  - kind: ServiceAccount
+    name: registrygate
+    namespace: registrygate
+EOF
+```
+
+Then make the mirror:
+
+<!-- e2e -->
+```sh
+kubectl apply -f - <<'EOF'
 apiVersion: registrygate.soliddowant.dev/v1alpha1
 kind: RegistryMirror
 metadata:
@@ -46,6 +85,7 @@ spec:
   pathPrefix: ci-foo-ghcr
   secretRef:
     name: harbor-ci-foo
+EOF
 ```
 
 - `upstreamRef`: The `UpstreamRegistry` that the mirror copies. It must admit the namespace of the mirror in its `allowedNamespaces`.
@@ -61,6 +101,49 @@ spec:
 The proxy never sends the credential of an upstream to a mirror. It never sends the credential of a mirror to an upstream.
 
 The proxy reads the Secrets in the admin namespaces. For a Secret in a tenant namespace, the tenant creates a Role that names that one Secret. See [tenant mirrors](../user/policies.md#use-a-mirror).
+
+## Send pulls to the mirror
+
+Add a rule with a `mirrorRef` to the policy of the namespace. This policy keeps the push rule and lets the ServiceAccount pull `soliddowant/public` from the mirror:
+
+<!-- e2e -->
+```sh
+kubectl apply -f - <<'EOF'
+apiVersion: registrygate.soliddowant.dev/v1alpha1
+kind: RegistryAccessPolicy
+metadata:
+  name: builder
+  namespace: ci-foo
+spec:
+  serviceAccounts: [builder]
+  rules:
+    - name: push-foo
+      credentialRef:
+        name: ghcr-pat
+        namespace: registrygate
+      repositories: [soliddowant/foo]
+      actions: [pull, push]
+    - name: pull-public
+      mirrorRef:
+        name: harbor
+      repositories: [soliddowant/public]
+      actions: [pull]
+EOF
+```
+
+Wait until the mirror and the policy are ready:
+
+<!-- e2e -->
+```sh
+kubectl -n ci-foo wait --for=condition=Ready registrymirror/harbor registryaccesspolicy/builder --timeout=120s
+```
+
+A pull in a pod of that ServiceAccount, for example the pod from [CI pods](ci-pods.md), now comes through the mirror:
+
+<!-- e2e -->
+```sh
+kubectl -n ci-foo exec build -c docker -- docker pull ghcr.io/soliddowant/public:latest
+```
 
 ## Default mirror
 
