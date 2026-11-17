@@ -22,6 +22,12 @@ import (
 	"github.com/solidDoWant/registrygate/internal/metrics"
 )
 
+// StateSource supplies the credentials and CAs a Client uses. The boolean is
+// false while the mirror can't be used.
+type StateSource interface {
+	Get() (State, bool)
+}
+
 // Failures of a mirror request before the mirror answered it.
 var (
 	// ErrUnavailable is the mirror being unreachable, its files not loaded,
@@ -56,6 +62,7 @@ type ClientConfig struct {
 // realm on the mirror's own scheme and host, and never sees the PAT.
 type Client struct {
 	cfg      ClientConfig
+	source   StateSource
 	registry name.Registry
 
 	mu            sync.Mutex
@@ -81,6 +88,10 @@ type tokenEntry struct {
 
 // NewClient returns a client for the mirror in cfg.
 func NewClient(cfg ClientConfig) (*Client, error) {
+	return newClient(cfg, cfg.Files)
+}
+
+func newClient(cfg ClientConfig, source StateSource) (*Client, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
@@ -100,7 +111,7 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 		return nil, err
 	}
 
-	return &Client{cfg: cfg, registry: registry, tokens: tokens, responseLimit: cfg.Mirror.ResponseHeaderTimeout}, nil
+	return &Client{cfg: cfg, source: source, registry: registry, tokens: tokens, responseLimit: cfg.Mirror.ResponseHeaderTimeout}, nil
 }
 
 // URL is the mirror's base URL.
@@ -117,7 +128,7 @@ func (c *Client) FallbackToUpstream() bool { return c.cfg.Mirror.FallbackToUpstr
 // are not followed. A 401 with a cached token is retried once with a new
 // token; req must then have no body.
 func (c *Client) Send(req *http.Request, scope string) (*http.Response, error) {
-	state, ok := c.cfg.Files.Get()
+	state, ok := c.source.Get()
 	if !ok {
 		return nil, ErrUnavailable
 	}
@@ -131,6 +142,7 @@ func (c *Client) Send(req *http.Request, scope string) (*http.Response, error) {
 		}
 
 		out := req.Clone(req.Context())
+		out.Header.Del("Authorization")
 		// An empty token means the mirror needs no authentication: send no credential.
 		if token != "" {
 			out.Header.Set("Authorization", "Bearer "+token)
