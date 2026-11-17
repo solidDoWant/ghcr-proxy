@@ -160,7 +160,7 @@ type UpstreamRegistrySpec struct {
 	TokenRealmHosts []string `json:"tokenRealmHosts,omitempty"`
 	// AliasHosts are other names (host or host:port) of the registry at url, such as Harbor's externalURL when url is
 	// its in-cluster Service. A token realm or Location on an alias host is treated as on url; the proxy never sends
-	// a request to an alias host.
+	// a request to an alias host. The registry's own hosts always count as alias hosts without being listed.
 	// +kubebuilder:validation:MaxItems=8
 	// +kubebuilder:validation:items:MaxLength=260
 	// +kubebuilder:validation:items:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*(:[0-9]{1,5})?$`

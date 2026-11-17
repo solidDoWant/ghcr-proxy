@@ -96,7 +96,8 @@ spec:
 // applyHarborUpstream makes the UpstreamRegistry for Harbor, which the proxy
 // reaches through Harbor's core Service over plain HTTP, and for each namespace
 // an UpstreamCredential for its push robot. The robot's Secret is in the admin
-// namespace only.
+// namespace only. Harbor's externalURL host is one of the upstream's own
+// hosts, so only the Service host is listed as an alias.
 func (e *env) applyHarborUpstream(ctx context.Context, tenantNames []string) error {
 	certPEM, keyPEM, err := e.harborProxyCA.issue(e.harborHostName)
 	if err != nil {
@@ -114,13 +115,13 @@ metadata: {name: harbor, namespace: %[1]s}
 spec:
   hosts: [%[2]s]
   url: %[3]s
-  aliasHosts: [%[4]s, harbor-core.harbor.svc]
+  aliasHosts: [harbor-core.harbor.svc]
   tls:
     secretRef: {name: harbor-tls}
   anonymousPulls: Challenge
   allowedNamespaces:
-    names: [%[5]s]
-`, proxyNamespace, e.harborHostName, e.harborURL, strings.TrimPrefix(e.harborExternalURL, "https://"), strings.Join(tenantNames, ", "))); err != nil {
+    names: [%[4]s]
+`, proxyNamespace, e.harborHostName, e.harborURL, strings.Join(tenantNames, ", "))); err != nil {
 		return err
 	}
 

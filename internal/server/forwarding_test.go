@@ -404,6 +404,48 @@ func TestHostHeaderMustNameTheServerNamesRegistry(t *testing.T) {
 	}
 }
 
+func TestUpstreamOwnHostRealmAndLocationsGoToItsURL(t *testing.T) {
+	// The upstream names itself by the host the proxy intercepts, as Harbor does when its externalURL is that
+	// host, and lists no alias hosts. That host doesn't resolve: anything sent to it fails the request.
+	proxy := newHarness(t, harnessOptions{
+		fake: fakeregistry.Options{UploadPath: fakeregistry.Uploads, StorageHost: registryHost},
+	})
+	require.Empty(t, proxy.objects.upstream.Spec.AliasHosts)
+	proxy.fake.SetRealm("https://" + registryHost + "/token")
+	proxy.fake.SetLocationBase("https://" + registryHost)
+
+	image := randomImage(t)
+	require.NoError(t, remote.Write(proxy.ref(t, "soliddowant/foo/app"), image, proxy.builderOptions()...),
+		"the push's token realm and upload Locations on the upstream's own host reach its url")
+
+	pulled, err := remote.Image(proxy.ref(t, "soliddowant/foo/app"), proxy.builderOptions()...)
+	require.NoError(t, err)
+
+	want, err := image.Digest()
+	require.NoError(t, err)
+
+	got, err := pulled.Digest()
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+
+	started := proxy.do(t, http.MethodPost, "/v2/soliddowant/foo/app/blobs/uploads/", basic(builderToken))
+	require.Equal(t, http.StatusAccepted, started.status, started.body)
+
+	session := mustURL(t, started.header.Get("Location"))
+	assert.Contains(t, []string{"", registryHost}, session.Host, "the session Location names the proxy")
+
+	manifest, err := image.Manifest()
+	require.NoError(t, err)
+
+	blob := proxy.do(t, http.MethodGet, "/v2/soliddowant/foo/app/blobs/"+manifest.Config.Digest.String(), basic(builderToken))
+	require.Equal(t, http.StatusTemporaryRedirect, blob.status, blob.body)
+
+	location := mustURL(t, blob.header.Get("Location"))
+	assert.Equal(t, "https", location.Scheme)
+	assert.Equal(t, registryHost, location.Host)
+	assert.Equal(t, "/"+manifest.Config.Digest.String(), location.Path)
+}
+
 func TestUpstreamAliasHostRealmAndLocationsGoToItsURL(t *testing.T) {
 	// The alias doesn't resolve: anything sent to it fails the request.
 	const alias = "registry.alias.invalid"

@@ -551,6 +551,31 @@ func TestClientSendsTokenRequestForAliasRealmToItsURL(t *testing.T) {
 	}
 }
 
+func TestClientSendsTokenRequestForRealmOnItsOwnHostToItsURL(t *testing.T) {
+	// The host doesn't resolve, so a token request sent to it would fail the
+	// pull. It is listed only in hosts, not in aliasHosts.
+	const host = "registry.own.invalid"
+
+	fake := fakeregistry.New(t, fakeregistry.Options{})
+	repo := repoFor(t)
+	require.NoError(t, fake.Push(repo, mustRandomImage(t)))
+	fake.SetRealm("https://" + host + "/token")
+	fake.ResetLog()
+
+	client := newClient(t, fakeUpstream(t, fake, func(u *model.Upstream) {
+		u.Object.Spec.Hosts = []string{host}
+	}))
+
+	cred := upstream.Credential{ID: "cred", Version: "1", Username: "registrygate", Password: fake.PAT()}
+	resp, err := get(t, client, "/v2/"+repo+"/manifests/latest", cred, "repository:"+repo+":pull")
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	moved, ok := client.OntoURL(&url.URL{Scheme: "https", Host: host, Path: "/v2/" + repo + "/blobs/uploads/x"})
+	require.True(t, ok, "a Location on its own host is moved onto its url")
+	assert.Equal(t, fake.RegistryHost(), moved.Host)
+}
+
 func TestClientRefusesRealmOnAnAliasItDoesNotList(t *testing.T) {
 	fake := fakeregistry.New(t, fakeregistry.Options{})
 	fake.SetRealm("https://registry.alias.invalid/token")

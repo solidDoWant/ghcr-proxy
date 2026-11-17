@@ -297,13 +297,6 @@ func (b *builder) validateUpstream(object *v1alpha1.UpstreamRegistry) (*url.URL,
 		return nil, admission{}, err
 	}
 
-	for _, alias := range spec.AliasHosts {
-		aliasName, _, _ := strings.Cut(alias, ":")
-		if slices.Contains(spec.Hosts, aliasName) {
-			return nil, admission{}, fmt.Errorf("spec.aliasHosts: %q names one of spec.hosts", alias)
-		}
-	}
-
 	switch spec.AnonymousPulls {
 	case "", v1alpha1.AnonymousPullsChallenge, v1alpha1.AnonymousPullsForward:
 	default:

@@ -112,10 +112,15 @@ func NewClient(u *model.Upstream, options ClientOptions) (*Client, error) {
 		allowed = append(allowed, CanonicalHost(u.URL.Scheme, host))
 	}
 
+	// The upstream's own hosts are aliases too: Harbor's externalURL is
+	// usually the name the proxy intercepts, and its realm and Locations
+	// must still go to url.
+	aliases := slices.Concat(u.Object.Spec.Hosts, u.Object.Spec.AliasHosts)
+
 	now := time.Now
 
 	return &Client{
-		url: u.URL, registry: registry, transport: httpTransport, allowed: allowed, aliases: u.Object.Spec.AliasHosts,
+		url: u.URL, registry: registry, transport: httpTransport, allowed: allowed, aliases: aliases,
 		tokenTimeout: token, logger: logger, metrics: options.Metrics, name: u.Name().String(),
 		tokens: newTokenCache(now), now: now,
 	}, nil
@@ -127,8 +132,8 @@ func (c *Client) Name() string { return c.name }
 // URL is the upstream's URL.
 func (c *Client) URL() *url.URL { return c.url }
 
-// OntoURL moves a URL on one of the upstream's alias hosts onto its url. It
-// returns false for any other URL.
+// OntoURL moves a URL on one of the upstream's hosts or alias hosts onto its
+// url. It returns false for any other URL.
 func (c *Client) OntoURL(target *url.URL) (*url.URL, bool) {
 	return model.OntoURL(target, c.url, c.aliases)
 }

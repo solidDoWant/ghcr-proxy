@@ -102,7 +102,7 @@ Every field of the `registrygate.soliddowant.dev/v1alpha1` resources. A field ma
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `spec.aliasHosts` | list of string |  | AliasHosts are other names (host or host:port) of the registry at url, such as Harbor's externalURL when url is its in-cluster Service. A token realm or Location on an alias host is treated as on url; the proxy never sends a request to an alias host. |
+| `spec.aliasHosts` | list of string |  | AliasHosts are other names (host or host:port) of the registry at url, such as Harbor's externalURL when url is its in-cluster Service. A token realm or Location on an alias host is treated as on url; the proxy never sends a request to an alias host. The registry's own hosts always count as alias hosts without being listed. |
 | `spec.allowedMirrorURLs` | list of string |  | AllowedMirrorURLs are the URL prefixes a mirror of this upstream may use. |
 | `spec.allowedNamespaces` | object |  | AllowedNamespaces may point credentials, mirrors and policies at this upstream. |
 | `spec.allowedNamespaces.names` | list of string |  | Names of allowed namespaces. |
