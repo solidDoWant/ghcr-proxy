@@ -8,8 +8,8 @@ registrygate has four kinds of readers. Each page is for one of them. This page 
 
 | Reader | What they already know | What they need | Pages |
 |---|---|---|---|
-| Chart authors (users) | Kubernetes YAML, Helm and Docker. | How to write a `GHCRAccessPolicy`, what its status means, and why a push is denied. | `docs/user/` |
-| Admins | Kubernetes, Helm, Flux, cert-manager and Tekton. | How to install the proxy, the PAT, the certificate and its CA, the grants, how to set up a CI pod (host aliases, `certs.d`, the credential helper, the token), the security limits, and how to fix problems. | `docs/admin/` (the CRD and chart value references are generated) |
+| Chart authors (users) | Kubernetes YAML, Helm and Docker. | How to write a `RegistryAccessPolicy`, what its status means, and why a push is denied. | `docs/user/` |
+| Admins | Kubernetes, Helm, Flux, cert-manager and Tekton. | How to install the proxy, the PAT, the certificates and their CAs, the upstreams, credentials and mirrors, how to set up a CI pod (host aliases, `certs.d`, the credential helper, the token), the security limits, and how to fix problems. | `docs/admin/` (the CRD and chart value references are generated) |
 | Developers | Go, controller-runtime and the registry API. | The architecture, the packages, the fake GHCR, the test tiers and how to release. | `docs/dev/` |
 | Agents | This repository. | Playbooks. Their pages do not follow the style rules for people. | `docs/agents/`, `.claude/`, `CLAUDE.md` |
 
@@ -35,13 +35,16 @@ docs/README.md             This page.
 
 docs/user/
   README.md                The pages for chart authors.
-  policies.md              How to write a policy and why a push is denied.
-  policy-status.md         What the status of a policy means.
+  policies.md              How to write a policy, tenant mirrors, and why a request is denied or ambiguous.
+  policy-status.md         What the status of an object means.
   crd-reference.md         Every resource field (generated).
 
 docs/admin/
   README.md                The pages for admins.
-  install.md               PAT, certificate and CA, grants, chart install and the audit log.
+  install.md               Chart install, optional chart objects, the webhook, security limits and the audit log.
+  upstreams.md             One CA and certificate per host, UpstreamRegistry and anonymousPulls.
+  credentials.md           The PAT, UpstreamCredential and its ceiling.
+  mirrors.md               RegistryMirror, and why mirrors serve public content only.
   ci-pods.md               How to set up a CI pod, with a Tekton Task example.
   metrics.md               The Prometheus metrics and their labels.
   chart-values.md          Every Helm chart value (generated).

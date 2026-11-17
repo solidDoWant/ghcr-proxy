@@ -2,7 +2,12 @@
 
 For: admins who install registrygate in a cluster. You know Kubernetes, Helm and cert-manager.
 
-This page covers the PAT, the TLS certificate and its CA, the grants, the chart install and the audit log. To set up a CI pod after the install, read [CI pod setup](ci-pods.md).
+This page covers the chart install, the optional chart objects, the admission webhook, the security limits and the audit log. The install gives you a proxy with no upstream. Next, you tell the proxy which registries to stand in for:
+
+1. [Upstream registries](upstreams.md): the certificate authority (CA), the certificate and the `UpstreamRegistry` for each host.
+2. [Shared credentials](credentials.md): the `UpstreamCredential` objects that hold a personal access token (PAT) or other login, and their ceilings.
+3. [Mirrors](mirrors.md): `RegistryMirror` objects for pull-through caches.
+4. [CI pods](ci-pods.md): how a pod reaches the proxy.
 
 ## Requirements
 
@@ -10,178 +15,39 @@ This page covers the PAT, the TLS certificate and its CA, the grants, the chart 
 - A `TokenReview` API that the proxy can reach.
 - Docker CLI and daemon 25 or later in the CI pods.
 
-## Create the PAT Secret
 
-The proxy holds one GitHub classic personal access token (PAT). GitHub has no API that makes GHCR credentials, so you make the PAT by hand.
+## Install the chart
 
-1. Create a GitHub machine-user account that is only for this proxy.
-2. Give the machine user access to the packages that CI must push to.
-3. Create a classic PAT for that account with exactly these scopes: `read:packages`, `write:packages` and `delete:packages`.
-4. Store the PAT in a Secret in the namespace of the proxy. This example reads the PAT from the file `pat.txt`.
+Install the chart in the namespace of the proxy. The chart creates the four CRDs, the Deployment (two replicas), the Service, the RBAC and a Secret that signs upload session tokens. It creates no upstream, credential or mirror. You create those objects yourself.
 
 <!-- e2e -->
 ```sh
 kubectl create namespace registrygate
 ```
 
-<!-- e2e -->
-```sh
-kubectl -n registrygate create secret generic registrygate-pat --from-file=token=./pat.txt
-```
-
-All callers share this one GitHub identity and its rate limits. The [audit log](#audit-log) tells you who did what.
-
-The proxy reads the PAT from a mounted file and reloads it when the file changes. The proxy never logs the PAT, never returns it to a client and never sends it anywhere except GHCR.
-
-## Make the TLS certificate
-
-CI pods connect to the proxy under the name `ghcr.io`. Thus the proxy needs a certificate for `ghcr.io`. You issue it from a private CA. The proxy only serves the certificate. It never issues or rotates it.
-
-Warning: the private CA must have a name constraint that limits it to `ghcr.io`. Without the constraint, anyone who holds the CA key can make a valid certificate for any host.
-
-Warning: trust this CA only through the Docker directory `/etc/docker/certs.d/ghcr.io/ca.crt`. Never add it to the system trust store of a pod or a node. The `certs.d` directory limits the CA to one registry name. The system trust store does not.
-
-This example uses cert-manager. If your cluster has no cert-manager, install it from its Helm chart. Pin the version. The `NameConstraints` feature gate must be on in the controller and in the webhook.
-
-<!-- e2e -->
-```sh
-helm install cert-manager oci://quay.io/jetstack/charts/cert-manager \
-  --version v1.19.2 \
-  --namespace cert-manager --create-namespace \
-  --set crds.enabled=true \
-  --set featureGates=NameConstraints=true \
-  --set webhook.featureGates=NameConstraints=true \
-  --wait
-```
-
-The CA certificate carries the name constraint through `nameConstraints`.
-
-<!-- e2e -->
-```sh
-kubectl apply -f - <<'EOF'
-apiVersion: cert-manager.io/v1
-kind: Issuer
-metadata:
-  name: selfsigned
-  namespace: registrygate
-spec:
-  selfSigned: {}
----
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: registrygate-ca
-  namespace: registrygate
-spec:
-  isCA: true
-  commonName: registrygate-ca
-  secretName: registrygate-ca
-  privateKey:
-    algorithm: ECDSA
-    size: 256
-  nameConstraints:
-    critical: true
-    permitted:
-      dnsDomains: [ghcr.io]
-  issuerRef:
-    name: selfsigned
----
-apiVersion: cert-manager.io/v1
-kind: Issuer
-metadata:
-  name: registrygate-ca
-  namespace: registrygate
-spec:
-  ca:
-    secretName: registrygate-ca
----
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: registrygate-tls
-  namespace: registrygate
-spec:
-  secretName: registrygate-tls
-  dnsNames: [ghcr.io]
-  privateKey:
-    algorithm: ECDSA
-    size: 256
-  issuerRef:
-    name: registrygate-ca
-EOF
-```
-
-Wait until cert-manager has issued the certificate:
-
-<!-- e2e -->
-```sh
-kubectl -n registrygate wait --for=condition=Ready certificate/registrygate-tls --timeout=120s
-```
-
-The `nameConstraints` field needs the `NameConstraints` feature gate of cert-manager. Make sure that it is on in your cert-manager version. If you use another tool, make sure that the CA certificate carries a permitted DNS name of `ghcr.io` and no other.
-
-The Secret `registrygate-tls` has the type `kubernetes.io/tls`. The chart mounts it. The proxy reloads the certificate when the files change. If a reload fails, the proxy keeps the old certificate and logs an error.
-
-The file `ca.crt` in the Secret `registrygate-tls` is the CA that CI pods must trust. [CI pod setup](ci-pods.md) shows where it goes.
-
-## Plan the grants
-
-A grant caps what policies in a set of namespaces can allow. A `GHCRAccessPolicy` can never allow more than its grant. A namespace without a grant only gets anonymous pulls.
-
-Each grant has these fields:
-
-- `namespaces`: A regular expression (RE2). The proxy anchors it, so it must match the whole namespace name.
-- `repositories`: A list of repository patterns. A pattern can use `*` inside one path segment and `**` for whole segments. It can also use `${name}` for a named capture of `namespaces`.
-- `actions`: Any of `pull`, `push` and `delete`. Both `push` and `delete` include `pull`.
-
-Example: each namespace `ci-<name>` can use the repositories `soliddowant/<name>` and everything below it.
-
-<!-- e2e -->
-```sh
-cat > grants.yaml <<'EOF'
-grants:
-  - namespaces: "ci-(?P<repo>[a-z0-9-]+)"
-    repositories:
-      - soliddowant/${repo}
-      - soliddowant/${repo}/**
-    actions: [pull, push, delete]
-EOF
-```
-
-A grant does not apply to a namespace if a capture is empty or expands to a value outside `[a-z0-9._-]+`. A grant that does not apply never widens anything. If several grants match a namespace, each one adds its patterns and actions.
-
-The proxy reads the grants at start only. The chart restarts the Deployment when you change them. During a rolling restart, replicas can run different grants for a short time. The status of a policy shows the grants of the leader replica, and it settles when the restart ends.
-
-## Install the chart
-
-Create the Secrets first. Then install the chart in the namespace that holds them.
+Pick a free address in the service range of your cluster for `service.clusterIP`. CI pods map the registry host names to this fixed address with `hostAliases`, so it must not change.
 
 <!-- e2e -->
 ```sh
 helm install registrygate oci://ghcr.io/soliddowant/charts/registrygate \
   --namespace registrygate \
-  --set pat.existingSecret=registrygate-pat \
-  --set tls.existingSecret=registrygate-tls \
-  --set service.clusterIP=10.96.0.50 \
-  --values grants.yaml
+  --set service.clusterIP=10.96.0.50
 ```
 
-Pick a free address in the service range of your cluster for `service.clusterIP`. CI pods map `ghcr.io` to this fixed address with `hostAliases`, so it must not change. `grants.yaml` holds the `grants` list from the section above under the key `grants`.
+The proxy reads `UpstreamRegistry` objects and their Secrets only in its admin namespaces. By default, this is the namespace of the proxy. To add more, set `adminNamespaces` in the chart values. The chart then creates a Role and a RoleBinding for Secrets in each one. Add the release namespace to the list too.
 
-The chart installs the `GHCRAccessPolicy` CRD, the Deployment (two replicas), the Service and the RBAC. The chart never creates the PAT or TLS Secrets. [Chart values](chart-values.md) lists every value.
+[Chart values](chart-values.md) lists every value.
 
 Make sure that the install works:
 
-1. Run this command:
+<!-- e2e -->
+```sh
+kubectl -n registrygate rollout status deploy/registrygate
+```
 
-   <!-- e2e -->
-   ```sh
-   kubectl -n registrygate rollout status deploy/registrygate
-   ```
+A proxy pod answers `200` on `/readyz` (port 8080) when it has synced the custom resources and loaded the Secrets that they use. Until then, requests get `503` with the message `registrygate is not ready`. With no `UpstreamRegistry`, the proxy is ready but answers no host.
 
-2. Make sure that `/readyz` on port 8080 of a proxy pod answers `200`. The proxy is ready when it loaded the PAT and the certificate and synced the policies.
-
-If the proxy cannot decide, it fails closed. It denies the request or forwards it with no credential. It never uses the PAT as a fallback.
+If the proxy cannot decide, it fails closed. It denies the request or forwards it with no credential. It never uses a credential as a fallback.
 
 ## Optional chart objects
 
@@ -192,59 +58,17 @@ Three objects are off by default. [Chart values](chart-values.md) lists their va
   - port `8443` from the namespaces in `clientNamespaceSelector`;
   - port `8080` from the namespaces in `metricsNamespaceSelector`;
   - port `9443` from `apiServerCIDRs`;
-  - for egress: DNS, `apiServerCIDRs` on `apiServerPorts` (default `443` and `6443`), port `443` to any address, and your `extraEgress` rules.
+  - for egress: DNS, `apiServerCIDRs` on `apiServerPorts` (default `443` and `6443`), port `443` to any address, the addresses in `egressHosts` on `egressPorts`, and your `extraEgress` rules.
 
   NetworkPolicy ports match the port of the destination pod, after the Service has translated the address. A Service on port `443` that points to pod port `8443` needs a rule for `8443`. Set `apiServerCIDRs` to the addresses from `kubectl get endpoints kubernetes`, not to the Service address. GHCR has no fixed addresses, so the chart allows port `443` to anywhere. With Cilium, you can replace this with a policy on the name `ghcr.io`. Use `extraEgress` for an in-cluster upstream or mirror.
 - **ServiceMonitor** (`serviceMonitor.enabled`): scrapes the metrics port. It needs the Prometheus Operator CRDs.
 
-## Configure pull mirrors
-
-A pull mirror is a registry that keeps copies of GHCR images, for example a Harbor proxy-cache project for `ghcr.io`. The proxy can use two mirrors. Both are optional. Set them under `mirrors` in the chart values:
-
-- `mirrors.policy`: Allowed pulls of manifests and blobs go to this mirror.
-- `mirrors.anonymous`: Anonymous and not-allowed pulls of manifests and blobs go to this mirror.
-
-Tag lists, pushes, deletes and mounts always go to the upstream.
-
-Do not give the anonymous mirror any credentials for `ghcr.io`. Anyone who can reach the proxy can pull through the anonymous mirror. If the mirror can read private images, these callers can read them too. The proxy cannot detect this.
-
-Each mirror has these fields:
-
-| Value | Meaning |
-|---|---|
-| `url` | The scheme, host and port of the mirror, for example `https://harbor.example.com`. It has no path. An empty value turns the mirror off. |
-| `pathPrefix` | The path under which the mirror serves GHCR repositories. With `ghcr`, the image `owner/image` is `ghcr/owner/image` on the mirror. |
-| `credentials.existingSecret` | A Secret that holds the credentials of the mirror as `user:password`. Leave it empty if the mirror needs no credentials. |
-| `ca.existingSecret` | A Secret with an extra CA certificate (PEM) for the mirror. |
-| `fallbackToUpstream` | If `true` (the default), a pull goes to the upstream when the mirror fails. |
-| `responseHeaderTimeout` | How long the proxy waits for the response headers of the mirror. The default is `10s`. |
-
-The proxy never sends the PAT to a mirror. The mirror credentials must be in their own Secret. The proxy does not start if the credentials file of a mirror is the PAT file.
-
-Example:
-
-```yaml
-mirrors:
-  policy:
-    url: https://harbor.example.com
-    pathPrefix: ghcr
-    credentials:
-      existingSecret: registrygate-mirror-policy
-```
-
-A mirror fails when the proxy cannot connect to it, when its response headers do not arrive in `responseHeaderTimeout`, or when it answers `5xx` or `404`. If `fallbackToUpstream` is `true`, the pull then goes to the upstream. If it is `false`, the client gets `502` with the message `mirror unavailable`, except for a `404`, which the client gets as is. A blob goes to the upstream only if the mirror failed before it sent the response headers.
-
-If the policy mirror answers `401` or `403`, or its token endpoint rejects the mirror credentials, the client gets `502` with the message `mirror unavailable`. The pull does not go to the upstream, because the mirror credentials are wrong and you must fix them. The same answers from the anonymous mirror give the client the normal request for credentials.
-
-A blob check (`HEAD` on a blob) always goes to the upstream. `docker push` uses it to decide which layers to upload, and a mirror can keep a blob that GHCR no longer has.
-
-The proxy reads the credentials and CA files at start. It reads them again when the Secrets change. If a file is missing or not valid at start, the proxy marks that mirror as unavailable and pulls take the fallback rule. Pulls never go to the other mirror. If a file becomes not valid later, the proxy keeps the last good value and logs an error.
 
 ## Turn on the admission webhook
 
 The proxy enforces ceilings and admin namespaces whether or not you use the webhook. The webhook only gives fast feedback: `kubectl apply` fails at once. The webhook is off by default.
 
-The webhook rejects an `UpstreamRegistry` that is not in an admin namespace. It also rejects a new `RegistryAccessPolicy`, and a change to its `spec`, when a rule with a `credentialRef` has a repository pattern or action outside the ceiling of that credential. The message names the rule and the patterns. A rule whose credential does not exist yet is admitted; the policy status reports it. The webhook reads the same view of the cluster as the proxy, and rejects a policy while that view is not yet built. The webhook admits an update that does not change the `spec`, and an update of an object that is being deleted. So labels and finalizers still change after you narrow a grant.
+The webhook rejects an `UpstreamRegistry` that is not in an admin namespace. It also rejects a new `RegistryAccessPolicy`, and a change to its `spec`, when a rule with a `credentialRef` has a repository pattern or action outside the ceiling of that credential. The message names the rule and the patterns. A rule whose credential does not exist yet is admitted; the policy status reports it. The webhook reads the same view of the cluster as the proxy, and rejects a policy while that view is not yet built. The webhook admits an update that does not change the `spec`, and an update of an object that is being deleted. So labels and finalizers still change after you narrow a ceiling.
 
 The webhook has its own Service and its own certificate. Every proxy replica serves it, also a replica that is not ready. If no replica runs, the webhook rejects all writes of `UpstreamRegistry` and `RegistryAccessPolicy` objects, because it fails closed (`failurePolicy: Fail`).
 
@@ -268,8 +92,8 @@ The API server must reach port `9443` of the proxy pods. If you use a NetworkPol
 
 - A synced replica keeps the last policies it saw. During an outage of the Kubernetes API server, a revoked policy keeps working until the watch recovers.
 - The proxy caches a token review for up to 30 seconds (`authentication.cacheTTL`). A deleted ServiceAccount can keep working for that time.
-- All callers share one GitHub identity and its rate limits.
-- A delete by digest uses the PAT with the GitHub REST API at `upstream.apiURL` (default `https://api.github.com/`). The PAT needs the `delete:packages` scope for it. If you use a NetworkPolicy, allow the proxy to connect to that host on port 443.
+- Callers that use the same `UpstreamCredential` share one upstream identity and its rate limits. The audit log tells you who did what.
+- A mirror serves public content only. See [mirrors](mirrors.md#mirrors-serve-public-content-only).
 - ServiceAccount tokens must use the audience `registrygate` and a short life of 1 to 6 hours. Do not accept the default API server audience.
 
 ## Audit log
@@ -307,14 +131,14 @@ The `decision` field has one of these values:
 
 | Value | Meaning |
 |---|---|
-| `allowed` | A policy and its grant allowed the request. The proxy used the rule's credential. |
+| `allowed` | A policy and the ceiling of its credential allowed the request. The proxy used the rule's credential. |
 | `mirror` | A rule with a mirror allowed the pull. The proxy used the mirror and no upstream credential. |
 | `anonymous` | The proxy forwarded the request with no credential (a pull that no policy allows). |
-| `denied` | A policy or grant did not allow the request. The client got `403`. |
+| `denied` | No policy rule allowed the request. The client got `403`. |
 | `ambiguous` | Two or more rules named different credentials for the request. The client got `403`. |
 | `unauthenticated` | The credential was missing or not valid. The client got `401`. |
 | `unavailable` | The proxy could not decide or reach GHCR. The client got `502` or `503`. |
 | `notfound` | The route is not one that the proxy serves. The client got `404`. |
 | `invalid` | The request was malformed. The client got `400`. |
 
-To find out why a push failed, search for the `serviceAccount` and `repository` and read `decision` and `status`. To see how clients read the answers, see [why a push is denied](../user/policies.md#why-a-push-is-denied).
+To find out why a push failed, search for the `serviceAccount` and `repository` and read `decision` and `status`. To see how clients read the answers, see [why a push is denied](../user/policies.md#why-a-request-is-denied).
