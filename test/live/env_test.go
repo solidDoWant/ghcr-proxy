@@ -15,10 +15,17 @@ package live
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/hex"
-	"errors"
+	"encoding/pem"
 	"fmt"
+	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -27,11 +34,14 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
@@ -39,6 +49,16 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
 	"github.com/solidDoWant/registrygate/api/v1alpha1"
+	"github.com/solidDoWant/registrygate/internal/authn"
+	"github.com/solidDoWant/registrygate/internal/authz"
+	"github.com/solidDoWant/registrygate/internal/metrics"
+	"github.com/solidDoWant/registrygate/internal/mirror"
+	"github.com/solidDoWant/registrygate/internal/model"
+	"github.com/solidDoWant/registrygate/internal/registry"
+	"github.com/solidDoWant/registrygate/internal/secrets"
+	"github.com/solidDoWant/registrygate/internal/server"
+	"github.com/solidDoWant/registrygate/internal/uploadtoken"
+	"github.com/solidDoWant/registrygate/internal/upstream"
 )
 
 const (
@@ -48,6 +68,9 @@ const (
 	// already-public image, pulled anonymously and read-only, by its digest.
 	publicImage = "ghcr.io/soliddowant/ghcr-proxy:0.2.0@sha256:e3a1e8f2dd0f78b659622cb7ee4654c29e26a972f6202c4e4c70dfa68efdcb8f"
 
+	// registryHost is the name the CI pod reaches the proxy at; the test transport dials the local listener.
+	registryHost   = "registry.test"
+	adminNamespace = "registrygate-live"
 	ciNamespace    = "ci-live"
 	serviceAccount = "builder"
 	proxyAudience  = "registrygate"
@@ -181,45 +204,198 @@ func startEnv() (*liveEnv, error) {
 
 	stops = append(stops, func() { _ = testEnv.Stop() })
 
-	if err := env.startProxy(ctx, restConfig, patFile); err != nil {
+	k8s, err := env.setUpCaller(ctx, restConfig)
+	if err != nil {
+		env.stop()
+		return nil, err
+	}
+
+	if err := env.startProxy(ctx, restConfig, k8s); err != nil {
 		env.stop()
 		return nil, err
 	}
 
 	stops = append([]func(){env.proxy.Close}, stops...)
 
-	if err := env.setUpCaller(ctx, restConfig); err != nil {
-		env.stop()
-		return nil, err
-	}
-
 	return env, nil
 }
 
-// errNotPorted stops a live run until the environment builds the custom resources the proxy now reads; the
-// proxy no longer takes an upstream, a PAT file or grants from its config file.
-var errNotPorted = errors.New("the live environment does not build UpstreamRegistry, UpstreamCredential and " +
-	"RegistryAccessPolicy objects yet")
-
-// startProxy would start the proxy for the run. It refuses until the environment is ported.
-func (e *liveEnv) startProxy(context.Context, *rest.Config, string) error {
-	return errNotPorted
-}
-
-// setUpCaller creates the CI namespace, its ServiceAccount, a pod token for
-// the proxy and a policy allowing the run prefix.
-func (e *liveEnv) setUpCaller(ctx context.Context, restConfig *rest.Config) error {
-	clientset, err := kubernetes.NewForConfig(restConfig)
+// startProxy builds the snapshot from the custom resources in envtest and serves the real handler, forwarder
+// and TokenReview reviewer on a local TLS listener. The PAT and the serving key pair never leave memory.
+func (e *liveEnv) startProxy(ctx context.Context, restConfig *rest.Config, k8s client.Client) error {
+	certificatePEM, keyPEM, err := selfSignedPair(registryHost)
 	if err != nil {
 		return err
 	}
 
-	if _, err := clientset.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ciNamespace}}, metav1.CreateOptions{}); err != nil {
+	pool, err := x509.SystemCertPool()
+	if err != nil {
 		return err
 	}
 
-	if _, err := clientset.CoreV1().ServiceAccounts(ciNamespace).Create(ctx, &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: serviceAccount}}, metav1.CreateOptions{}); err != nil {
+	pool.AppendCertsFromPEM(certificatePEM)
+
+	var (
+		upstreamObject   v1alpha1.UpstreamRegistry
+		credentialObject v1alpha1.UpstreamCredential
+		policyObject     v1alpha1.RegistryAccessPolicy
+	)
+
+	if err := k8s.Get(ctx, types.NamespacedName{Namespace: adminNamespace, Name: "ghcr"}, &upstreamObject); err != nil {
 		return err
+	}
+
+	if err := k8s.Get(ctx, types.NamespacedName{Namespace: adminNamespace, Name: "live"}, &credentialObject); err != nil {
+		return err
+	}
+
+	if err := k8s.Get(ctx, types.NamespacedName{Namespace: ciNamespace, Name: "live"}, &policyObject); err != nil {
+		return err
+	}
+
+	snapshot := model.Build(model.Inputs{
+		Upstreams:       []v1alpha1.UpstreamRegistry{upstreamObject},
+		Credentials:     []v1alpha1.UpstreamCredential{credentialObject},
+		Policies:        []v1alpha1.RegistryAccessPolicy{policyObject},
+		Namespaces:      map[string]labels.Set{adminNamespace: {}, ciNamespace: {}},
+		AdminNamespaces: []string{adminNamespace},
+		Secrets: liveSecrets{
+			{Namespace: adminNamespace, Name: "ghcr-tls"}: {
+				State: secrets.Present, ResourceVersion: "1",
+				Data: secrets.Data{"tls.crt": certificatePEM, "tls.key": keyPEM},
+			},
+			{Namespace: adminNamespace, Name: "live-pat"}: {
+				State: secrets.Present, ResourceVersion: "1",
+				Data: secrets.Data{"username": []byte(e.owner), "password": []byte(e.pat)},
+			},
+		},
+	})
+
+	status := snapshot.Upstreams[types.NamespacedName{Namespace: adminNamespace, Name: "ghcr"}].Status
+	if !status.Ready {
+		return fmt.Errorf("upstream not ready: %s", status.Message)
+	}
+
+	reviewer, err := authn.NewReviewerForConfig(restConfig, authn.Options{
+		Audience: proxyAudience, CacheTTL: time.Minute, ReviewTimeout: 10 * time.Second,
+	})
+	if err != nil {
+		return err
+	}
+
+	signingKey := make([]byte, 32)
+	if _, err := rand.Read(signingKey); err != nil {
+		return err
+	}
+
+	codec, err := uploadtoken.New(signingKey)
+	if err != nil {
+		return err
+	}
+
+	forwarder := registry.NewForwarder(registry.ForwarderConfig{
+		Upstreams:      upstream.NewClients(upstream.ClientOptions{}),
+		RuleMirrors:    mirror.NewCache(mirror.ClientOptions{Target: metrics.TargetPolicyMirror}),
+		DefaultMirrors: mirror.NewCache(mirror.ClientOptions{Target: metrics.TargetAnonymousMirror}),
+		UploadTokens:   func() *uploadtoken.Codec { return codec },
+	})
+
+	handler := &server.Handler{
+		Reviewer:  reviewer,
+		Decider:   authz.Resolver{Snapshot: func() *model.Snapshot { return snapshot }},
+		Forwarder: forwarder,
+		Ready:     func() bool { return true },
+	}
+
+	proxy := httptest.NewUnstartedServer(handler)
+	proxy.TLS = server.SNICertificates(func() *model.Snapshot { return snapshot })
+	proxy.StartTLS()
+	e.proxy = proxy
+
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	proxyAddr := proxy.Listener.Addr().String()
+	dialer := &net.Dialer{}
+
+	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		if addr == registryHost+":443" {
+			addr = proxyAddr
+		}
+
+		return dialer.DialContext(ctx, network, addr)
+	}
+	transport.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
+	e.clientTransport = transport
+
+	return nil
+}
+
+// liveSecrets is the in-memory Secret source the snapshot is built from.
+type liveSecrets map[secrets.Key]secrets.Secret
+
+func (s liveSecrets) Get(key secrets.Key) (secrets.Secret, bool) {
+	secret, ok := s[key]
+	if !ok {
+		return secrets.Secret{State: secrets.NotFound}, true
+	}
+
+	return secret, true
+}
+
+// selfSignedPair returns a self-signed serving certificate and key (PEM) for host.
+func selfSignedPair(host string) ([]byte, []byte, error) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	serial, err := rand.Int(rand.Reader, big.NewInt(1<<62))
+	if err != nil {
+		return nil, nil, err
+	}
+
+	template := &x509.Certificate{
+		SerialNumber:          serial,
+		Subject:               pkix.Name{CommonName: host},
+		DNSNames:              []string{host},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
+		pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}), nil
+}
+
+// setUpCaller creates the admin and CI namespaces, the CI ServiceAccount and its pod token, and the custom
+// resources: an UpstreamRegistry for ghcr.io, an UpstreamCredential whose ceiling is the run prefix, and a
+// policy that allows the run prefix. It returns a client for them.
+func (e *liveEnv) setUpCaller(ctx context.Context, restConfig *rest.Config) (client.Client, error) {
+	clientset, err := kubernetes.NewForConfig(restConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, namespace := range []string{adminNamespace, ciNamespace} {
+		if _, err := clientset.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}, metav1.CreateOptions{}); err != nil {
+			return nil, err
+		}
+	}
+
+	if _, err := clientset.CoreV1().ServiceAccounts(ciNamespace).Create(ctx, &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: serviceAccount}}, metav1.CreateOptions{}); err != nil {
+		return nil, err
 	}
 
 	pod, err := clientset.CoreV1().Pods(ciNamespace).Create(ctx, &corev1.Pod{
@@ -230,7 +406,7 @@ func (e *liveEnv) setUpCaller(ctx context.Context, restConfig *rest.Config) erro
 		},
 	}, metav1.CreateOptions{})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	request, err := clientset.CoreV1().ServiceAccounts(ciNamespace).CreateToken(ctx, serviceAccount, &authenticationv1.TokenRequest{
@@ -241,31 +417,67 @@ func (e *liveEnv) setUpCaller(ctx context.Context, restConfig *rest.Config) erro
 		},
 	}, metav1.CreateOptions{})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	e.callerToken = request.Status.Token
 
 	scheme := runtime.NewScheme()
 	if err := v1alpha1.AddToScheme(scheme); err != nil {
-		return err
+		return nil, err
 	}
 
 	k8s, err := client.New(restConfig, client.Options{Scheme: scheme})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	return k8s.Create(ctx, &v1alpha1.GHCRAccessPolicy{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ciNamespace, Name: "live"},
-		Spec: v1alpha1.GHCRAccessPolicySpec{
-			ServiceAccounts: []string{serviceAccount},
-			Rules: []v1alpha1.GHCRAccessRule{{
-				Repositories: []string{e.prefix, e.prefix + "/**"},
-				Actions:      []v1alpha1.Action{v1alpha1.ActionPull, v1alpha1.ActionPush, v1alpha1.ActionDelete},
-			}},
+	admits := v1alpha1.AllowedNamespaces{Names: []string{ciNamespace}}
+	credentialRef := &v1alpha1.ObjectRef{Namespace: adminNamespace, Name: "live"}
+
+	objects := []client.Object{
+		&v1alpha1.UpstreamRegistry{
+			ObjectMeta: metav1.ObjectMeta{Namespace: adminNamespace, Name: "ghcr"},
+			Spec: v1alpha1.UpstreamRegistrySpec{
+				Hosts:             []string{registryHost},
+				URL:               registryURL,
+				TLS:               v1alpha1.ServingTLS{SecretRef: v1alpha1.LocalRef{Name: "ghcr-tls"}},
+				AllowedNamespaces: admits,
+			},
 		},
-	})
+		&v1alpha1.UpstreamCredential{
+			ObjectMeta: metav1.ObjectMeta{Namespace: adminNamespace, Name: "live"},
+			Spec: v1alpha1.UpstreamCredentialSpec{
+				UpstreamRef: v1alpha1.ObjectRef{Namespace: adminNamespace, Name: "ghcr"},
+				SecretRef:   v1alpha1.CredentialsSecretRef{Name: "live-pat"},
+				Ceiling: []v1alpha1.AccessGrant{{
+					Repositories: []string{e.prefix, e.prefix + "/**"},
+					Actions:      []v1alpha1.Action{v1alpha1.ActionPull, v1alpha1.ActionPush, v1alpha1.ActionDelete},
+				}},
+				AllowedNamespaces: admits,
+			},
+		},
+		&v1alpha1.RegistryAccessPolicy{
+			ObjectMeta: metav1.ObjectMeta{Namespace: ciNamespace, Name: "live"},
+			Spec: v1alpha1.RegistryAccessPolicySpec{
+				ServiceAccounts: []string{serviceAccount},
+				Rules: []v1alpha1.AccessRule{{
+					Name:          "run-prefix",
+					CredentialRef: credentialRef,
+					Repositories:  []string{e.prefix, e.prefix + "/**"},
+					Actions:       []v1alpha1.Action{v1alpha1.ActionPull, v1alpha1.ActionPush, v1alpha1.ActionDelete},
+				}},
+			},
+		},
+	}
+
+	for _, object := range objects {
+		if err := k8s.Create(ctx, object); err != nil {
+			return nil, err
+		}
+	}
+
+	return k8s, nil
 }
 
 // repo returns the repository <prefix>/<name> for this run.
