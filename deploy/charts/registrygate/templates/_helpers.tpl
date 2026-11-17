@@ -37,6 +37,12 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 {{/* The rendered proxy config file: the server's own settings. Upstreams, credentials, mirrors and access come from the custom resources. */}}
 {{- define "registrygate.config" -}}
+{{- with .Values.adminNamespaces }}
+adminNamespaces:
+  {{- range . }}
+  - {{ . | quote }}
+  {{- end }}
+{{- end }}
 authentication:
   audience: {{ .Values.authentication.audience | quote }}
   cacheTTL: {{ .Values.authentication.cacheTTL | quote }}
@@ -84,4 +90,9 @@ webhook:
 {{/* Name of the Secret with the upload signing key. */}}
 {{- define "registrygate.uploadSigningSecretName" -}}
 {{- default (printf "%s-upload-signing" (include "registrygate.fullname" .)) .Values.uploadSigning.existingSecret -}}
+{{- end }}
+
+{{/* The admin namespaces as a JSON array: the configured ones, or the release namespace. */}}
+{{- define "registrygate.adminNamespaces" -}}
+{{- toJson (default (list .Release.Namespace) .Values.adminNamespaces) -}}
 {{- end }}

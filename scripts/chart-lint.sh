@@ -30,13 +30,13 @@ render --set service.clusterIP=10.96.0.50 --show-only templates/service.yaml | g
 	fail "service.clusterIP is not used"
 
 opts=(--set podDisruptionBudget.enabled=true --set networkPolicy.enabled=true --set serviceMonitor.enabled=true
-	--set 'networkPolicy.apiServerCIDRs={10.0.0.5/32}' --set networkPolicy.clientNamespaceSelector.matchLabels.team=ci)
+	--set 'networkPolicy.apiServerCIDRs={10.0.0.5/32}' --set 'networkPolicy.egressHosts={192.0.2.7/32}' --set 'networkPolicy.egressPorts={5000}' --set networkPolicy.clientNamespaceSelector.matchLabels.team=ci)
 for kind in PodDisruptionBudget NetworkPolicy ServiceMonitor; do
 	grep -qF "kind: $kind" <<<"$(render)" && fail "$kind rendered by default"
 	grep -qF "kind: $kind" <<<"$(render "${opts[@]}")" || fail "$kind not rendered when enabled"
 done
 np=$(render "${opts[@]}" --show-only templates/networkpolicy.yaml)
-for want in 'port: 8443' 'port: 8080' 'port: 9443' 'port: 6443' 'team: ci' '10.0.0.5/32'; do
+for want in 'port: 8443' 'port: 8080' 'port: 9443' 'port: 6443' 'team: ci' '10.0.0.5/32' '192.0.2.7/32' 'port: 5000'; do
 	grep -qF -- "$want" <<<"$np" || fail "network policy lacks: $want"
 done
 

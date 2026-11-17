@@ -19,8 +19,8 @@ func TestAddToSchemeRegistersTheAccessPolicyKinds(t *testing.T) {
 		object runtime.Object
 		kind   string
 	}{
-		{name: "policy", object: &v1alpha1.GHCRAccessPolicy{}, kind: "GHCRAccessPolicy"},
-		{name: "policy list", object: &v1alpha1.GHCRAccessPolicyList{}, kind: "GHCRAccessPolicyList"},
+		{name: "policy", object: &v1alpha1.RegistryAccessPolicy{}, kind: "RegistryAccessPolicy"},
+		{name: "policy list", object: &v1alpha1.RegistryAccessPolicyList{}, kind: "RegistryAccessPolicyList"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

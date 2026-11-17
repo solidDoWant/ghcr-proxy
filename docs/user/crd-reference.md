@@ -6,28 +6,6 @@ For: chart authors who write registrygate resources.
 
 Every field of the `registrygate.soliddowant.dev/v1alpha1` resources. A field marked `yes` in the Required column must be set. The [user guide](README.md) shows them in use.
 
-## GHCRAccessPolicy
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `spec.rules` | list of object | yes | Rules allow actions on repositories. Policies only ever add access. |
-| `spec.rules[].actions` | list of string | yes | Actions allowed on those repositories. |
-| `spec.rules[].repositories` | list of string | yes | Repositories are glob patterns of repository names, without the registry host. `*` matches within one path segment and `**` matches any number of whole segments. |
-| `spec.serviceAccounts` | list of string | yes | ServiceAccounts in this namespace this policy applies to. |
-| `status.conditions` | list of object |  | Conditions: Ready. |
-| `status.conditions[].lastTransitionTime` | time | yes | lastTransitionTime is the last time the condition transitioned from one status to another. This should be when the underlying condition changed. If that is not known, then using the time when the API field changed is acceptable. |
-| `status.conditions[].message` | string | yes | message is a human readable message indicating details about the transition. This may be an empty string. |
-| `status.conditions[].observedGeneration` | integer |  | observedGeneration represents the .metadata.generation that the condition was set based upon. For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date with respect to the current state of the instance. |
-| `status.conditions[].reason` | string | yes | reason contains a programmatic identifier indicating the reason for the condition's last transition. Producers of specific condition types may define expected values and meanings for this field, and whether the values are considered a guaranteed API. The value should be a CamelCase string. This field may not be empty. |
-| `status.conditions[].status` | string | yes | status of the condition, one of True, False, Unknown. One of `True`, `False`, `Unknown`. |
-| `status.conditions[].type` | string | yes | type of condition in CamelCase or in foo.example.com/CamelCase. |
-| `status.observedGeneration` | integer |  | ObservedGeneration is the last generation the proxy computed this status for. |
-| `status.rejected` | list of object |  | Rejected lists each repository pattern that lost actions, with the actions it lost and why. |
-| `status.rejected[].actions` | list of string | yes | Actions are the actions dropped for this pattern, counting the pull that push and delete imply. |
-| `status.rejected[].reason` | string | yes | Reason says why the actions were dropped. One of `OutsideGrant`, `InvalidPattern`, `NoGrant`. |
-| `status.rejected[].repository` | string | yes | Repository is the pattern as written in the rule. |
-| `status.rejected[].rule` | integer | yes | Rule is the index into spec.rules. |
-
 ## RegistryAccessPolicy
 
 | Field | Type | Required | Description |

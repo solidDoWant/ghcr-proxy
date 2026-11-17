@@ -14,9 +14,7 @@ For: admins who install registrygate with its Helm chart.
 | `nameOverride` | `""` | Override the chart name used in resource names. |
 | `fullnameOverride` | `""` | Override the full resource name. |
 | `crds.install` | `true` | Install the CRDs with the chart. Set to false when you manage them yourself. |
-| `pat.existingSecret` | `""` | Name of the Secret that holds the GitHub personal access token. Required. The chart never creates it. |
-| `pat.key` | `token` | Key in that Secret that holds the token. |
-| `tls.existingSecret` | `""` | Name of the `kubernetes.io/tls` Secret with the serving certificate. Required. The chart never creates it. |
+| `adminNamespaces` | `[]` | Admin namespaces: the namespaces whose `UpstreamRegistry` objects count and where the proxy reads Secrets. The chart creates a Role and RoleBinding for Secrets in each. Empty means the release namespace only. The upload signing Secret lives in the release namespace, so list it too when you set this. |
 | `uploadSigning.existingSecret` | `""` | Name of a Secret in the release namespace whose key `key` (at least 32 bytes) signs upload session tokens. Empty makes the chart create one with a random key and keep it across upgrades. |
 | `webhook.enabled` | `false` | Serve the validating admission webhook that rejects an `UpstreamRegistry` outside the admin namespaces, and a `RegistryAccessPolicy` rule outside the ceiling of its credential, at apply time. The proxy still enforces both either way. |
 | `webhook.existingSecret` | `""` | Name of the `kubernetes.io/tls` Secret with the webhook's serving certificate. Required when the webhook is on and `webhook.certManager.issuerRef.name` is empty. The chart never creates it. |
@@ -25,33 +23,9 @@ For: admins who install registrygate with its Helm chart.
 | `webhook.certManager.issuerRef.kind` | `Issuer` | Kind of the issuer. |
 | `webhook.certManager.issuerRef.group` | `cert-manager.io` | API group of the issuer. |
 | `service.clusterIP` | `""` | Fixed ClusterIP of the Service. Pin it so CI pods can map `ghcr.io` to it with `hostAliases`. Empty lets Kubernetes choose. |
-| `upstream.url` | `https://ghcr.io` | Upstream registry URL. |
-| `upstream.tokenHosts` | `[]` | Extra hosts allowed as token realms. The upstream host is always allowed. |
-| `upstream.ca.existingSecret` | `""` | Name of a Secret with an extra CA certificate (PEM) to trust for the upstream, next to the system roots. Only for a private or test upstream; leave empty for `ghcr.io`. |
-| `upstream.ca.key` | `ca.crt` | Key in that Secret that holds the CA certificate. |
-| `upstream.timeout` | `30m` | Timeout of one whole upstream request. Uploads of several GB must fit. |
-| `upstream.tokenTimeout` | `10s` | Timeout of one upstream token exchange. |
-| `upstream.apiURL` | `https://api.github.com/` | GitHub REST API URL. Deletes by digest delete the package version through this API with the PAT. Uses the upstream CA when set. |
-| `mirrors.policy.url` | `""` | URL of the policy pull mirror, with a scheme, a host and an optional port only. Empty turns this mirror off. Allowed pulls of manifests and blobs go to this mirror. |
-| `mirrors.policy.pathPrefix` | `""` | Path under which the mirror serves GHCR's repositories. The mirror name of `owner/image` is `<pathPrefix>/owner/image`. |
-| `mirrors.policy.credentials.existingSecret` | `""` | Name of a Secret with the mirror's own credentials as `user:password`. Empty means the proxy connects to the mirror with no credentials. Never put the PAT here. |
-| `mirrors.policy.credentials.key` | `credentials` | Key in that Secret that holds the credentials. |
-| `mirrors.policy.ca.existingSecret` | `""` | Name of a Secret with an extra CA certificate (PEM) to trust for the mirror, next to the system roots. |
-| `mirrors.policy.ca.key` | `ca.crt` | Key in that Secret that holds the CA certificate. |
-| `mirrors.policy.fallbackToUpstream` | `true` | Send the pull to the upstream when the mirror fails. |
-| `mirrors.policy.responseHeaderTimeout` | `10s` | How long the proxy waits for the mirror's response headers before it counts the mirror as failed. |
-| `mirrors.anonymous.url` | `""` | URL of the anonymous pull mirror, with a scheme, a host and an optional port only. Empty turns this mirror off. Anonymous and not-allowed pulls of manifests and blobs go to this mirror. It must have no upstream credentials, because anyone who can reach the proxy can read through it. |
-| `mirrors.anonymous.pathPrefix` | `""` | Path under which the mirror serves GHCR's repositories. The mirror name of `owner/image` is `<pathPrefix>/owner/image`. |
-| `mirrors.anonymous.credentials.existingSecret` | `""` | Name of a Secret with the mirror's own credentials as `user:password`. Empty means the proxy connects to the mirror with no credentials. Never put the PAT here. |
-| `mirrors.anonymous.credentials.key` | `credentials` | Key in that Secret that holds the credentials. |
-| `mirrors.anonymous.ca.existingSecret` | `""` | Name of a Secret with an extra CA certificate (PEM) to trust for the mirror, next to the system roots. |
-| `mirrors.anonymous.ca.key` | `ca.crt` | Key in that Secret that holds the CA certificate. |
-| `mirrors.anonymous.fallbackToUpstream` | `true` | Send the pull to the upstream when the mirror fails. |
-| `mirrors.anonymous.responseHeaderTimeout` | `10s` | How long the proxy waits for the mirror's response headers before it counts the mirror as failed. |
 | `authentication.audience` | `registrygate` | Audience that ServiceAccount tokens must carry. |
 | `authentication.cacheTTL` | `30s` | How long a token review result is cached (1s to 30s). |
 | `authentication.reviewTimeout` | `5s` | Timeout of one token review. |
-| `grants` | `[]` | Grants that cap what policies in each namespace may allow. Each has a `namespaces` regular expression, `repositories` globs and `actions`. |
 | `server.readHeaderTimeout` | `10s` | Timeout for reading request headers. |
 | `server.idleTimeout` | `120s` | Idle timeout of keep-alive connections. |
 | `server.maxHeaderBytes` | `65536` | Largest accepted request header size in bytes. |
@@ -81,7 +55,9 @@ For: admins who install registrygate with its Helm chart.
 | `networkPolicy.metricsNamespaceSelector` | `{}` | Namespaces whose pods may scrape port 8080 (health and metrics), such as the monitoring namespace. The default matches every namespace. |
 | `networkPolicy.apiServerCIDRs` | `[]` | CIDRs of the Kubernetes API server. They may reach port 9443 (the admission webhook) and the proxy may reach them on `apiServerPorts`. Without them, the proxy cannot reach the API server for token reviews. Use the addresses of `kubectl get endpoints kubernetes`, because the NetworkPolicy sees the address after Service translation. |
 | `networkPolicy.apiServerPorts` | `[443, 6443]` | Ports of the API server, after Service translation. |
-| `networkPolicy.extraEgress` | `[]` | Extra raw egress rules (NetworkPolicy `egress` items), for example for an in-cluster upstream or mirror. Port 443 to any address is always allowed. |
+| `networkPolicy.egressHosts` | `[]` | Addresses (IPs or CIDRs) of upstream registries and mirrors the proxy may reach on `egressPorts`. A NetworkPolicy matches addresses, not host names, so list the addresses the hosts resolve to. Port 443 to any address is always allowed. |
+| `networkPolicy.egressPorts` | `[443]` | Ports the proxy may reach on `egressHosts`. |
+| `networkPolicy.extraEgress` | `[]` | Extra raw egress rules (NetworkPolicy `egress` items), for example for an in-cluster upstream or mirror selected by labels. |
 | `serviceMonitor.enabled` | `false` | Create a Prometheus Operator ServiceMonitor for the metrics port. Needs the ServiceMonitor CRD. |
 | `serviceMonitor.interval` | `30s` | Scrape interval. |
 | `serviceMonitor.labels` | `{}` | Extra labels on the ServiceMonitor, for example the label your Prometheus selects on. |

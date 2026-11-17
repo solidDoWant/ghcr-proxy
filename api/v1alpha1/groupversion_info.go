@@ -17,7 +17,6 @@ var (
 	SchemeBuilder = runtime.NewSchemeBuilder(func(s *runtime.Scheme) error {
 		metav1.AddToGroupVersion(s, GroupVersion)
 		s.AddKnownTypes(GroupVersion,
-			&GHCRAccessPolicy{}, &GHCRAccessPolicyList{},
 			&UpstreamRegistry{}, &UpstreamRegistryList{},
 			&UpstreamCredential{}, &UpstreamCredentialList{},
 			&RegistryMirror{}, &RegistryMirrorList{},
