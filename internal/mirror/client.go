@@ -49,10 +49,10 @@ type ClientConfig struct {
 	// TokenTimeout bounds one ping or token exchange.
 	TokenTimeout time.Duration
 	Logger       *slog.Logger
-	// Metrics counts token fetches under Target (metrics.TargetPolicyMirror or metrics.TargetAnonymousMirror);
-	// nil turns it off.
+	// Metrics counts token fetches under the mirror target and Upstream; nil turns it off.
 	Metrics *metrics.Metrics
-	Target  string
+	// Upstream is the "<namespace>/<name>" of the mirror's upstream, the metrics' upstream label.
+	Upstream string
 }
 
 // Client sends pull requests to one mirror with a token fetched with the
@@ -195,7 +195,7 @@ func (c *Client) token(ctx context.Context, roundTripper http.RoundTripper, stat
 
 	challenge, err := c.ping(ctx, roundTripper, state)
 	if err != nil {
-		c.cfg.Metrics.UpstreamTokenFetch(c.cfg.Target, metrics.ResultError)
+		c.cfg.Metrics.UpstreamTokenFetch(c.cfg.Upstream, metrics.TargetMirror, metrics.ResultError)
 		return "", key, err
 	}
 
@@ -219,16 +219,16 @@ func (c *Client) token(ctx context.Context, roundTripper http.RoundTripper, stat
 		var registryErr *transport.Error
 		if errors.As(err, &registryErr) &&
 			(registryErr.StatusCode == http.StatusUnauthorized || registryErr.StatusCode == http.StatusForbidden) {
-			c.cfg.Metrics.UpstreamTokenFetch(c.cfg.Target, metrics.ResultRejected)
+			c.cfg.Metrics.UpstreamTokenFetch(c.cfg.Upstream, metrics.TargetMirror, metrics.ResultRejected)
 			return "", key, ErrCredentialRejected
 		}
 
-		c.cfg.Metrics.UpstreamTokenFetch(c.cfg.Target, metrics.ResultError)
+		c.cfg.Metrics.UpstreamTokenFetch(c.cfg.Upstream, metrics.TargetMirror, metrics.ResultError)
 
 		return "", key, ErrUnavailable
 	}
 
-	c.cfg.Metrics.UpstreamTokenFetch(c.cfg.Target, metrics.ResultOK)
+	c.cfg.Metrics.UpstreamTokenFetch(c.cfg.Upstream, metrics.TargetMirror, metrics.ResultOK)
 
 	value := fetched.Token
 	if value == "" {

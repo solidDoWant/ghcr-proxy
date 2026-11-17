@@ -34,7 +34,7 @@ func TestForwarderCountsUpstreamRequestsAndMirrorFallbacks(t *testing.T) {
 	require.NoError(t, testutil.GatherAndCompare(proxyMetrics.Gatherer(), strings.NewReader(`
 # HELP registrygate_mirror_fallbacks_total Pulls that fell back from a mirror to the upstream.
 # TYPE registrygate_mirror_fallbacks_total counter
-registrygate_mirror_fallbacks_total{mirror="policy"} 1
+registrygate_mirror_fallbacks_total{upstream="registrygate/upstream-a"} 1
 `), "registrygate_mirror_fallbacks_total"))
 
 	count, err := testutil.GatherAndCount(proxyMetrics.Gatherer(), "registrygate_upstream_requests_total")

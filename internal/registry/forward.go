@@ -362,7 +362,7 @@ func (t *tokenTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	started := time.Now()
 	resp, err := state.client.Do(req, cred, scopes)
-	t.forwarder.cfg.Metrics.UpstreamRequest(metrics.TargetUpstream, statusOf(resp), time.Since(started))
+	t.forwarder.cfg.Metrics.UpstreamRequest(upstreamName(forward), metrics.TargetUpstream, statusOf(resp), time.Since(started))
 
 	if err != nil {
 		return nil, err
@@ -404,15 +404,15 @@ func (t *tokenTransport) tryMirror(req *http.Request, state *exchange) (resp *ht
 	logger := t.forwarder.cfg.Logger
 	mirrorName := forward.Mirror.Name().String()
 
-	fallbackName, mirrorTarget, cache := metrics.MirrorAnonymous, metrics.TargetAnonymousMirror, t.forwarder.cfg.DefaultMirrors
+	cache := t.forwarder.cfg.DefaultMirrors
 	if viaRule {
-		fallbackName, mirrorTarget, cache = metrics.MirrorPolicy, metrics.TargetPolicyMirror, t.forwarder.cfg.RuleMirrors
+		cache = t.forwarder.cfg.RuleMirrors
 	}
 
 	// failed applies the fallback rule to a mirror failure.
 	failed := func(reason string) (*http.Response, bool, error) {
 		if forward.Mirror.FallbackToUpstream {
-			t.forwarder.cfg.Metrics.MirrorFallback(fallbackName)
+			t.forwarder.cfg.Metrics.MirrorFallback(upstreamName(forward))
 			logger.Warn("mirror failed; falling back to the upstream", "mirror", mirrorName, "reason", reason)
 
 			return nil, false, nil
@@ -439,7 +439,7 @@ func (t *tokenTransport) tryMirror(req *http.Request, state *exchange) (resp *ht
 
 	started := time.Now()
 	resp, err = target.Send(out, "repository:"+target.PathPrefix()+"/"+forward.Request.Name+":pull")
-	t.forwarder.cfg.Metrics.UpstreamRequest(mirrorTarget, statusOf(resp), time.Since(started))
+	t.forwarder.cfg.Metrics.UpstreamRequest(upstreamName(forward), metrics.TargetMirror, statusOf(resp), time.Since(started))
 
 	switch {
 	case err != nil && req.Context().Err() != nil:
@@ -566,4 +566,13 @@ func (w *noInterimWriter) WriteHeader(code int) {
 // Unwrap lets http.ResponseController reach the underlying writer.
 func (w *noInterimWriter) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
+}
+
+// upstreamName is the forward's upstream as "<namespace>/<name>", the metrics' upstream label.
+func upstreamName(forward Forward) string {
+	if forward.Upstream == nil {
+		return metrics.NoUpstream
+	}
+
+	return forward.Upstream.Name().String()
 }

@@ -1,7 +1,6 @@
 package metrics_test
 
 import (
-	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -13,62 +12,66 @@ import (
 	"github.com/solidDoWant/registrygate/internal/metrics"
 )
 
-func TestRecordedEventsAppearWithFixedLabels(t *testing.T) {
+func TestRecordedEventsAppearWithTheUpstreamLabel(t *testing.T) {
 	proxyMetrics := metrics.New()
 
-	proxyMetrics.Request("pull", "allowed", 200)
-	proxyMetrics.Request("pull", "allowed", 206)
-	proxyMetrics.Request("none", "unauthenticated", 401)
-	proxyMetrics.UpstreamRequest(metrics.TargetUpstream, 503, time.Millisecond)
-	proxyMetrics.UpstreamRequest(metrics.TargetPolicyMirror, 0, time.Millisecond)
-	proxyMetrics.MirrorFallback(metrics.MirrorPolicy)
+	proxyMetrics.Request("adm/a", "pull", "mirror", 200)
+	proxyMetrics.Request("adm/a", "pull", "ambiguous", 403)
+	proxyMetrics.Request("", "none", "notfound", 404)
+	proxyMetrics.UpstreamRequest("adm/a", metrics.TargetUpstream, 503, time.Millisecond)
+	proxyMetrics.UpstreamRequest("adm/b", metrics.TargetMirror, 0, time.Millisecond)
+	proxyMetrics.MirrorFallback("adm/a")
 	proxyMetrics.TokenReview(metrics.ResultAuthenticated, true)
-	proxyMetrics.TokenReview(metrics.ResultError, false)
-	proxyMetrics.UpstreamTokenFetch(metrics.TargetUpstream, metrics.ResultOK)
-	proxyMetrics.CredentialReload(metrics.KindPAT, nil)
-	proxyMetrics.CredentialReload(metrics.KindTLS, errors.New("bad pair"))
-	proxyMetrics.SetPolicyCounts(func() (int, int) { return 3, 1 })
+	proxyMetrics.UpstreamTokenFetch("adm/a", metrics.TargetMirror, metrics.ResultOK)
+	proxyMetrics.SecretUpdate(metrics.ResultInvalid)
+	proxyMetrics.SetObjectCounts(func() []metrics.ObjectCount {
+		return []metrics.ObjectCount{
+			{Kind: metrics.KindRegistryMirror, Ready: metrics.ReadyTrue, Count: 3},
+			{Kind: metrics.KindRegistryMirror, Ready: metrics.ReadyPending, Count: 1},
+		}
+	})
 
 	expectations := map[string]string{
 		"registrygate_requests_total": `
-# HELP registrygate_requests_total Requests served, by action, decision and status class.
+# HELP registrygate_requests_total Requests served, by upstream, action, decision and status class.
 # TYPE registrygate_requests_total counter
-registrygate_requests_total{action="none",code="4xx",decision="unauthenticated"} 1
-registrygate_requests_total{action="pull",code="2xx",decision="allowed"} 2
+registrygate_requests_total{action="none",code="4xx",decision="notfound",upstream="none"} 1
+registrygate_requests_total{action="pull",code="2xx",decision="mirror",upstream="adm/a"} 1
+registrygate_requests_total{action="pull",code="4xx",decision="ambiguous",upstream="adm/a"} 1
 `,
 		"registrygate_upstream_requests_total": `
 # HELP registrygate_upstream_requests_total Requests sent to the upstream or a mirror, by status class.
 # TYPE registrygate_upstream_requests_total counter
-registrygate_upstream_requests_total{code="5xx",target="upstream"} 1
-registrygate_upstream_requests_total{code="error",target="policy_mirror"} 1
+registrygate_upstream_requests_total{code="5xx",target="upstream",upstream="adm/a"} 1
+registrygate_upstream_requests_total{code="error",target="mirror",upstream="adm/b"} 1
 `,
 		"registrygate_mirror_fallbacks_total": `
 # HELP registrygate_mirror_fallbacks_total Pulls that fell back from a mirror to the upstream.
 # TYPE registrygate_mirror_fallbacks_total counter
-registrygate_mirror_fallbacks_total{mirror="policy"} 1
+registrygate_mirror_fallbacks_total{upstream="adm/a"} 1
 `,
 		"registrygate_token_reviews_total": `
 # HELP registrygate_token_reviews_total ServiceAccount token reviews, by result and cache use.
 # TYPE registrygate_token_reviews_total counter
 registrygate_token_reviews_total{cache="hit",result="authenticated"} 1
-registrygate_token_reviews_total{cache="miss",result="error"} 1
 `,
 		"registrygate_upstream_token_fetches_total": `
-# HELP registrygate_upstream_token_fetches_total Registry token fetches, by target and result.
+# HELP registrygate_upstream_token_fetches_total Registry token fetches, by upstream, target and result.
 # TYPE registrygate_upstream_token_fetches_total counter
-registrygate_upstream_token_fetches_total{result="ok",target="upstream"} 1
+registrygate_upstream_token_fetches_total{result="ok",target="mirror",upstream="adm/a"} 1
 `,
-		"registrygate_credential_reloads_total": `
-# HELP registrygate_credential_reloads_total Credential file reloads, by kind and result.
-# TYPE registrygate_credential_reloads_total counter
-registrygate_credential_reloads_total{kind="pat",result="ok"} 1
-registrygate_credential_reloads_total{kind="tls",result="error"} 1
+		"registrygate_secret_updates_total": `
+# HELP registrygate_secret_updates_total Secret updates the proxy saw, by result.
+# TYPE registrygate_secret_updates_total counter
+registrygate_secret_updates_total{result="invalid"} 1
+registrygate_secret_updates_total{result="ok"} 0
+registrygate_secret_updates_total{result="unavailable"} 0
 `,
-		"registrygate_policies": `
-# HELP registrygate_policies GHCRAccessPolicy objects in the local index, by whether they are inside the grants.
-# TYPE registrygate_policies gauge
-registrygate_policies{ready="false"} 1
-registrygate_policies{ready="true"} 3
+		"registrygate_objects": `
+# HELP registrygate_objects Custom resources in the model snapshot, by kind and readiness.
+# TYPE registrygate_objects gauge
+registrygate_objects{kind="RegistryMirror",ready="pending"} 1
+registrygate_objects{kind="RegistryMirror",ready="true"} 3
 `,
 	}
 
@@ -80,20 +83,48 @@ registrygate_policies{ready="true"} 3
 
 	count, err := testutil.GatherAndCount(proxyMetrics.Gatherer(), "registrygate_upstream_request_duration_seconds")
 	require.NoError(t, err)
-	assert.Equal(t, 2, count, "one histogram per target seen")
+	assert.Equal(t, 2, count, "one histogram per upstream and target seen")
+}
+
+func TestOnlyTheUpstreamLabelNamesAnObject(t *testing.T) {
+	proxyMetrics := metrics.New()
+	proxyMetrics.Request("adm/a", "pull", "allowed", 200)
+	proxyMetrics.UpstreamRequest("adm/a", metrics.TargetUpstream, 200, time.Millisecond)
+	proxyMetrics.MirrorFallback("adm/a")
+	proxyMetrics.UpstreamTokenFetch("adm/a", metrics.TargetUpstream, metrics.ResultOK)
+
+	families, err := proxyMetrics.Gatherer().Gather()
+	require.NoError(t, err)
+
+	allowed := map[string]bool{
+		"upstream": true, "action": true, "decision": true, "code": true, "target": true, "result": true,
+		"cache": true, "kind": true, "ready": true, "le": true,
+	}
+
+	for _, family := range families {
+		if !strings.HasPrefix(family.GetName(), "registrygate_") {
+			continue
+		}
+
+		for _, metric := range family.GetMetric() {
+			for _, label := range metric.GetLabel() {
+				assert.True(t, allowed[label.GetName()], "%s has label %s", family.GetName(), label.GetName())
+			}
+		}
+	}
 }
 
 func TestNilMetricsDoNothing(t *testing.T) {
 	var proxyMetrics *metrics.Metrics
 
 	assert.NotPanics(t, func() {
-		proxyMetrics.Request("pull", "allowed", 200)
-		proxyMetrics.UpstreamRequest(metrics.TargetAPI, 200, time.Second)
-		proxyMetrics.MirrorFallback(metrics.MirrorAnonymous)
+		proxyMetrics.Request("", "pull", "allowed", 200)
+		proxyMetrics.UpstreamRequest("", metrics.TargetMirror, 200, time.Second)
+		proxyMetrics.MirrorFallback("")
 		proxyMetrics.TokenReview(metrics.ResultRejected, false)
-		proxyMetrics.UpstreamTokenFetch(metrics.TargetAPI, metrics.ResultError)
-		proxyMetrics.CredentialReload(metrics.KindMirror, nil)
-		proxyMetrics.SetPolicyCounts(nil)
+		proxyMetrics.UpstreamTokenFetch("", metrics.TargetMirror, metrics.ResultError)
+		proxyMetrics.SecretUpdate(metrics.ResultOK)
+		proxyMetrics.SetObjectCounts(nil)
 	})
 }
 

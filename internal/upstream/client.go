@@ -55,6 +55,7 @@ type Client struct {
 	tokenTimeout time.Duration
 	logger       *slog.Logger
 	metrics      *metrics.Metrics
+	name         string // "<namespace>/<name>", the metrics label
 	tokens       *tokenCache
 	now          func() time.Time
 
@@ -113,10 +114,13 @@ func NewClient(u *model.Upstream, options ClientOptions) (*Client, error) {
 
 	return &Client{
 		url: u.URL, registry: registry, transport: httpTransport, allowed: allowed,
-		tokenTimeout: token, logger: logger, metrics: options.Metrics,
+		tokenTimeout: token, logger: logger, metrics: options.Metrics, name: u.Name().String(),
 		tokens: newTokenCache(now), now: now,
 	}, nil
 }
+
+// Name is the upstream's "<namespace>/<name>", the value of the metrics' upstream label.
+func (c *Client) Name() string { return c.name }
 
 // URL is the upstream's URL.
 func (c *Client) URL() *url.URL { return c.url }
@@ -232,12 +236,12 @@ func (c *Client) token(ctx context.Context, challenge *transport.Challenge, cred
 	fetched, err := transport.Exchange(exchangeCtx, c.registry, auth, c.transport, strings.Fields(key.scopes), challenge)
 	if err != nil {
 		failure := c.exchangeFailure(cred, err)
-		c.metrics.UpstreamTokenFetch(metrics.TargetUpstream, tokenFetchResult(failure))
+		c.metrics.UpstreamTokenFetch(c.name, metrics.TargetUpstream, tokenFetchResult(failure))
 
 		return credentialToken{}, failure
 	}
 
-	c.metrics.UpstreamTokenFetch(metrics.TargetUpstream, metrics.ResultOK)
+	c.metrics.UpstreamTokenFetch(c.name, metrics.TargetUpstream, metrics.ResultOK)
 
 	value := fetched.Token
 	if value == "" {

@@ -23,9 +23,8 @@ const (
 // from its RegistryMirror.
 type ClientOptions struct {
 	Logger *slog.Logger
-	// Metrics counts token fetches under Target; nil turns it off.
+	// Metrics counts token fetches; nil turns it off.
 	Metrics *metrics.Metrics
-	Target  string
 }
 
 // staticState is a StateSource that always returns the same state.
@@ -62,7 +61,7 @@ func NewClientFromMirror(mirror *model.Mirror, options ClientOptions) (*Client, 
 		TokenTimeout: token,
 		Logger:       options.Logger,
 		Metrics:      options.Metrics,
-		Target:       options.Target,
+		Upstream:     upstreamName(mirror),
 	}, staticState{state: state})
 }
 
@@ -147,4 +146,13 @@ func (c *Client) RequestURL(path, rawQuery string) *url.URL {
 		Path:     strings.TrimSuffix(base.Path, "/") + "/v2/" + c.cfg.Mirror.PathPrefix + "/" + strings.TrimPrefix(path, "/v2/"),
 		RawQuery: rawQuery,
 	}
+}
+
+// upstreamName is the mirror's upstream as "<namespace>/<name>", or metrics.NoUpstream when it has none.
+func upstreamName(mirror *model.Mirror) string {
+	if mirror.Upstream == nil {
+		return metrics.NoUpstream
+	}
+
+	return mirror.Upstream.Name().String()
 }

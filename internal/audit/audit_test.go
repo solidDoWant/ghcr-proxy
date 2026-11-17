@@ -20,7 +20,8 @@ func TestLogWritesOneJSONLineWithTheDocumentedFields(t *testing.T) {
 	audit.New(&out).Log(audit.Entry{
 		Time: started, ClientIP: "10.0.0.1", Namespace: "ci", SA: "builder", Pod: "p-1", Method: "PUT",
 		Path: "/v2/org/app/manifests/latest", Repository: "org/app", From: "org/base", Action: "push",
-		Decision: "allowed", Policy: "pol", Status: 201, Upstream: 201, Bytes: 12, DurationMS: 7, Digest: "sha256:abc",
+		Decision: "allowed", Host: "ghcr.io", Upstream: "adm/ghcr", Policy: "ci/pol", Rule: "r1",
+		Credential: "adm/shared", Mirror: "ci/harbor", Status: 201, UpstreamStatus: 201, Bytes: 12, DurationMS: 7, Digest: "sha256:abc",
 	})
 
 	require.Equal(t, 1, bytes.Count(out.Bytes(), []byte("\n")))
@@ -31,7 +32,8 @@ func TestLogWritesOneJSONLineWithTheDocumentedFields(t *testing.T) {
 	assert.Equal(t, map[string]any{
 		"time": "2026-01-02T03:04:05Z", "clientIP": "10.0.0.1", "namespace": "ci", "serviceAccount": "builder",
 		"pod": "p-1", "method": "PUT", "path": "/v2/org/app/manifests/latest", "repository": "org/app",
-		"from": "org/base", "action": "push", "decision": "allowed", "policy": "pol", "status": float64(201),
+		"from": "org/base", "action": "push", "decision": "allowed", "host": "ghcr.io", "upstream": "adm/ghcr", "policy": "ci/pol", "rule": "r1",
+		"credential": "adm/shared", "mirror": "ci/harbor", "status": float64(201),
 		"upstreamStatus": float64(201), "bytes": float64(12), "durationMs": float64(7), "digest": "sha256:abc",
 	}, line)
 }
@@ -44,7 +46,7 @@ func TestLogOmitsEmptyOptionalFields(t *testing.T) {
 	var line map[string]any
 	require.NoError(t, json.Unmarshal(out.Bytes(), &line))
 
-	for _, key := range []string{"namespace", "serviceAccount", "pod", "repository", "from", "policy", "upstreamStatus", "digest"} {
+	for _, key := range []string{"namespace", "serviceAccount", "pod", "repository", "from", "host", "upstream", "policy", "rule", "credential", "mirror", "upstreamStatus", "digest"} {
 		assert.NotContains(t, line, key)
 	}
 }

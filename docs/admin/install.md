@@ -291,9 +291,14 @@ These fields are in each line:
 | `from` | The source repository of a blob mount that the proxy forwarded. |
 | `action` | `none`, `pull`, `push`, `delete` or `unknown`. |
 | `decision` | The decision. See the next table. |
-| `policy` | The name of the policy that allowed the request. |
+| `host` | The server name the client reached. |
+| `upstream` | The `UpstreamRegistry` that the host resolved to, as `namespace/name`. Empty when no upstream matched. |
+| `policy` | The policy that decided the request, as `namespace/name`. Several policies are joined by `,`. |
+| `rule` | The name of the rule that decided the request. For `ambiguous`, every matching rule name, joined by `,`. |
+| `credential` | The `UpstreamCredential` the proxy used, as `namespace/name`. |
+| `mirror` | The `RegistryMirror` the proxy pulled from, as `namespace/name`. |
 | `status` | The HTTP status that the client got. |
-| `upstreamStatus` | The HTTP status from GHCR, when the request reached it. |
+| `upstreamStatus` | The HTTP status from the upstream or mirror, when the request reached it. |
 | `bytes` | The number of body bytes sent to the client. |
 | `durationMs` | How long the request took, in milliseconds. |
 | `digest` | The manifest digest, for a manifest push or delete. |
@@ -302,9 +307,11 @@ The `decision` field has one of these values:
 
 | Value | Meaning |
 |---|---|
-| `allowed` | A policy and its grant allowed the request. The proxy used the PAT. |
+| `allowed` | A policy and its grant allowed the request. The proxy used the rule's credential. |
+| `mirror` | A rule with a mirror allowed the pull. The proxy used the mirror and no upstream credential. |
 | `anonymous` | The proxy forwarded the request with no credential (a pull that no policy allows). |
 | `denied` | A policy or grant did not allow the request. The client got `403`. |
+| `ambiguous` | Two or more rules named different credentials for the request. The client got `403`. |
 | `unauthenticated` | The credential was missing or not valid. The client got `401`. |
 | `unavailable` | The proxy could not decide or reach GHCR. The client got `502` or `503`. |
 | `notfound` | The route is not one that the proxy serves. The client got `404`. |

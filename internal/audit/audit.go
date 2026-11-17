@@ -21,13 +21,19 @@ type Entry struct {
 	Repository string
 	From       string // mount source, when forwarded
 	Action     string // none, pull, push, delete, unknown
-	Decision   string // allowed, anonymous, denied, unauthenticated, unavailable, notfound, invalid
-	Policy     string // the allowing policy's name
+	Decision   string // allowed, mirror, anonymous, denied, ambiguous, unauthenticated, unavailable, notfound, invalid
+	Host       string // TLS server name the client reached
+	Upstream   string // <namespace>/<name> of the upstream the host resolved to
+	Policy     string // <namespace>/<name> of the deciding policies, joined by ","
+	Rule       string // the deciding rule names, joined by ","
+	Credential string // <namespace>/<name> of the credential used
+	Mirror     string // <namespace>/<name> of the mirror used
 	Status     int    // what the client got
-	Upstream   int
-	Bytes      int64
-	DurationMS int64
-	Digest     string // manifest push or delete
+	// UpstreamStatus is the status the upstream or mirror answered with.
+	UpstreamStatus int
+	Bytes          int64
+	DurationMS     int64
+	Digest         string // manifest push or delete
 }
 
 // Logger writes entries. A nil Logger discards them.
@@ -71,11 +77,16 @@ func (l *Logger) Log(entry Entry) {
 	add("repository", entry.Repository)
 	add("from", entry.From)
 	attrs = append(attrs, slog.String("action", entry.Action), slog.String("decision", entry.Decision))
+	add("host", entry.Host)
+	add("upstream", entry.Upstream)
 	add("policy", entry.Policy)
+	add("rule", entry.Rule)
+	add("credential", entry.Credential)
+	add("mirror", entry.Mirror)
 
 	attrs = append(attrs, slog.Int("status", entry.Status))
-	if entry.Upstream != 0 {
-		attrs = append(attrs, slog.Int("upstreamStatus", entry.Upstream))
+	if entry.UpstreamStatus != 0 {
+		attrs = append(attrs, slog.Int("upstreamStatus", entry.UpstreamStatus))
 	}
 
 	attrs = append(attrs, slog.Int64("bytes", entry.Bytes), slog.Int64("durationMs", entry.DurationMS))
