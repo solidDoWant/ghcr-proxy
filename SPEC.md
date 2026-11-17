@@ -169,7 +169,7 @@ A credential or mirror that becomes not ready while serving (Secret removed, adm
 
 ### Aliases
 
-A registry reached through an in-cluster Service often names itself by another host: Harbor puts its `externalURL` in token realms and may put it in `Location` headers. `aliasHosts` on an `UpstreamRegistry` or `RegistryMirror` lists those names. A token realm or `Location` on an alias host is treated as being on the object's own `url`: the proxy sends the request to the same path and query on `url`, never to the alias host, so traffic stays on the Service. Credentials sent to an alias host's paths therefore still go only to `url` (principle 1).
+A registry reached through an in-cluster Service often names itself by another host: Harbor puts its `externalURL` in token realms and may put it in `Location` headers. `aliasHosts` on an `UpstreamRegistry` or `RegistryMirror` lists those names; an `UpstreamRegistry`'s own `hosts` always count as aliases. A token realm or `Location` on an alias host is treated as being on the object's own `url`: the proxy sends the request to the same path and query on `url`, never to the alias host, so traffic stays on the Service. Credentials sent to an alias host's paths therefore still go only to `url` (principle 1).
 
 ### Rewrites
 
