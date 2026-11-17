@@ -425,6 +425,14 @@ func TestBuildReadiness(t *testing.T) {
 			},
 			status: mirrorStatus, reason: v1alpha1.ReasonSecretUnavailable,
 		},
+		{
+			name: "mirror whose credentials Secret is forbidden has it unavailable",
+			mutate: func(_ *testing.T, f *fixture) {
+				f.mirror().Spec.SecretRef = &v1alpha1.CredentialsSecretRef{Name: "robot"}
+				f.secrets.set(tenantNamespace, "robot", secrets.Secret{State: secrets.Forbidden})
+			},
+			status: mirrorStatus, reason: v1alpha1.ReasonSecretUnavailable,
+		},
 
 		// UpstreamCredential.
 		{
