@@ -29,6 +29,7 @@ fmt: ## Format Go code (gofmt + goimports through golangci-lint).
 lint: ## Run every linter and check (golangci-lint, go mod tidy, shellcheck, Python syntax, image references, tracking IDs, chart lint), then fail if any failed.
 	@failed=""; \
 	golangci-lint run ./... || failed="$$failed golangci-lint"; \
+	go vet -tags integration ./... && go vet -tags e2e ./... && go vet -tags live ./... || failed="$$failed vet-tags"; \
 	go mod tidy -diff || failed="$$failed go-mod-tidy"; \
 	shellcheck $$(git ls-files --cached --others --exclude-standard -- '*.sh' 'scripts/agents/sched-status') || failed="$$failed shellcheck"; \
 	./scripts/check-python.sh || failed="$$failed python"; \
