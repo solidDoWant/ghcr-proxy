@@ -59,3 +59,9 @@ func TestParseAcceptsAnEmptyFile(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, ":8443", cfg.Listen.HTTPS)
 }
+
+func TestParseDefaultsTheAudienceToRegistrygate(t *testing.T) {
+	cfg, err := Parse(nil)
+	require.NoError(t, err)
+	assert.Equal(t, "registrygate", cfg.Authentication.Audience)
+}
