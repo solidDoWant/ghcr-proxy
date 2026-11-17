@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/url"
 	"slices"
@@ -52,6 +53,7 @@ type Client struct {
 	registry     name.Registry
 	transport    *http.Transport
 	allowed      []string
+	aliases      []string
 	tokenTimeout time.Duration
 	logger       *slog.Logger
 	metrics      *metrics.Metrics
@@ -113,7 +115,7 @@ func NewClient(u *model.Upstream, options ClientOptions) (*Client, error) {
 	now := time.Now
 
 	return &Client{
-		url: u.URL, registry: registry, transport: httpTransport, allowed: allowed,
+		url: u.URL, registry: registry, transport: httpTransport, allowed: allowed, aliases: u.Object.Spec.AliasHosts,
 		tokenTimeout: token, logger: logger, metrics: options.Metrics, name: u.Name().String(),
 		tokens: newTokenCache(now), now: now,
 	}, nil
@@ -124,6 +126,12 @@ func (c *Client) Name() string { return c.name }
 
 // URL is the upstream's URL.
 func (c *Client) URL() *url.URL { return c.url }
+
+// OntoURL moves a URL on one of the upstream's alias hosts onto its url. It
+// returns false for any other URL.
+func (c *Client) OntoURL(target *url.URL) (*url.URL, bool) {
+	return model.OntoURL(target, c.url, c.aliases)
+}
 
 // Transport is the client's transport. It follows no redirects and adds no
 // credential.
@@ -164,7 +172,7 @@ func (c *Client) Do(req *http.Request, cred Credential, scopes []string) (*http.
 		return nil, err
 	}
 
-	if err := c.checkChallenge(fresh); err != nil {
+	if fresh, err = c.checkChallenge(fresh); err != nil {
 		discard(resp)
 		return nil, err
 	}
@@ -289,7 +297,7 @@ func (c *Client) currentChallenge(ctx context.Context) (*transport.Challenge, er
 		return nil, ErrUnavailable
 	}
 
-	if err := c.checkChallenge(fresh); err != nil {
+	if fresh, err = c.checkChallenge(fresh); err != nil {
 		return nil, err
 	}
 
@@ -306,22 +314,39 @@ func (c *Client) setChallenge(challenge *transport.Challenge) {
 }
 
 // checkChallenge refuses a bearer challenge whose realm is outside the
-// upstream's host and its token realm hosts, so no credential goes there.
-func (c *Client) checkChallenge(challenge *transport.Challenge) error {
+// upstream's host, its token realm hosts and its alias hosts, so no
+// credential goes there. A realm on an alias host is moved onto the
+// upstream's url in the returned challenge.
+func (c *Client) checkChallenge(challenge *transport.Challenge) (*transport.Challenge, error) {
 	if !strings.EqualFold(challenge.Scheme, "bearer") {
-		return nil
+		return challenge, nil
 	}
 
 	realm := challenge.Parameters["realm"]
 
 	parsed, err := url.Parse(realm)
+	if err == nil {
+		if moved, ok := c.OntoURL(parsed); ok {
+			return withRealm(challenge, moved.String()), nil
+		}
+	}
+
 	if err != nil || !strings.EqualFold(parsed.Scheme, c.url.Scheme) || parsed.Host == "" || parsed.User != nil ||
 		!slices.Contains(c.allowed, CanonicalHost(parsed.Scheme, parsed.Host)) {
 		c.logger.Error("upstream token realm is not allowed; no credential sent", "realm", realm)
-		return ErrRealmNotAllowed
+		return nil, ErrRealmNotAllowed
 	}
 
-	return nil
+	return challenge, nil
+}
+
+// withRealm returns a copy of challenge with another realm.
+func withRealm(challenge *transport.Challenge, realm string) *transport.Challenge {
+	moved := *challenge
+	moved.Parameters = maps.Clone(challenge.Parameters)
+	moved.Parameters["realm"] = realm
+
+	return &moved
 }
 
 // parseChallenge reads the challenge of a 401 answer with

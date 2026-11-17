@@ -18,7 +18,7 @@ Pin the image digests of the helper and dind images in your own manifests.
 
 ## Pod example
 
-This pod runs the Docker CLI against a dind sidecar. The Secret `registrygate-ca` in the pod namespace holds the CA certificate in the key `ca.crt`. Copy it from the `ca.crt` of the certificate Secret `ghcr-io-tls` (see [Upstream registries](upstreams.md#one-ca-and-one-certificate-for-each-upstream)).
+This pod runs the Docker CLI against a dind sidecar. The Secret `registrygate-ca` in the pod namespace holds the CA certificate in the key `ca.crt`. Copy it from the `ca.crt` of the certificate Secret `ghcr-io-tls` (see [Upstream registries](upstreams.md#one-ca-for-all-intercepted-hosts)).
 
 First make the namespace, the Secret with the CA certificate, the ServiceAccount and the policy. The policy lets the ServiceAccount push to `soliddowant/foo`. The policy uses the credential `ghcr-pat`. That credential and the upstream `ghcr` both admit the namespace `ci-foo`, and the ceiling of the credential covers the repository.
 

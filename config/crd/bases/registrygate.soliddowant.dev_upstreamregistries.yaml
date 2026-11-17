@@ -50,6 +50,18 @@ spec:
             description: UpstreamRegistrySpec says which hosts the proxy answers for
               and where their requests go.
             properties:
+              aliasHosts:
+                description: |-
+                  AliasHosts are other names (host or host:port) of the registry at url, such as Harbor's externalURL when url is
+                  its in-cluster Service. A token realm or Location on an alias host is treated as on url; the proxy never sends
+                  a request to an alias host.
+                items:
+                  maxLength: 260
+                  pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*(:[0-9]{1,5})?$
+                  type: string
+                maxItems: 8
+                type: array
+                x-kubernetes-list-type: set
               allowedMirrorURLs:
                 description: AllowedMirrorURLs are the URL prefixes a mirror of this
                   upstream may use.
@@ -212,7 +224,8 @@ spec:
                 type: array
                 x-kubernetes-list-type: set
               url:
-                description: 'URL is where requests go: https://host[:port].'
+                description: 'URL is where requests go: https://host[:port], or http://host[:port]
+                  for plain HTTP (no caSecretRef).'
                 maxLength: 2048
                 type: string
             required:

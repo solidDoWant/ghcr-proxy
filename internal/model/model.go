@@ -39,8 +39,6 @@ type Options struct {
 	Secrets SecretStore
 	// AdminNamespaces may hold UpstreamRegistries.
 	AdminNamespaces []string
-	// AllowHTTP accepts http URLs; tests only.
-	AllowHTTP bool
 	// OnRebuild is called with every snapshot after it is published.
 	OnRebuild func(*Snapshot)
 	// Logger receives list errors.
@@ -201,7 +199,6 @@ func (m *Model) list(ctx context.Context) (Inputs, error) {
 		Policies:        policies.Items,
 		Namespaces:      namespaceLabels,
 		AdminNamespaces: m.options.AdminNamespaces,
-		AllowHTTP:       m.options.AllowHTTP,
 	}
 	if m.options.Secrets != nil {
 		inputs.Secrets = m.options.Secrets

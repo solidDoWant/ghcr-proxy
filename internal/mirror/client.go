@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/url"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/solidDoWant/registrygate/internal/metrics"
+	"github.com/solidDoWant/registrygate/internal/model"
 )
 
 // StateSource supplies the credentials and CAs a Client uses. The boolean is
@@ -30,7 +32,7 @@ type StateSource interface {
 // Failures of a mirror request before the mirror answered it.
 var (
 	// ErrUnavailable is the mirror being unreachable, its files not loaded,
-	// or its token endpoint failing or not on the mirror's own host.
+	// or its token endpoint failing or not on an allowed host.
 	ErrUnavailable = errors.New("mirror unavailable")
 	// ErrCredentialRejected is the mirror's token endpoint refusing the
 	// mirror's credentials (or an anonymous token).
@@ -57,7 +59,8 @@ type ClientConfig struct {
 
 // Client sends pull requests to one mirror with a token fetched with the
 // mirror's own credentials. It has its own token cache, accepts only a token
-// realm on the mirror's own scheme and host, and never sees the PAT.
+// realm on the mirror's own scheme and host, its token realm hosts or its
+// alias hosts, and never sees the PAT.
 type Client struct {
 	cfg      ClientConfig
 	source   StateSource
@@ -289,14 +292,15 @@ func (c *Client) ping(ctx context.Context, roundTripper http.RoundTripper, state
 		return nil, ErrUnavailable
 	}
 
-	if !c.realmAllowed(challenge.Parameters["realm"]) {
-		c.cfg.Logger.Error("mirror token realm is not on the mirror's host; no credential sent",
+	checked, ok := c.checkRealm(challenge)
+	if !ok {
+		c.cfg.Logger.Error("mirror token realm is not on the mirror's host or its token realm hosts; no credential sent",
 			"url", c.cfg.Mirror.URL.String(), "realm", challenge.Parameters["realm"])
 
 		return nil, ErrUnavailable
 	}
 
-	return challenge, nil
+	return checked, nil
 }
 
 // statusRecorder notes whether any response was a 200, which the ping result
@@ -315,10 +319,41 @@ func (r *statusRecorder) RoundTrip(req *http.Request) (*http.Response, error) {
 	return resp, err
 }
 
-func (c *Client) realmAllowed(realm string) bool {
-	parsed, err := url.Parse(realm)
+// checkRealm accepts a bearer challenge whose realm is on the mirror's own
+// scheme and host, or on one of its token realm hosts with the mirror's
+// scheme. A realm on an alias host is accepted and moved onto the mirror's
+// URL in the returned challenge, so nothing is sent to the alias.
+func (c *Client) checkRealm(challenge *transport.Challenge) (*transport.Challenge, bool) {
+	parsed, err := url.Parse(challenge.Parameters["realm"])
+	if err != nil || parsed.Host == "" || parsed.User != nil {
+		return nil, false
+	}
 
-	return err == nil && parsed.Host != "" && parsed.User == nil && c.SameHost(parsed)
+	if moved, ok := c.OntoURL(parsed); ok {
+		checked := *challenge
+		checked.Parameters = maps.Clone(challenge.Parameters)
+		checked.Parameters["realm"] = moved.String()
+
+		return &checked, true
+	}
+
+	if c.SameHost(parsed) {
+		return challenge, true
+	}
+
+	mirrorURL := c.cfg.Mirror.URL
+	if !strings.EqualFold(parsed.Scheme, mirrorURL.Scheme) {
+		return nil, false
+	}
+
+	host := model.CanonicalHost(parsed.Scheme, parsed.Host)
+	for _, allowed := range c.cfg.Mirror.TokenRealmHosts {
+		if host == model.CanonicalHost(parsed.Scheme, allowed) {
+			return challenge, true
+		}
+	}
+
+	return nil, false
 }
 
 // SameHost reports whether u is on the mirror's scheme and host.
@@ -326,20 +361,11 @@ func (c *Client) SameHost(u *url.URL) bool {
 	mirrorURL := c.cfg.Mirror.URL
 
 	return strings.EqualFold(u.Scheme, mirrorURL.Scheme) &&
-		canonicalHost(u.Scheme, u.Host) == canonicalHost(mirrorURL.Scheme, mirrorURL.Host)
+		model.CanonicalHost(u.Scheme, u.Host) == model.CanonicalHost(mirrorURL.Scheme, mirrorURL.Host)
 }
 
-// canonicalHost lower-cases host and removes the scheme's default port, for
-// comparing hosts.
-func canonicalHost(scheme, host string) string {
-	host = strings.ToLower(host)
-
-	switch strings.ToLower(scheme) {
-	case "https":
-		host = strings.TrimSuffix(host, ":443")
-	case "http":
-		host = strings.TrimSuffix(host, ":80")
-	}
-
-	return host
+// OntoURL moves a URL on one of the mirror's alias hosts onto the mirror's
+// scheme and host. It returns false for any other URL.
+func (c *Client) OntoURL(target *url.URL) (*url.URL, bool) {
+	return model.OntoURL(target, c.cfg.Mirror.URL, c.cfg.Mirror.AliasHosts)
 }

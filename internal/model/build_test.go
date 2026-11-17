@@ -256,8 +256,38 @@ func TestBuildReadiness(t *testing.T) {
 
 		// UpstreamRegistry.
 		{
-			name:   "upstream with an http url is an invalid spec",
+			name:   "upstream with an http url is ready",
 			mutate: func(_ *testing.T, f *fixture) { f.upstream().Spec.URL = "http://ghcr.example" },
+			status: upstreamStatus, reason: v1alpha1.ReasonReady,
+		},
+		{
+			name: "upstream with an http url and a CA is an invalid spec",
+			mutate: func(_ *testing.T, f *fixture) {
+				f.upstream().Spec.URL = "http://ghcr.example"
+				f.upstream().Spec.CASecretRef = &v1alpha1.LocalRef{Name: "ca"}
+			},
+			status: upstreamStatus, reason: v1alpha1.ReasonInvalidSpec,
+		},
+		{
+			name:   "upstream whose alias host is one of its hosts is an invalid spec",
+			mutate: func(_ *testing.T, f *fixture) { f.upstream().Spec.AliasHosts = []string{"harbor.example", "ghcr.io"} },
+			status: upstreamStatus, reason: v1alpha1.ReasonInvalidSpec,
+		},
+		{
+			name:   "upstream whose alias host is one of its hosts with a port is an invalid spec",
+			mutate: func(_ *testing.T, f *fixture) { f.upstream().Spec.AliasHosts = []string{"ghcr.io:443"} },
+			status: upstreamStatus, reason: v1alpha1.ReasonInvalidSpec,
+		},
+		{
+			name: "upstream with alias hosts apart from its hosts is ready",
+			mutate: func(_ *testing.T, f *fixture) {
+				f.upstream().Spec.AliasHosts = []string{"harbor.example", "harbor.example:8443"}
+			},
+			status: upstreamStatus, reason: v1alpha1.ReasonReady,
+		},
+		{
+			name:   "upstream with an alias that isn't a DNS name is an invalid spec",
+			mutate: func(_ *testing.T, f *fixture) { f.upstream().Spec.AliasHosts = []string{"Harbor.example/x"} },
 			status: upstreamStatus, reason: v1alpha1.ReasonInvalidSpec,
 		},
 		{
@@ -388,12 +418,42 @@ func TestBuildReadiness(t *testing.T) {
 			status: mirrorStatus, reason: v1alpha1.ReasonURLNotAllowed,
 		},
 		{
-			name: "mirror with another scheme than the allowed prefix is not allowed",
+			name:   "mirror with another scheme than the allowed prefix is not allowed",
+			mutate: func(_ *testing.T, f *fixture) { f.mirror().Spec.URL = "http://harbor.example/base" },
+			status: mirrorStatus, reason: v1alpha1.ReasonURLNotAllowed,
+		},
+		{
+			name: "mirror with an https url under an http prefix is not allowed",
 			mutate: func(_ *testing.T, f *fixture) {
-				f.inputs.AllowHTTP = true
-				f.mirror().Spec.URL = "http://harbor.example/base"
+				f.upstream().Spec.AllowedMirrorURLs = []string{"http://harbor.example/base"}
 			},
 			status: mirrorStatus, reason: v1alpha1.ReasonURLNotAllowed,
+		},
+		{
+			name: "mirror with an http url under an http prefix is ready",
+			mutate: func(_ *testing.T, f *fixture) {
+				f.upstream().Spec.AllowedMirrorURLs = []string{"http://harbor.example/base"}
+				f.mirror().Spec.URL = "http://harbor.example/base/ci-a"
+			},
+			status: mirrorStatus, reason: v1alpha1.ReasonReady,
+		},
+		{
+			name: "mirror with alias and token realm hosts is ready",
+			mutate: func(_ *testing.T, f *fixture) {
+				f.mirror().Spec.AliasHosts = []string{"harbor.public.example"}
+				f.mirror().Spec.TokenRealmHosts = []string{"auth.harbor.example:8443"}
+			},
+			status: mirrorStatus, reason: v1alpha1.ReasonReady,
+		},
+		{
+			name:   "mirror with an alias that isn't a DNS name is an invalid spec",
+			mutate: func(_ *testing.T, f *fixture) { f.mirror().Spec.AliasHosts = []string{"https://harbor.example"} },
+			status: mirrorStatus, reason: v1alpha1.ReasonInvalidSpec,
+		},
+		{
+			name:   "mirror with a token realm host that isn't a DNS name is an invalid spec",
+			mutate: func(_ *testing.T, f *fixture) { f.mirror().Spec.TokenRealmHosts = []string{"auth example"} },
+			status: mirrorStatus, reason: v1alpha1.ReasonInvalidSpec,
 		},
 		{
 			name:   "mirror at exactly the allowed prefix is ready",
@@ -943,4 +1003,27 @@ func TestBuildPendingSecrets(t *testing.T) {
 
 	f.secrets.set(adminNamespace, "push-creds", present(map[string]string{"username": "robot", "password": "secret"}))
 	assert.False(t, model.Build(f.inputs).PendingSecrets())
+}
+
+func TestBuildNotesPlainHTTPInTheReadyMessage(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	f.upstream().Spec.URL = "http://ghcr.example"
+	f.upstream().Spec.AllowedMirrorURLs = []string{"http://harbor.example/base"}
+	f.mirror().Spec.URL = "http://harbor.example/base/ci-a"
+
+	snapshot := model.Build(f.inputs)
+
+	for _, status := range []model.Status{
+		snapshot.Upstreams[name(adminNamespace, "ghcr")].Status,
+		snapshot.Mirrors[name(tenantNamespace, "harbor")].Status,
+	} {
+		assert.True(t, status.Ready, status.Message)
+		assert.Equal(t, "plain HTTP: credentials cross the cluster network unencrypted", status.Message)
+	}
+
+	https := model.Build(newFixture(t).inputs)
+	assert.Empty(t, https.Upstreams[name(adminNamespace, "ghcr")].Status.Message)
+	assert.Empty(t, https.Mirrors[name(tenantNamespace, "harbor")].Status.Message)
 }

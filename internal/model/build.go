@@ -30,6 +30,7 @@ const (
 
 var (
 	dnsNamePattern    = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`)
+	hostPortPattern   = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*(:[0-9]{1,5})?$`)
 	pathPrefixPattern = regexp.MustCompile(`^[a-z0-9]+([._-][a-z0-9]+)*(/[a-z0-9]+([._-][a-z0-9]+)*)*$`)
 )
 
@@ -52,8 +53,6 @@ type Inputs struct {
 	Secrets    SecretSource
 	// AdminNamespaces may hold UpstreamRegistries.
 	AdminNamespaces []string
-	// AllowHTTP accepts http URLs; tests only.
-	AllowHTTP bool
 }
 
 // Build computes the readiness of every object and the snapshot's indexes.
@@ -254,8 +253,16 @@ func (b *builder) upstreamStatus(upstream *Upstream, claims map[string][]*Upstre
 	upstream.CAs = pool
 	upstream.CAResourceVersion = caVersion
 
-	return ready(generation)
+	status := ready(generation)
+	if upstream.URL.Scheme == "http" {
+		status.Message = plainHTTPMessage
+	}
+
+	return status
 }
+
+// plainHTTPMessage is the Ready message of an object reached over plain HTTP.
+const plainHTTPMessage = "plain HTTP: credentials cross the cluster network unencrypted"
 
 func (b *builder) validateUpstream(object *v1alpha1.UpstreamRegistry) (*url.URL, admission, error) {
 	spec := object.Spec
@@ -273,9 +280,28 @@ func (b *builder) validateUpstream(object *v1alpha1.UpstreamRegistry) (*url.URL,
 		return nil, admission{}, fmt.Errorf("spec.tls.secretRef.name is empty")
 	}
 
-	parsed, err := parseURL(spec.URL, b.in.AllowHTTP, false)
+	parsed, err := parseURL(spec.URL, false)
 	if err != nil {
 		return nil, admission{}, fmt.Errorf("spec.url: %w", err)
+	}
+
+	if parsed.Scheme == "http" && spec.CASecretRef != nil {
+		return nil, admission{}, fmt.Errorf("spec.caSecretRef must be unset with an http url")
+	}
+
+	if err := checkHostList("spec.tokenRealmHosts", spec.TokenRealmHosts); err != nil {
+		return nil, admission{}, err
+	}
+
+	if err := checkHostList("spec.aliasHosts", spec.AliasHosts); err != nil {
+		return nil, admission{}, err
+	}
+
+	for _, alias := range spec.AliasHosts {
+		aliasName, _, _ := strings.Cut(alias, ":")
+		if slices.Contains(spec.Hosts, aliasName) {
+			return nil, admission{}, fmt.Errorf("spec.aliasHosts: %q names one of spec.hosts", alias)
+		}
 	}
 
 	switch spec.AnonymousPulls {
@@ -285,7 +311,7 @@ func (b *builder) validateUpstream(object *v1alpha1.UpstreamRegistry) (*url.URL,
 	}
 
 	for _, prefix := range spec.AllowedMirrorURLs {
-		if _, err := parseURL(prefix, b.in.AllowHTTP, true); err != nil {
+		if _, err := parseURL(prefix, true); err != nil {
 			return nil, admission{}, fmt.Errorf("spec.allowedMirrorURLs: %q: %w", prefix, err)
 		}
 	}
@@ -325,9 +351,14 @@ func (b *builder) mirrorStatus(mirror *Mirror) Status {
 
 	pool, caVersion, caProblem := b.readCA(generation, object.Namespace, spec.CASecretRef)
 
-	parsed, err := parseURL(spec.URL, b.in.AllowHTTP, true)
+	parsed, err := parseURL(spec.URL, true)
 	if err != nil {
 		return notReady(generation, v1alpha1.ReasonInvalidSpec, "spec.url: %s", err)
+	}
+
+	if err := cmp.Or(checkHostList("spec.tokenRealmHosts", spec.TokenRealmHosts),
+		checkHostList("spec.aliasHosts", spec.AliasHosts)); err != nil {
+		return notReady(generation, v1alpha1.ReasonInvalidSpec, "%s", err)
 	}
 
 	if !pathPrefixPattern.MatchString(spec.PathPrefix) || len(spec.PathPrefix) > 255 {
@@ -368,7 +399,12 @@ func (b *builder) mirrorStatus(mirror *Mirror) Status {
 	mirror.CAs = pool
 	mirror.CAResourceVersion = caVersion
 
-	return ready(generation)
+	status := ready(generation)
+	if parsed.Scheme == "http" {
+		status.Message = plainHTTPMessage
+	}
+
+	return status
 }
 
 // upstreamRef resolves an upstream reference of an object in namespace and
@@ -833,10 +869,31 @@ func containsAction(actions []v1alpha1.Action, action v1alpha1.Action) bool {
 	return slices.Contains(actions, action)
 }
 
-// parseURL checks an upstream or mirror URL: https (http only when allowed),
-// a host, no userinfo, query, fragment or percent-encoding, and, when a path
-// is allowed, no empty, "." or ".." segments.
-func parseURL(raw string, allowHTTP, allowPath bool) (*url.URL, error) {
+// checkHostList checks that every entry of a list of hosts is a lower-case
+// DNS name with an optional port, at most 8 of them.
+func checkHostList(field string, hosts []string) error {
+	if len(hosts) > maxHostListLength {
+		return fmt.Errorf("%s has more than %d entries", field, maxHostListLength)
+	}
+
+	for _, host := range hosts {
+		if !hostPortPattern.MatchString(host) {
+			return fmt.Errorf("%s: %q is not a lower-case DNS name with an optional port", field, host)
+		}
+	}
+
+	return nil
+}
+
+// maxHostListLength is the CRD's limit on tokenRealmHosts and aliasHosts.
+const maxHostListLength = 8
+
+// parseURL checks an upstream or mirror URL: http or https, a host, no
+// userinfo, query, fragment or percent-encoding, and, when a path is
+// allowed, no empty, "." or ".." segments. A mirror's http URL is accepted
+// only through an http allowedMirrorURLs entry, which mirrorURLAllowed
+// checks, because the scheme must match.
+func parseURL(raw string, allowPath bool) (*url.URL, error) {
 	if strings.Contains(raw, "%") {
 		return nil, fmt.Errorf("must not contain %%")
 	}
@@ -846,11 +903,8 @@ func parseURL(raw string, allowHTTP, allowPath bool) (*url.URL, error) {
 		return nil, fmt.Errorf("not a URL")
 	}
 
-	switch {
-	case parsed.Scheme == "https":
-	case parsed.Scheme == "http" && allowHTTP:
-	default:
-		return nil, fmt.Errorf("the scheme must be https")
+	if parsed.Scheme != "https" && parsed.Scheme != "http" {
+		return nil, fmt.Errorf("the scheme must be https or http")
 	}
 
 	if parsed.Host == "" || parsed.Opaque != "" {

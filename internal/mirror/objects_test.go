@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -17,12 +18,15 @@ import (
 	"github.com/solidDoWant/registrygate/api/v1alpha1"
 	"github.com/solidDoWant/registrygate/internal/mirror"
 	"github.com/solidDoWant/registrygate/internal/model"
+	"github.com/solidDoWant/registrygate/test/fakeregistry"
 )
 
 type fakeMirror struct {
 	server *httptest.Server
 	pool   *x509.CertPool
 	open   bool
+	// realm replaces the challenge's realm, which is otherwise the fake's own /token.
+	realm string
 
 	mu      sync.Mutex
 	paths   []string
@@ -32,8 +36,20 @@ type fakeMirror struct {
 func newFakeMirror(t *testing.T) *fakeMirror {
 	t.Helper()
 
+	return startFakeMirror(t, httptest.NewTLSServer)
+}
+
+func newPlainHTTPFakeMirror(t *testing.T) *fakeMirror {
+	t.Helper()
+
+	return startFakeMirror(t, httptest.NewServer)
+}
+
+func startFakeMirror(t *testing.T, start func(http.Handler) *httptest.Server) *fakeMirror {
+	t.Helper()
+
 	fake := &fakeMirror{}
-	fake.server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	fake.server = start(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fake.mu.Lock()
 		fake.paths = append(fake.paths, r.URL.Path)
 		fake.headers = append(fake.headers, r.Header.Clone())
@@ -43,7 +59,12 @@ func newFakeMirror(t *testing.T) *fakeMirror {
 		case fake.open:
 			w.WriteHeader(http.StatusOK)
 		case r.URL.Path == "/v2/":
-			w.Header().Set("WWW-Authenticate", `Bearer realm="`+fake.server.URL+`/token",service="mirror"`)
+			realm := fake.server.URL + "/token"
+			if fake.realm != "" {
+				realm = fake.realm
+			}
+
+			w.Header().Set("WWW-Authenticate", `Bearer realm="`+realm+`",service="mirror"`)
 			w.WriteHeader(http.StatusUnauthorized)
 		case r.URL.Path == "/token":
 			user, password, _ := r.BasicAuth()
@@ -62,7 +83,9 @@ func newFakeMirror(t *testing.T) *fakeMirror {
 	t.Cleanup(fake.server.Close)
 
 	fake.pool = x509.NewCertPool()
-	fake.pool.AddCert(fake.server.Certificate())
+	if certificate := fake.server.Certificate(); certificate != nil {
+		fake.pool.AddCert(certificate)
+	}
 
 	return fake
 }
@@ -214,5 +237,130 @@ func TestClientSendsNoUpstreamCredentialToAnOpenMirror(t *testing.T) {
 
 	for _, header := range fake.headers {
 		assert.NotContains(t, header.Get("Authorization"), "upstream-token")
+	}
+}
+
+func TestClientTokenRealm(t *testing.T) {
+	// The alias names a host that doesn't resolve, so a token request sent to
+	// it would fail the pull.
+	const alias = "harbor.alias.invalid"
+
+	// tokenServer is a separate token endpoint, as a mirror whose token
+	// service runs on another host has. It is named localhost because
+	// go-containerregistry refuses a private IP as another host's realm, and
+	// served over plain HTTP because the test certificate doesn't cover
+	// localhost.
+	tokenServer := newPlainHTTPFakeMirror(t)
+	tokenHost := "localhost:" + tokenServer.server.URL[strings.LastIndex(tokenServer.server.URL, ":")+1:]
+
+	// tlsTokenServer serves TLS for localhost, so only the realm check stops a
+	// token request to it from a plain HTTP mirror.
+	tlsTokenServer := fakeregistry.New(t, fakeregistry.Options{DNSNames: []string{"localhost"}})
+	tlsTokenHost := "localhost:" + tlsTokenServer.RegistryHost()[strings.LastIndex(tlsTokenServer.RegistryHost(), ":")+1:]
+
+	tests := []struct {
+		name         string
+		plainHTTP    bool
+		realm        func(fake *fakeMirror) string
+		configure    func(object *model.Mirror, fake *fakeMirror)
+		errAssertion require.ErrorAssertionFunc
+		// tokenAt is where the token request must go; the mirror itself when nil.
+		tokenAt *fakeMirror
+	}{
+		{
+			name:  "realm on an alias host goes to the mirror's url",
+			realm: func(*fakeMirror) string { return "https://" + alias + "/token?service=x" },
+			configure: func(object *model.Mirror, _ *fakeMirror) {
+				object.Object.Spec.AliasHosts = []string{alias}
+			},
+		},
+		{
+			name:      "https realm on an alias host of a plain HTTP mirror goes to the mirror's url",
+			plainHTTP: true,
+			realm:     func(*fakeMirror) string { return "https://" + alias + "/token" },
+			configure: func(object *model.Mirror, _ *fakeMirror) {
+				object.Object.Spec.AliasHosts = []string{alias}
+			},
+		},
+		{
+			name:         "realm on an unlisted host is refused",
+			realm:        func(*fakeMirror) string { return "https://" + alias + "/token" },
+			errAssertion: errorIs(mirror.ErrUnavailable),
+		},
+		{
+			name:      "realm on a token realm host is used",
+			plainHTTP: true,
+			realm:     func(*fakeMirror) string { return "http://" + tokenHost + "/token" },
+			configure: func(object *model.Mirror, _ *fakeMirror) { object.Object.Spec.TokenRealmHosts = []string{tokenHost} },
+			tokenAt:   tokenServer,
+		},
+		{
+			name:      "realm on a token realm host with another scheme is refused",
+			plainHTTP: true,
+			realm:     func(*fakeMirror) string { return "https://" + tlsTokenHost + "/token" },
+			configure: func(object *model.Mirror, _ *fakeMirror) {
+				object.Object.Spec.TokenRealmHosts = []string{tlsTokenHost}
+				object.CAs = tlsTokenServer.CAPool()
+			},
+			errAssertion: func(t require.TestingT, err error, _ ...any) {
+				require.ErrorIs(t, err, mirror.ErrUnavailable)
+				assert.Empty(t, tlsTokenServer.Log(), "nothing goes to a realm on another scheme")
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fake := newFakeMirror(t)
+			if test.plainHTTP {
+				fake = newPlainHTTPFakeMirror(t)
+			}
+
+			fake.realm = test.realm(fake)
+
+			object := fake.model(t)
+			if test.configure != nil {
+				test.configure(object, fake)
+			}
+
+			client, err := mirror.NewClientFromMirror(object, mirror.ClientOptions{})
+			require.NoError(t, err)
+
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, client.RequestURL("/v2/a/manifests/b", "").String(), nil)
+			require.NoError(t, err)
+
+			resp, err := client.Send(req, "repository:a:pull")
+			if test.errAssertion != nil {
+				test.errAssertion(t, err)
+				fake.mu.Lock()
+				defer fake.mu.Unlock()
+
+				assert.NotContains(t, fake.paths, "/token", "no credential goes to a refused realm")
+
+				return
+			}
+
+			require.NoError(t, err)
+
+			defer func() { _ = resp.Body.Close() }()
+
+			assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+			tokenAt := fake
+			if test.tokenAt != nil {
+				tokenAt = test.tokenAt
+			}
+
+			tokenAt.mu.Lock()
+			defer tokenAt.mu.Unlock()
+
+			assert.Contains(t, tokenAt.paths, "/token")
+		})
+	}
+}
+
+func errorIs(target error) require.ErrorAssertionFunc {
+	return func(t require.TestingT, err error, _ ...any) {
+		require.ErrorIs(t, err, target)
 	}
 }

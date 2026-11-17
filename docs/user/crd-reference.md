@@ -43,6 +43,7 @@ Every field of the `registrygate.soliddowant.dev/v1alpha1` resources. A field ma
 
 | Field | Type | Required | Description |
 |---|---|---|---|
+| `spec.aliasHosts` | list of string |  | AliasHosts are other names (host or host:port) of the registry at url, such as Harbor's externalURL when url is its in-cluster Service. A token realm or Location on an alias host is treated as on url; the proxy never sends a request to an alias host. |
 | `spec.allowedNamespaces` | object |  | AllowedNamespaces may use this mirror in policy rules. |
 | `spec.allowedNamespaces.names` | list of string |  | Names of allowed namespaces. |
 | `spec.allowedNamespaces.selector` | object |  | Selector allows every namespace whose labels match. An empty selector allows every namespace. |
@@ -57,10 +58,11 @@ Every field of the `registrygate.soliddowant.dev/v1alpha1` resources. A field ma
 | `spec.timeouts` | object |  | Timeouts of calls to the mirror. |
 | `spec.timeouts.responseHeader` | string |  | ResponseHeader is the time from the request being sent to the response headers arriving. Default 30s. |
 | `spec.timeouts.token` | string |  | Token is the time for the ping and the token exchange together. Default 10s. |
+| `spec.tokenRealmHosts` | list of string |  | TokenRealmHosts are hosts (host or host:port) allowed as the token endpoint besides the url host. |
 | `spec.upstreamRef` | object | yes | UpstreamRef is the upstream this mirror serves. |
 | `spec.upstreamRef.name` | string | yes | Name of the object. |
 | `spec.upstreamRef.namespace` | string |  | Namespace of the object. Defaults to the namespace of the referring object. |
-| `spec.url` | string | yes | URL of the mirror. |
+| `spec.url` | string | yes | URL of the mirror. An http URL needs a matching http allowedMirrorURLs entry on the upstream. |
 | `status.conditions` | list of object |  | Conditions: Ready. |
 | `status.conditions[].lastTransitionTime` | time | yes | lastTransitionTime is the last time the condition transitioned from one status to another. This should be when the underlying condition changed. If that is not known, then using the time when the API field changed is acceptable. |
 | `status.conditions[].message` | string | yes | message is a human readable message indicating details about the transition. This may be an empty string. |
@@ -100,6 +102,7 @@ Every field of the `registrygate.soliddowant.dev/v1alpha1` resources. A field ma
 
 | Field | Type | Required | Description |
 |---|---|---|---|
+| `spec.aliasHosts` | list of string |  | AliasHosts are other names (host or host:port) of the registry at url, such as Harbor's externalURL when url is its in-cluster Service. A token realm or Location on an alias host is treated as on url; the proxy never sends a request to an alias host. |
 | `spec.allowedMirrorURLs` | list of string |  | AllowedMirrorURLs are the URL prefixes a mirror of this upstream may use. |
 | `spec.allowedNamespaces` | object |  | AllowedNamespaces may point credentials, mirrors and policies at this upstream. |
 | `spec.allowedNamespaces.names` | list of string |  | Names of allowed namespaces. |
@@ -118,7 +121,7 @@ Every field of the `registrygate.soliddowant.dev/v1alpha1` resources. A field ma
 | `spec.tls.secretRef` | object | yes | SecretRef is the Secret with the serving key pair. |
 | `spec.tls.secretRef.name` | string | yes | Name of the Secret. |
 | `spec.tokenRealmHosts` | list of string |  | TokenRealmHosts are hosts (host or host:port) allowed as the token endpoint besides the url host. |
-| `spec.url` | string | yes | URL is where requests go: https://host[:port]. |
+| `spec.url` | string | yes | URL is where requests go: https://host[:port], or http://host[:port] for plain HTTP (no caSecretRef). |
 | `status.conditions` | list of object |  | Conditions: Ready. |
 | `status.conditions[].lastTransitionTime` | time | yes | lastTransitionTime is the last time the condition transitioned from one status to another. This should be when the underlying condition changed. If that is not known, then using the time when the API field changed is acceptable. |
 | `status.conditions[].message` | string | yes | message is a human readable message indicating details about the transition. This may be an empty string. |

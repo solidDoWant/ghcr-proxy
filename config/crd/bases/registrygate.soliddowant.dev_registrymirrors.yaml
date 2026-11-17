@@ -48,6 +48,18 @@ spec:
           spec:
             description: RegistryMirrorSpec is a pull-only mirror of an upstream.
             properties:
+              aliasHosts:
+                description: |-
+                  AliasHosts are other names (host or host:port) of the registry at url, such as Harbor's externalURL when url is
+                  its in-cluster Service. A token realm or Location on an alias host is treated as on url; the proxy never sends
+                  a request to an alias host.
+                items:
+                  maxLength: 260
+                  pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*(:[0-9]{1,5})?$
+                  type: string
+                maxItems: 8
+                type: array
+                x-kubernetes-list-type: set
               allowedNamespaces:
                 description: AllowedNamespaces may use this mirror in policy rules.
                 properties:
@@ -164,6 +176,16 @@ spec:
                       together. Default 10s.
                     type: string
                 type: object
+              tokenRealmHosts:
+                description: TokenRealmHosts are hosts (host or host:port) allowed
+                  as the token endpoint besides the url host.
+                items:
+                  maxLength: 260
+                  pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*(:[0-9]{1,5})?$
+                  type: string
+                maxItems: 8
+                type: array
+                x-kubernetes-list-type: set
               upstreamRef:
                 description: UpstreamRef is the upstream this mirror serves.
                 properties:
@@ -183,7 +205,8 @@ spec:
                 - name
                 type: object
               url:
-                description: URL of the mirror.
+                description: URL of the mirror. An http URL needs a matching http
+                  allowedMirrorURLs entry on the upstream.
                 maxLength: 2048
                 type: string
             required:

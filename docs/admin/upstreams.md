@@ -2,13 +2,15 @@
 
 For: admins who tell registrygate which registry hosts it stands in for. You know Kubernetes and cert-manager. You already installed the chart (see [Install registrygate](install.md)).
 
-An `UpstreamRegistry` object names one or more registry hosts, for example `ghcr.io`, and the real registry that serves them. CI pods connect to the proxy under that host name. The proxy needs a TLS certificate for the host. You make the certificate from a private CA, one CA for each upstream.
+An `UpstreamRegistry` object names one or more registry hosts, for example `ghcr.io`, and the real registry that serves them. CI pods connect to the proxy under that host name. The proxy needs a TLS certificate for the host. You make the certificate from one private CA. A name constraint limits that CA to the hosts that the proxy intercepts (the hosts that CI pods send to the proxy).
 
 You create an `UpstreamRegistry` in an admin namespace only. By default, this is the namespace of the proxy. The proxy ignores one in any other namespace, and the admission webhook rejects it.
 
-## One CA and one certificate for each upstream
+## One CA for all intercepted hosts
 
-Warning: limit each CA to the hosts of its upstream with a name constraint. Without the constraint, anyone who holds the CA key can make a valid certificate for any host.
+Use one CA for all the hosts that the proxy intercepts, and one serving certificate for each `UpstreamRegistry`.
+
+Warning: limit the CA to exactly the intercepted hosts with a name constraint. Without the constraint, anyone who holds the CA key can make a valid certificate for any host.
 
 Warning: trust the CA only through the Docker directory `/etc/docker/certs.d/<host>/ca.crt`. Never add it to the system trust store of a pod or a node. The `certs.d` directory limits the CA to one registry name. The system trust store does not.
 
@@ -27,7 +29,7 @@ helm install cert-manager oci://quay.io/jetstack/charts/cert-manager \
   --wait
 ```
 
-This example makes a CA and a certificate for the host `ghcr.io`. The CA can sign only `ghcr.io` and its subdomains. Make the objects in the namespace of the proxy, because the `UpstreamRegistry` reads the certificate Secret from its own namespace.
+This example makes a CA and a certificate for the host `ghcr.io`. The CA can sign only `ghcr.io` and its subdomains. If the proxy intercepts more hosts, put all of them in `dnsDomains` of the CA, for example `[ghcr.io, harbor.example.com, registry-1.docker.io, docker.io, index.docker.io]`. Make the objects in the namespace of the proxy, because the `UpstreamRegistry` reads the certificate Secret from its own namespace.
 
 <!-- e2e -->
 ```sh
@@ -93,7 +95,7 @@ kubectl -n registrygate wait --for=condition=Ready certificate/ghcr-io-tls --tim
 
 The Secret `ghcr-io-tls` holds the key pair (`tls.crt` and `tls.key`) and the CA certificate (`ca.crt`). CI pods must trust `ca.crt`. [CI pod setup](ci-pods.md) shows where it goes.
 
-For a second upstream, for example `quay.io`, make a second CA and a second certificate with its own name constraint. Never share a CA between upstreams.
+For a second upstream, for example `quay.io`, add its hosts to `dnsDomains` of the CA. A CA cannot change its name constraint, so cert-manager must issue the CA again: delete its Secret, and cert-manager makes a new one. Then make a second serving certificate for the new hosts from the same CA, and give the new `ca.crt` to the CI pods.
 
 ## Create the UpstreamRegistry
 
@@ -122,7 +124,8 @@ EOF
 These fields matter most:
 
 - `hosts`: The host names that the proxy answers for. Each host belongs to at most one `UpstreamRegistry`. If two objects claim the same host, both get `Ready=False` with the reason `HostConflict`, and the proxy serves neither.
-- `url`: Where the proxy sends requests. It has a scheme and a host, and no path.
+- `url`: Where the proxy sends requests. It has a scheme (`https` or `http`) and a host, and no path. See [Plain HTTP](#plain-http).
+- `aliasHosts`: Other names of the registry at `url`. See [Harbor through its Service](#harbor-through-its-service).
 - `tls.secretRef`: The Secret with the serving key pair. The certificate must be valid for every host in `hosts`. If it is not, the object gets the reason `CertificateMismatch`.
 - `caSecretRef`: An optional Secret with the key `ca.crt`. Use it when the real registry has a certificate from a private CA.
 - `tokenRealmHosts`: Hosts that can serve as the token endpoint of the registry, besides the host of `url`. The proxy refuses any other token endpoint.
@@ -153,3 +156,72 @@ An authenticated caller that no rule covers gets the same answer in both modes: 
 ## Projects that need the API of the registry
 
 The proxy passes only the registry API (`/v2`). If a project needs another API of the registry, do not intercept that host. A pod that calls such an API on an intercepted host gets `404`, because the proxy serves no other path. Add the `hostAliases` entry only to pods that push and pull images, and let other pods reach the real registry.
+
+## Plain HTTP
+
+The proxy can connect to an upstream over plain HTTP, for example to a registry Service in the cluster. Set `url` to `http://host[:port]`, and do not set `caSecretRef`. If `caSecretRef` is set, the object gets `Ready=False` with the reason `InvalidSpec`.
+
+Warning: use plain HTTP only inside a network that you trust. The proxy sends the credential, the tokens and the images unencrypted. The object stays ready, and its status message says `plain HTTP: credentials cross the cluster network unencrypted`.
+
+CI pods still connect to the proxy over TLS with the certificate of the `UpstreamRegistry`.
+
+## Harbor through its Service
+
+Harbor knows itself by its `externalURL`, for example `https://harbor.example.com`. It puts that host in its token endpoint and in its `Location` headers. If the proxy connects to Harbor through its Service (`http://harbor-core.harbor.svc`), list the `externalURL` host in `aliasHosts`. In this example, CI pods use the name `registry.example.com` for Harbor:
+
+```yaml
+apiVersion: registrygate.soliddowant.dev/v1alpha1
+kind: UpstreamRegistry
+metadata:
+  name: harbor
+  namespace: registrygate
+spec:
+  hosts: [registry.example.com]
+  url: http://harbor-core.harbor.svc
+  aliasHosts: [harbor.example.com]
+  tls:
+    secretRef:
+      name: registry-example-com-tls
+  allowedNamespaces:
+    names: [ci-foo]
+```
+
+The proxy treats a token endpoint or a `Location` on an alias host as if it were on `url`. It keeps the path and the query and replaces the scheme and the host with those of `url`. The proxy never sends a request to an alias host. An entry is a host name, or a host name and a port. An entry without a port matches the default port of the scheme.
+
+`aliasHosts` must not overlap `hosts`, because the proxy cannot stand in for a name and also treat it as another name of `url`. If an entry names a host in `hosts`, the object gets `Ready=False` with the reason `InvalidSpec`.
+
+### Push to Harbor with a robot account that the CI pod never sees
+
+A CI pod can push to a Harbor project with a robot account whose Secret is only in the admin namespace:
+
+1. Create the `UpstreamRegistry` for Harbor in the admin namespace, as above.
+2. For each project, create the robot account in the admin namespace. With harbor-operator, a `HarborProjectRobot` puts its Secret in the admin namespace. The `HarborProject` must admit the robot account.
+3. For each project, create an [`UpstreamCredential`](credentials.md) in the admin namespace that reads that Secret. Give it the ceiling `<project>/**` for `pull`, `push` and `delete`, and admit only the namespace of the project in `allowedNamespaces`.
+4. In the namespace of the project, create a policy with a credential rule for `<project>/**`.
+
+The pods of the project send the Harbor host to the proxy like any other host. So they cannot reach the API of Harbor. If a project needs the API, do not send the Harbor host to the proxy for that project.
+
+## Docker Hub
+
+Docker clients use three names for Docker Hub. One `UpstreamRegistry` must have all three:
+
+```yaml
+apiVersion: registrygate.soliddowant.dev/v1alpha1
+kind: UpstreamRegistry
+metadata:
+  name: docker-hub
+  namespace: registrygate
+spec:
+  hosts: [registry-1.docker.io, docker.io, index.docker.io]
+  url: https://registry-1.docker.io
+  tokenRealmHosts: [auth.docker.io]
+  tls:
+    secretRef:
+      name: docker-hub-tls
+```
+
+- The Docker daemon sends `docker.io/<image>` and short names like `alpine` to `registry-1.docker.io`. It reads the CA from `/etc/docker/certs.d/registry-1.docker.io/ca.crt`.
+- The Docker CLI and BuildKit look up the Docker Hub credential under `https://index.docker.io/v1/`. The credential helper maps that to `index.docker.io`.
+- The `hostAliases` of the CI pod and `REGISTRYGATE_HOSTS` must name all three hosts. See [CI pod setup](ci-pods.md).
+- The serving certificate must be valid for all three hosts.
+- The proxy does not change repository names. The daemon sends `library/<name>` for official images, so policy rules name `library/alpine`, not `alpine`.

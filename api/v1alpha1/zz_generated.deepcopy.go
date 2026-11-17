@@ -317,6 +317,16 @@ func (in *RegistryMirrorList) DeepCopyObject() runtime.Object {
 func (in *RegistryMirrorSpec) DeepCopyInto(out *RegistryMirrorSpec) {
 	*out = *in
 	out.UpstreamRef = in.UpstreamRef
+	if in.TokenRealmHosts != nil {
+		in, out := &in.TokenRealmHosts, &out.TokenRealmHosts
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.AliasHosts != nil {
+		in, out := &in.AliasHosts, &out.AliasHosts
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.SecretRef != nil {
 		in, out := &in.SecretRef, &out.SecretRef
 		*out = new(CredentialsSecretRef)
@@ -590,6 +600,11 @@ func (in *UpstreamRegistrySpec) DeepCopyInto(out *UpstreamRegistrySpec) {
 	out.TLS = in.TLS
 	if in.TokenRealmHosts != nil {
 		in, out := &in.TokenRealmHosts, &out.TokenRealmHosts
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.AliasHosts != nil {
+		in, out := &in.AliasHosts, &out.AliasHosts
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}

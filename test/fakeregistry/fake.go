@@ -86,6 +86,8 @@ type Options struct {
 	DNSNames []string
 	// BlobDir holds blob data. A new temporary directory when empty.
 	BlobDir string
+	// PlainHTTP serves the registry and blob storage over plain HTTP instead of TLS.
+	PlainHTTP bool
 }
 
 // Fake is a running registry double.
@@ -98,6 +100,7 @@ type Fake struct {
 	storage      *http.Server
 	registryHost string
 	storageHost  string
+	scheme       string
 	ownedBlobDir string
 
 	mode       Auth
@@ -110,7 +113,9 @@ type Fake struct {
 	mu     sync.Mutex
 	public map[string]bool
 	realm  string
-	sigs   map[string]bool
+	// locationBase replaces the registry's own scheme and host in Location headers when set.
+	locationBase string
+	sigs         map[string]bool
 }
 
 // New starts a Fake and stops it when the test ends.
@@ -192,12 +197,20 @@ func Start(opts Options) (*Fake, error) {
 
 	tlsConfig := &tls.Config{Certificates: []tls.Certificate{authority.leaf}, MinVersion: tls.VersionTLS12}
 
-	registryListener, err := tls.Listen("tcp", opts.RegistryAddr, tlsConfig)
+	fake.scheme = "https"
+	listen := func(addr string) (net.Listener, error) { return tls.Listen("tcp", addr, tlsConfig) }
+
+	if opts.PlainHTTP {
+		listen = func(addr string) (net.Listener, error) { return net.Listen("tcp", addr) }
+		fake.scheme = "http"
+	}
+
+	registryListener, err := listen(opts.RegistryAddr)
 	if err != nil {
 		return nil, err
 	}
 
-	storageListener, err := tls.Listen("tcp", opts.StorageAddr, tlsConfig)
+	storageListener, err := listen(opts.StorageAddr)
 	if err != nil {
 		_ = registryListener.Close()
 		return nil, err
@@ -205,7 +218,7 @@ func Start(opts Options) (*Fake, error) {
 
 	fake.registryHost = hostOr(opts.RegistryHost, registryListener)
 	fake.storageHost = hostOr(opts.StorageHost, storageListener)
-	fake.realm = "https://" + fake.registryHost + "/token"
+	fake.realm = fake.scheme + "://" + fake.registryHost + "/token"
 
 	fake.blobs = &redirectingBlobs{
 		disk: registry.NewDiskBlobHandler(opts.BlobDir),
@@ -282,6 +295,28 @@ func (f *Fake) SetRealm(url string) {
 	f.realm = url
 }
 
+// SetLocationBase changes the scheme and host ("https://host[:port]") that
+// relative registry Location headers are made absolute with, as a registry
+// that knows itself by another name (Harbor's externalURL) answers.
+func (f *Fake) SetLocationBase(base string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.locationBase = base
+}
+
+// LocationBase is the scheme and host registry Location headers currently use.
+func (f *Fake) LocationBase() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if f.locationBase != "" {
+		return f.locationBase
+	}
+
+	return f.scheme + "://" + f.registryHost
+}
+
 // Realm is the token realm currently put in challenges.
 func (f *Fake) Realm() string {
 	f.mu.Lock()
@@ -299,7 +334,12 @@ func (f *Fake) ResetLog() { f.log.reset() }
 // Push writes image to repo (a name such as "owner/app", tag "latest" unless
 // the name carries one) using the PAT, or without credentials when Auth is None.
 func (f *Fake) Push(repo string, image v1.Image) error {
-	ref, err := name.ParseReference(f.registryHost+"/"+repo, name.WithDefaultTag("latest"))
+	options := []name.Option{name.WithDefaultTag("latest")}
+	if f.scheme == "http" {
+		options = append(options, name.Insecure)
+	}
+
+	ref, err := name.ParseReference(f.registryHost+"/"+repo, options...)
 	if err != nil {
 		return err
 	}
@@ -331,7 +371,7 @@ func (f *Fake) registryHandler() http.Handler {
 
 	mux.Handle("/", f.authorize(store))
 
-	return f.record("registry", "https://"+f.registryHost, mux)
+	return f.record("registry", f.LocationBase, mux)
 }
 
 // deletes answers DELETE with 405 UNSUPPORTED when delete is unsupported.
@@ -352,10 +392,15 @@ func (f *Fake) deletes(next http.Handler) http.Handler {
 }
 
 // record logs each request after it is served and makes Location headers absolute.
-func (f *Fake) record(server, absoluteTo string, next http.Handler) http.Handler {
+func (f *Fake) record(server string, absoluteTo func() string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(resp http.ResponseWriter, req *http.Request) {
 		cred, _ := f.credentialOf(req)
-		recorder := &statusRecorder{ResponseWriter: resp, status: http.StatusOK, absoluteTo: absoluteTo}
+
+		recorder := &statusRecorder{ResponseWriter: resp, status: http.StatusOK}
+		if absoluteTo != nil {
+			recorder.absoluteTo = absoluteTo()
+		}
+
 		next.ServeHTTP(recorder, req)
 		f.log.add(Entry{
 			Server: server, Method: req.Method, Path: req.URL.Path, EscapedPath: req.URL.EscapedPath(),
@@ -396,14 +441,14 @@ func (b *redirectingBlobs) Get(_ context.Context, _ string, h v1.Hash) (io.ReadC
 	b.fake.mu.Unlock()
 
 	return nil, registry.RedirectError{
-		Location: fmt.Sprintf("https://%s/%s?sig=%s", b.fake.storageHost, h.String(), sig),
+		Location: fmt.Sprintf("%s://%s/%s?sig=%s", b.fake.scheme, b.fake.storageHost, h.String(), sig),
 		Code:     http.StatusTemporaryRedirect,
 	}
 }
 
 // storageHandler serves blobs for redirects the registry issued.
 func (f *Fake) storageHandler() http.Handler {
-	return f.record("storage", "", http.HandlerFunc(func(resp http.ResponseWriter, req *http.Request) {
+	return f.record("storage", nil, http.HandlerFunc(func(resp http.ResponseWriter, req *http.Request) {
 		f.mu.Lock()
 		signed := f.sigs[req.URL.Query().Get("sig")]
 		f.mu.Unlock()

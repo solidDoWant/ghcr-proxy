@@ -1,7 +1,9 @@
 package server_test
 
 import (
+	"encoding/pem"
 	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
@@ -397,6 +399,118 @@ func TestHostHeaderMustNameTheServerNamesRegistry(t *testing.T) {
 
 			if want == http.StatusBadRequest {
 				assert.Empty(t, proxy.fake.Log(), "nothing is sent upstream")
+			}
+		})
+	}
+}
+
+func TestUpstreamAliasHostRealmAndLocationsGoToItsURL(t *testing.T) {
+	// The alias doesn't resolve: anything sent to it fails the request.
+	const alias = "registry.alias.invalid"
+
+	proxy := newHarness(t, harnessOptions{
+		fake: fakeregistry.Options{UploadPath: fakeregistry.Uploads, StorageHost: alias},
+		configure: func(objects *objects) {
+			objects.upstream.Spec.AliasHosts = []string{alias}
+		},
+	})
+	proxy.fake.SetRealm("https://" + alias + "/token")
+	proxy.fake.SetLocationBase("https://" + alias)
+
+	image := randomImage(t)
+	require.NoError(t, remote.Write(proxy.ref(t, "soliddowant/foo/app"), image, proxy.builderOptions()...),
+		"the push's token realm and upload Locations on the alias reach the upstream")
+
+	pulled, err := remote.Image(proxy.ref(t, "soliddowant/foo/app"), proxy.builderOptions()...)
+	require.NoError(t, err)
+
+	want, err := image.Digest()
+	require.NoError(t, err)
+
+	got, err := pulled.Digest()
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+
+	// An upload started on the alias gets a session; finishing it answers 201 with a Location on the alias,
+	// which points back at the host the client used.
+	started := proxy.do(t, http.MethodPost, "/v2/soliddowant/foo/app/blobs/uploads/", basic(builderToken))
+	require.Equal(t, http.StatusAccepted, started.status, started.body)
+
+	session := mustURL(t, started.header.Get("Location"))
+	assert.Contains(t, []string{"", registryHost}, session.Host, "the session Location names the proxy")
+
+	// A blob download redirects to the storage host, here also on the alias: it points back at the host the
+	// client used.
+	manifest, err := image.Manifest()
+	require.NoError(t, err)
+
+	blob := proxy.do(t, http.MethodGet, "/v2/soliddowant/foo/app/blobs/"+manifest.Config.Digest.String(), basic(builderToken))
+	require.Equal(t, http.StatusTemporaryRedirect, blob.status, blob.body)
+
+	location := mustURL(t, blob.header.Get("Location"))
+	assert.Equal(t, "https", location.Scheme)
+	assert.Equal(t, registryHost, location.Host)
+	assert.Equal(t, "/"+manifest.Config.Digest.String(), location.Path)
+}
+
+func TestMirrorLocationOnAnAliasHostIsMappedLikeOneOnItsURL(t *testing.T) {
+	// The alias doesn't resolve: anything sent to it fails the request.
+	const alias = "harbor.alias.invalid"
+
+	const blobPath = "/v2/proxy-cache/soliddowant/foo/lib/blobs/sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+	tests := []struct {
+		name     string
+		location string
+		// status and want are the proxy's answer and its Location.
+		status int
+		want   string
+	}{
+		{
+			name:     "Location under the path prefix loses the prefix and points at the client host",
+			location: "https://" + alias + blobPath + "?part=1",
+			status:   http.StatusTemporaryRedirect,
+			want:     "https://" + registryHost + "/v2/soliddowant/foo/lib/blobs/sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855?part=1",
+		},
+		{
+			name:     "http Location on the alias is mapped too",
+			location: "http://" + alias + blobPath,
+			status:   http.StatusTemporaryRedirect,
+			want:     "https://" + registryHost + "/v2/soliddowant/foo/lib/blobs/sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+		},
+		{
+			name:     "Location outside the path prefix is refused",
+			location: "https://" + alias + "/v2/other-project/x/blobs/sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+			status:   http.StatusBadGateway,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			harbor := httptest.NewTLSServer(http.HandlerFunc(func(resp http.ResponseWriter, req *http.Request) {
+				if req.URL.Path == "/v2/" {
+					resp.WriteHeader(http.StatusOK)
+					return
+				}
+
+				resp.Header().Set("Location", test.location)
+				resp.WriteHeader(http.StatusTemporaryRedirect)
+			}))
+			t.Cleanup(harbor.Close)
+
+			caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: harbor.Certificate().Raw})
+
+			proxy := newHarness(t, harnessOptions{configure: func(objects *objects) {
+				mirrorAt(objects, harbor.URL, caPEM, "robot-password", "proxy-cache", false)
+				objects.mirrors[len(objects.mirrors)-1].Spec.AliasHosts = []string{alias}
+			}})
+
+			got := proxy.do(t, http.MethodGet,
+				"/v2/soliddowant/foo/lib/blobs/sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", basic(builderToken))
+			require.Equal(t, test.status, got.status, got.body)
+
+			if test.want != "" {
+				assert.Equal(t, test.want, got.header.Get("Location"))
 			}
 		})
 	}
