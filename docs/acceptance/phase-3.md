@@ -96,4 +96,4 @@ In the e2e scenarios, "a CI pod" is a pod with a dind sidecar set up exactly as 
 - **AC-3-34 Docs walk-through.** Following `docs/admin/` from an empty kind cluster (cert-manager, one name-constrained CA per upstream, the chart, two upstreams, a tenant mirror, a CI pod) gets to a working `docker push` and a mirrored `docker pull`, scripted as an e2e test that uses only commands from the docs.
   Tests:
 - **AC-3-35 Live GHCR (by hand).** With the live PAT behind an `UpstreamCredential`, the operator's `make test-live` run pushes and pulls through the proxy to the real `ghcr.io`, and delete returns GHCR's `405`.
-  Tests:
+  Tests: `test/live: TestClientFlowsThroughTheProxy`, `test/live: TestDeleteByDigestThroughTheProxyReturnsGHCRsUnsupported`
