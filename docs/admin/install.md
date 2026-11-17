@@ -45,7 +45,7 @@ Make sure that the install works:
 kubectl -n registrygate rollout status deploy/registrygate
 ```
 
-A proxy pod answers `200` on `/readyz` (port 8080) when it has synced the custom resources and loaded the Secrets that they use. Until then, requests get `503` with the message `registrygate is not ready`. With no `UpstreamRegistry`, the proxy is ready but answers no host.
+A proxy pod answers `200` on `/readyz` (port 8080) when it has synced the custom resources and loaded the Secrets that they use. Until then, requests get `503` with the message `registrygate is not ready`. After the pod is ready, it stays ready. If an object then refers to a Secret that the proxy has not loaded yet, only the requests that need that object get this `503`. Other requests work as before. With no `UpstreamRegistry`, the proxy is ready but answers no host.
 
 If the proxy cannot decide, it fails closed. It denies the request or forwards it with no credential. It never uses a credential as a fallback.
 

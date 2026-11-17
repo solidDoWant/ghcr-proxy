@@ -13,7 +13,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	kubefake "k8s.io/client-go/kubernetes/fake"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	clientgotesting "k8s.io/client-go/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -25,6 +27,15 @@ import (
 // startModel puts the fixture's objects in a fake client and runs a model
 // on it until the test ends.
 func startModel(t *testing.T, f *fixture) (*model.Model, client.Client) {
+	t.Helper()
+
+	return startModelWithStore(t, f, f.secrets, nil)
+}
+
+// startModelWithStore is startModel with the given Secret store. When
+// instance is set, it gets the model before the model starts, so the
+// store's OnChange can reach it.
+func startModelWithStore(t *testing.T, f *fixture, store model.SecretStore, instance **model.Model) (*model.Model, client.Client) {
 	t.Helper()
 
 	scheme := runtime.NewScheme()
@@ -54,11 +65,14 @@ func startModel(t *testing.T, f *fixture) (*model.Model, client.Client) {
 
 	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
 
-	instance := model.New(model.Options{
+	built := model.New(model.Options{
 		Reader:          kube,
-		Secrets:         f.secrets,
+		Secrets:         store,
 		AdminNamespaces: f.inputs.AdminNamespaces,
 	})
+	if instance != nil {
+		*instance = built
+	}
 
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
@@ -66,7 +80,7 @@ func startModel(t *testing.T, f *fixture) (*model.Model, client.Client) {
 	go func() {
 		defer close(done)
 
-		assert.NoError(t, instance.Run(ctx))
+		assert.NoError(t, built.Run(ctx))
 	}()
 
 	t.Cleanup(func() {
@@ -74,7 +88,7 @@ func startModel(t *testing.T, f *fixture) (*model.Model, client.Client) {
 		<-done
 	})
 
-	return instance, kube
+	return built, kube
 }
 
 func TestModelIsReadyOnlyWithoutPendingSecrets(t *testing.T) {
@@ -225,4 +239,80 @@ func TestModelReadersSeeOneConsistentSnapshot(t *testing.T) {
 	readers.Wait()
 
 	assert.Zero(t, failures.Load(), message.Load())
+}
+
+// A replica that is ready stays ready when a tenant adds a mirror whose
+// Secret watch hasn't listed yet: only that mirror waits, so one tenant
+// can't make every namespace's requests fail.
+func TestModelStaysReadyWhenANewSecretIsPending(t *testing.T) {
+	// The fake clientset sends no initial-events bookmark.
+	t.Setenv("KUBE_FEATURE_WatchListClient", "false")
+
+	f := newFixture(t)
+	certificate, privateKey := keyPair(t, "ghcr.io")
+
+	clientset := kubefake.NewClientset(
+		&corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Namespace: adminNamespace, Name: "ghcr-tls"},
+			Data:       map[string][]byte{"tls.crt": []byte(certificate), "tls.key": []byte(privateKey)},
+		},
+		&corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Namespace: adminNamespace, Name: "push-creds"},
+			Data:       map[string][]byte{"username": []byte("robot"), "password": []byte("secret")},
+		},
+		&corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Namespace: tenantNamespace, Name: "robot"},
+			Data:       map[string][]byte{"username": []byte("r"), "password": []byte("p")},
+		},
+	)
+
+	release := make(chan struct{})
+
+	// The API server doesn't answer the tenant Secret's first list.
+	clientset.PrependReactor("list", "secrets", func(action clientgotesting.Action) (bool, runtime.Object, error) {
+		if action.GetNamespace() == tenantNamespace {
+			<-release
+		}
+
+		return false, nil, nil
+	})
+	t.Cleanup(func() { close(release) })
+
+	var instance *model.Model
+
+	store := secrets.New(clientset, secrets.Options{
+		AdminNamespaces: []string{adminNamespace},
+		OnChange:        func() { instance.MarkDirty() },
+	})
+
+	_, kube := startModelWithStore(t, f, store, &instance)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	go func() { _ = store.Run(ctx) }()
+
+	require.Eventually(t, instance.Ready, 10*time.Second, 5*time.Millisecond, "ready with every Secret loaded")
+
+	require.NoError(t, kube.Create(t.Context(), &v1alpha1.RegistryMirror{
+		ObjectMeta: metav1.ObjectMeta{Namespace: tenantNamespace, Name: "harbor-b"},
+		Spec: v1alpha1.RegistryMirrorSpec{
+			UpstreamRef: v1alpha1.ObjectRef{Namespace: adminNamespace, Name: "ghcr"},
+			URL:         "https://harbor.example/base/ci-b",
+			PathPrefix:  "ci-b-ghcr",
+			SecretRef:   &v1alpha1.CredentialsSecretRef{Name: "robot"},
+		},
+	}))
+	instance.MarkDirty()
+
+	require.Eventually(t, func() bool {
+		mirror := instance.Snapshot().Mirrors[name(tenantNamespace, "harbor-b")]
+		return mirror != nil && mirror.Status.Pending
+	}, 10*time.Second, 5*time.Millisecond, "the new mirror waits for its Secret")
+
+	snapshot := instance.Snapshot()
+	assert.True(t, snapshot.PendingSecrets(), "the new mirror's Secret is still pending")
+	assert.True(t, instance.Ready(), "the replica stays ready; only the new mirror waits for its Secret")
+	assert.False(t, snapshot.Mirrors[name(tenantNamespace, "harbor")].Status.Pending,
+		"objects that don't use the pending Secret aren't pending")
 }
