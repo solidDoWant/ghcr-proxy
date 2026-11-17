@@ -52,7 +52,11 @@ type Model struct {
 	logger  *slog.Logger
 	current atomic.Pointer[Snapshot]
 	synced  atomic.Bool
-	dirty   chan struct{}
+	// wasReady latches once a published snapshot is ready. From then on a
+	// pending Secret marks only the objects that use it pending, so a new
+	// reference can't make the whole replica unready.
+	wasReady atomic.Bool
+	dirty    chan struct{}
 }
 
 // New returns a model. Call Run to start building snapshots.
@@ -77,9 +81,16 @@ func (m *Model) MarkDirty() {
 func (m *Model) Snapshot() *Snapshot { return m.current.Load() }
 
 // Ready reports whether the replica may serve: the informers have synced,
-// a snapshot has been built, and no Secret it references is pending.
+// a snapshot has been built, and no Secret it references is pending. Once
+// that has been true, Ready stays true: requests that need an object
+// waiting on a Secret are refused by resolution, not by the replica.
 func (m *Model) Ready() bool {
+	if m.wasReady.Load() {
+		return true
+	}
+
 	snapshot := m.current.Load()
+
 	return m.synced.Load() && snapshot != nil && !snapshot.PendingSecrets()
 }
 
@@ -166,6 +177,10 @@ func (m *Model) rebuild(ctx context.Context) {
 	}
 
 	m.current.Store(snapshot)
+
+	if m.synced.Load() && !snapshot.PendingSecrets() {
+		m.wasReady.Store(true)
+	}
 
 	if m.options.OnRebuild != nil {
 		m.options.OnRebuild(snapshot)
