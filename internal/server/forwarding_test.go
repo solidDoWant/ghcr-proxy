@@ -191,7 +191,7 @@ func TestDeleteForwardsWithTheCredentialAndReturnsTheUpstreamAnswer(t *testing.T
 	}
 }
 
-func TestACredentialSecretChangeAppliesToTheNextRequest(t *testing.T) {
+func TestCredentialSecretChangeAppliesToTheNextRequest(t *testing.T) {
 	proxy := newHarness(t, harnessOptions{})
 	require.NoError(t, proxy.fake.Push("soliddowant/foo/source", randomImage(t)))
 
