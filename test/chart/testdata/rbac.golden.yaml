@@ -1,0 +1,112 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: registrygate
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - authentication.k8s.io
+  resources:
+  - tokenreviews
+  verbs:
+  - create
+- apiGroups:
+  - registrygate.soliddowant.dev
+  resources:
+  - registryaccesspolicies
+  - registrymirrors
+  - upstreamcredentials
+  - upstreamregistries
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - registrygate.soliddowant.dev
+  resources:
+  - registryaccesspolicies/status
+  - registrymirrors/status
+  - upstreamcredentials/status
+  - upstreamregistries/status
+  verbs:
+  - patch
+  - update
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: registrygate
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: registrygate
+subjects:
+- kind: ServiceAccount
+  name: registrygate
+  namespace: registrygate
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: registrygate-lease
+rules:
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: registrygate-lease
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: registrygate-lease
+subjects:
+- kind: ServiceAccount
+  name: registrygate
+  namespace: registrygate
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: registrygate-secrets
+  namespace: registrygate
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: registrygate-secrets
+  namespace: registrygate
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: registrygate-secrets
+subjects:
+- kind: ServiceAccount
+  name: registrygate
+  namespace: registrygate

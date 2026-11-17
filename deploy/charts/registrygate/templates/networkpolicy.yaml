@@ -50,6 +50,16 @@ spec:
     {{- end }}
     - ports:
         - {protocol: TCP, port: 443}
+    {{- with .Values.networkPolicy.egressHosts }}
+    - to:
+        {{- range . }}
+        - ipBlock: {cidr: {{ . | quote }}}
+        {{- end }}
+      ports:
+        {{- range $.Values.networkPolicy.egressPorts }}
+        - {protocol: TCP, port: {{ . }}}
+        {{- end }}
+    {{- end }}
     {{- with .Values.networkPolicy.extraEgress }}
     {{- toYaml . | nindent 4 }}
     {{- end }}

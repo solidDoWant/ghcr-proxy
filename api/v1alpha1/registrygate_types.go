@@ -4,6 +4,19 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// Action is a registry action a rule allows.
+// +kubebuilder:validation:Enum=pull;push;delete
+type Action string
+
+const (
+	// ActionPull reads manifests, blobs, tag lists and referrers.
+	ActionPull Action = "pull"
+	// ActionPush uploads blobs and manifests. It implies pull.
+	ActionPush Action = "push"
+	// ActionDelete deletes manifests and blobs. It implies pull.
+	ActionDelete Action = "delete"
+)
+
 // Condition types and reasons shared by the status of every registrygate kind.
 const (
 	// ConditionReady is the condition type every kind reports.

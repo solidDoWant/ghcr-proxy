@@ -15,6 +15,30 @@ resources:
       namespaced: true
     domain: soliddowant.dev
     group: registrygate
-    kind: GHCRAccessPolicy
+    kind: UpstreamRegistry
+    path: github.com/solidDoWant/registrygate/api/v1alpha1
+    version: v1alpha1
+  - api:
+      crdVersion: v1
+      namespaced: true
+    domain: soliddowant.dev
+    group: registrygate
+    kind: UpstreamCredential
+    path: github.com/solidDoWant/registrygate/api/v1alpha1
+    version: v1alpha1
+  - api:
+      crdVersion: v1
+      namespaced: true
+    domain: soliddowant.dev
+    group: registrygate
+    kind: RegistryMirror
+    path: github.com/solidDoWant/registrygate/api/v1alpha1
+    version: v1alpha1
+  - api:
+      crdVersion: v1
+      namespaced: true
+    domain: soliddowant.dev
+    group: registrygate
+    kind: RegistryAccessPolicy
     path: github.com/solidDoWant/registrygate/api/v1alpha1
     version: v1alpha1
