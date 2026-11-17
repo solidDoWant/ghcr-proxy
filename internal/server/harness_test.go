@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -296,4 +297,17 @@ func (h *harness) client() *http.Client {
 		Transport:     h.transport(),
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
+}
+
+func objectMeta(namespace, name string) metav1.ObjectMeta {
+	return metav1.ObjectMeta{Namespace: namespace, Name: name, UID: types.UID(namespace + "-" + name + "-uid"), Generation: 1}
+}
+
+func mustURL(t *testing.T, raw string) *url.URL {
+	t.Helper()
+
+	parsed, err := url.Parse(raw)
+	require.NoError(t, err)
+
+	return parsed
 }
