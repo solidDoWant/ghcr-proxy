@@ -227,12 +227,18 @@ func TestCredentialSecretChangeAppliesToTheNextRequest(t *testing.T) {
 func mirrorOf(t *testing.T, objects *objects, mirrorFake *fakeregistry.Fake, pathPrefix string, fallback bool) {
 	t.Helper()
 
-	objects.upstream.Spec.AllowedMirrorURLs = []string{"https://" + mirrorFake.RegistryHost()}
+	mirrorAt(objects, "https://"+mirrorFake.RegistryHost(), mirrorFake.CAPEM(), mirrorFake.PAT(), pathPrefix, fallback)
+}
+
+// mirrorAt sets up the CI namespace's mirror rule for soliddowant/foo/** with a mirror at mirrorURL, trusted by
+// caPEM, that the proxy logs in to with password.
+func mirrorAt(objects *objects, mirrorURL string, caPEM []byte, password, pathPrefix string, fallback bool) {
+	objects.upstream.Spec.AllowedMirrorURLs = []string{mirrorURL}
 	objects.mirrors = append(objects.mirrors, v1alpha1.RegistryMirror{
 		ObjectMeta: objectMeta(ciNamespace, "mirror"),
 		Spec: v1alpha1.RegistryMirrorSpec{
 			UpstreamRef:        *ref("upstream-a"),
-			URL:                "https://" + mirrorFake.RegistryHost(),
+			URL:                mirrorURL,
 			PathPrefix:         pathPrefix,
 			SecretRef:          &v1alpha1.CredentialsSecretRef{Name: "mirror-robot"},
 			CASecretRef:        &v1alpha1.LocalRef{Name: "mirror-ca"},
@@ -241,10 +247,10 @@ func mirrorOf(t *testing.T, objects *objects, mirrorFake *fakeregistry.Fake, pat
 	})
 	objects.secrets[secrets.Key{Namespace: ciNamespace, Name: "mirror-robot"}] = secrets.Secret{
 		State: secrets.Present, ResourceVersion: "1",
-		Data: secrets.Data{"username": []byte("robot"), "password": []byte(mirrorFake.PAT())},
+		Data: secrets.Data{"username": []byte("robot"), "password": []byte(password)},
 	}
 	objects.secrets[secrets.Key{Namespace: ciNamespace, Name: "mirror-ca"}] = secrets.Secret{
-		State: secrets.Present, ResourceVersion: "1", Data: secrets.Data{"ca.crt": mirrorFake.CAPEM()},
+		State: secrets.Present, ResourceVersion: "1", Data: secrets.Data{"ca.crt": caPEM},
 	}
 	objects.policy.Spec.Rules = append(objects.policy.Spec.Rules, v1alpha1.AccessRule{
 		Name: "mirrored", MirrorRef: &v1alpha1.ObjectRef{Name: "mirror"},
