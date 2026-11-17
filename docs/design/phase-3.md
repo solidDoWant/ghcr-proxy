@@ -102,7 +102,7 @@ type AccessRule struct {
 }
 ```
 
-CEL on `AccessRule`: exactly one of `credentialRef` and `mirrorRef`; with `mirrorRef`, `actions == ['pull']`. The worker checks that the CRD still installs within the API server's CEL cost budget with 64 rules of 32 globs; if it doesn't, lower the rule limit to 32 and say so on the issue. The paths of `RegistryMirror.url` and of `allowedMirrorURLs` entries must not contain `%`, `.` or `..` segments, or empty segments (CEL, and checked again by the model). `ObjectRef.namespace` can't be defaulted by the API server (defaulting can't read the object's own namespace); the model treats an empty namespace as the referring object's. `Action` and the glob validation are phase 1's. The `http` scheme is allowed by the CRD for `url` fields, but the proxy treats an `http` URL as invalid (`Ready=False, reason=InvalidSpec`) unless it runs with `--allow-http` (tests only; the chart doesn't expose it).
+CEL on `AccessRule`: exactly one of `credentialRef` and `mirrorRef`; with `mirrorRef`, `actions == ['pull']`. The worker checks that the CRD still installs within the API server's CEL cost budget with 64 rules of 32 globs; if it doesn't, lower the rule limit to 32 and say so on the issue. The paths of `RegistryMirror.url` and of `allowedMirrorURLs` entries must not contain `%`, `.` or `..` segments, or empty segments (CEL, and checked again by the model). `ObjectRef.namespace` can't be defaulted by the API server (defaulting can't read the object's own namespace); the model treats an empty namespace as the referring object's. `Action` and the glob validation are phase 1's. The `http` scheme is allowed by the CRD for `url` fields. Since section 13, the proxy accepts it on an `UpstreamRegistry` (admin-only) and on a `RegistryMirror` whose matching `allowedMirrorURLs` entry is `http://`; any other `http` URL is `InvalidSpec` (`--allow-http` remains for tests).
 
 Status for every kind: `ObservedGeneration int64`, `Conditions []metav1.Condition` (`Ready`). `RegistryAccessPolicyStatus` adds:
 
@@ -305,3 +305,42 @@ The order keeps `master` building and green after every issue (H6). New code lan
 15. **Docs and the walk-through test.** Needs 14.
 16. **Live test port** (operator runs it). Needs 9.
 17. **Metrics and audit fields** (sections 10.1, 10.2). Needs 9.
+
+## 13. Harbor through its Service, and Docker Hub (owner request, 2026-11-17)
+
+The owner wants the proxy to reach Harbor through its in-cluster Service (`http://harbor-core.<ns>.svc`), both as a mirror and as an upstream that CI pushes to with a robot that build pods never see, and wants Docker Hub as an upstream. Scenarios AC-3-36 and AC-3-37.
+
+### 13.1 Plain HTTP
+
+- `UpstreamRegistry.url` may be `http://host[:port]`. The upstream client then uses no TLS, and `caSecretRef` must be unset (`InvalidSpec` otherwise).
+- `RegistryMirror.url` may be `http://…` only when the `allowedMirrorURLs` entry it matches starts with `http://`. An `https://` entry never matches an `http` URL, and vice versa.
+- `Ready` stays `True`; the status message says "plain HTTP: credentials cross the cluster network unencrypted".
+
+### 13.2 `aliasHosts` and mirror `tokenRealmHosts`
+
+- New fields: `UpstreamRegistry.aliasHosts`, `RegistryMirror.aliasHosts` and `RegistryMirror.tokenRealmHosts`, each at most 8 entries of `host` or `host:port` (lower-case DNS names; CEL).
+- **Token realms.** A realm whose host is an alias host passes the realm check, and the token request goes to the realm's path and query on the object's own `url` (scheme, host and port from `url`). A realm on a `tokenRealmHosts` host goes to that host as before.
+- **`Location` headers.** A `Location` on an alias host (any scheme) is treated as if it were on the object's `url`: then the usual rules apply (upload tokens for an upstream `202`, `/v2/<pathPrefix>/` stripping for a mirror, host rewrite for the rest). The proxy never sends a request to an alias host itself.
+- Upload tokens store the path and query only (section 6.2), so an alias `Location` and a `url` `Location` give the same token.
+- `aliasHosts` must not overlap the object's own `hosts` (an `UpstreamRegistry` can't alias a name it intercepts): `InvalidSpec`.
+
+### 13.3 Pushing to Harbor with a robot the build pod never sees
+
+No new behaviour, only a documented setup (admin docs, plus the e2e of AC-3-36):
+- `UpstreamRegistry` `harbor` in an admin namespace: `hosts: [<Harbor's name>]`, `url: http://harbor-core.<ns>.svc`, `aliasHosts: [<Harbor's externalURL host>]`.
+- Per project, in the admin namespace: harbor-operator's `HarborProjectRobot` (its Secret lands in the admin namespace; the `HarborProject` must admit it) and an `UpstreamCredential` with ceiling `<project>/**` for `pull`, `push`, `delete`, admitting only the project's namespace.
+- The project's policy has a credential rule for `<project>/**`. Its pods intercept the Harbor host like any other, so Harbor's own API isn't reachable from them; a project that needs it doesn't intercept the Harbor host (`SPEC.md` section 1).
+
+### 13.4 Docker Hub
+
+Docker's clients name Docker Hub in several ways, all of which must reach the same `UpstreamRegistry`:
+- `hosts: [registry-1.docker.io, docker.io, index.docker.io]`, `url: https://registry-1.docker.io`, `tokenRealmHosts: [auth.docker.io]`.
+- dockerd resolves `docker.io/<image>` and bare names (`alpine`) to `registry-1.docker.io` and reads its CA from `certs.d/registry-1.docker.io/ca.crt`. The pod's `hostAliases` cover all three names.
+- The Docker CLI and BuildKit look up Docker Hub credentials under `https://index.docker.io/v1/`. The helper's host normalization maps that to `index.docker.io`. `configure` writes `credHelpers` for every listed host, and the admin docs list all three for Docker Hub.
+- Repository names: dockerd sends `library/<name>` for official images; nothing in the proxy rewrites names.
+- e2e: a third `UpstreamRegistry` for these hosts pointing at a fake registry (any `Auth`), and a CI pod running `docker pull alpine` (from a pinned fake image named `library/alpine`) and a `FROM docker.io/library/alpine` build, both served through a Harbor proxy-cache mirror. The fake isn't Docker Hub; the test proves the client-side naming, not Docker Hub's own quirks.
+
+### 13.5 Issues
+
+1. Plain HTTP, `aliasHosts` and mirror `tokenRealmHosts` (13.1, 13.2), with unit and integration tests; updates the admin docs (one CA for all hosts, plain HTTP and its caveat, aliases, Docker Hub hosts). `model:opus` (upstream credentials).
+2. e2e for AC-3-36 and AC-3-37 (13.3, 13.4). Needs 1 and the e2e port (#116). The docs walk-through issue (#148) also needs 1, so it walks the final docs.
