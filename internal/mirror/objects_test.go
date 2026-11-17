@@ -364,3 +364,29 @@ func errorIs(target error) require.ErrorAssertionFunc {
 		require.ErrorIs(t, err, target)
 	}
 }
+
+func TestClientNonPositiveTimeoutsUseTheDefaults(t *testing.T) {
+	for name, value := range map[string]time.Duration{"zero": 0, "negative": -time.Second} {
+		t.Run(name, func(t *testing.T) {
+			fake := newFakeMirror(t)
+			object := fake.model(t)
+			object.Object.Spec.Timeouts = v1alpha1.Timeouts{
+				Token:          &metav1.Duration{Duration: value},
+				ResponseHeader: &metav1.Duration{Duration: value},
+			}
+
+			client, err := mirror.NewClientFromMirror(object, mirror.ClientOptions{})
+			require.NoError(t, err)
+
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, client.RequestURL("/v2/team/app/manifests/latest", "").String(), nil)
+			require.NoError(t, err)
+
+			resp, err := client.Send(req, "repository:team/app:pull")
+			require.NoError(t, err)
+
+			defer func() { _ = resp.Body.Close() }()
+
+			assert.Equal(t, http.StatusOK, resp.StatusCode)
+		})
+	}
+}

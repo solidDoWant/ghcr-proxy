@@ -38,11 +38,11 @@ func NewClientFromMirror(mirror *model.Mirror, options ClientOptions) (*Client, 
 	spec := mirror.Object.Spec
 
 	responseHeader, token := defaultResponseHeaderTimeout, defaultTokenTimeout
-	if spec.Timeouts.ResponseHeader != nil {
+	if spec.Timeouts.ResponseHeader != nil && spec.Timeouts.ResponseHeader.Duration > 0 {
 		responseHeader = spec.Timeouts.ResponseHeader.Duration
 	}
 
-	if spec.Timeouts.Token != nil {
+	if spec.Timeouts.Token != nil && spec.Timeouts.Token.Duration > 0 {
 		token = spec.Timeouts.Token.Duration
 	}
 
