@@ -220,6 +220,7 @@ func TestClientSendsNoAuthorizationHeaderWithoutAChallenge(t *testing.T) {
 
 	server := httptest.NewTLSServer(http.HandlerFunc(func(resp http.ResponseWriter, req *http.Request) {
 		mu.Lock()
+
 		headers = append(headers, req.Header.Get("Authorization"))
 		mu.Unlock()
 	}))
@@ -418,6 +419,7 @@ func TestClientUsesNewCredentialVersionAndNotItsOldTokens(t *testing.T) {
 	current := upstream.Credential{ID: "cred-uid", Version: "1", Username: "registrygate", Password: fake.PAT()}
 
 	fake.ResetLog()
+
 	resp, err := get(t, client, path, current, scope)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode)

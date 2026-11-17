@@ -85,6 +85,7 @@ func NewClient(u *model.Upstream, options ClientOptions) (*Client, error) {
 	}
 
 	responseHeader, token := defaultResponseHeaderTimeout, defaultTokenTimeout
+
 	timeouts := u.Object.Spec.Timeouts
 	if timeouts.ResponseHeader != nil && timeouts.ResponseHeader.Duration > 0 {
 		responseHeader = timeouts.ResponseHeader.Duration
