@@ -3,27 +3,31 @@
 package live
 
 import (
+	"net/http"
 	"testing"
-	"time"
 
 	"github.com/google/go-containerregistry/pkg/v1/remote"
+	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestDeleteByDigestThroughTheProxy(t *testing.T) {
+func TestDeleteByDigestThroughTheProxyReturnsGHCRsUnsupported(t *testing.T) {
 	env := requireLive(t)
 	repo := env.repo("delete/by-digest")
 
-	// GitHub refuses to delete a package's last version, so the package
-	// keeps a second one.
-	env.pushThroughProxy(t, repo, "keep")
-	doomed := env.pushThroughProxy(t, repo, "doomed")
-	ref := env.proxyRef(t, repo+"@"+digestOf(t, doomed).String())
+	target := env.pushThroughProxy(t, repo, "target")
+	ref := env.proxyRef(t, repo+"@"+digestOf(t, target).String())
 
-	require.NoError(t, remote.Delete(ref, env.callerOptions(nil)...))
+	err := remote.Delete(ref, env.callerOptions(nil)...)
+	require.Error(t, err)
 
-	require.Eventually(t, func() bool {
-		_, err := remote.Head(ref, env.callerOptions(nil)...)
-		return err != nil
-	}, time.Minute, 2*time.Second, "the deleted manifest is still served")
+	var registryErr *transport.Error
+	require.ErrorAs(t, err, &registryErr)
+	assert.Equal(t, http.StatusMethodNotAllowed, registryErr.StatusCode)
+	require.NotEmpty(t, registryErr.Errors)
+	assert.Equal(t, transport.UnsupportedErrorCode, registryErr.Errors[0].Code)
+
+	_, err = remote.Head(ref, env.callerOptions(nil)...)
+	require.NoError(t, err, "the manifest must still be served after the refused delete")
 }
