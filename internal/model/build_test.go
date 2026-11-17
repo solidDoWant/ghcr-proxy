@@ -418,7 +418,7 @@ func TestBuildReadiness(t *testing.T) {
 			status: mirrorStatus, reason: v1alpha1.ReasonURLNotAllowed,
 		},
 		{
-			name:   "mirror with an http url under an https prefix is not allowed",
+			name:   "mirror with another scheme than the allowed prefix is not allowed",
 			mutate: func(_ *testing.T, f *fixture) { f.mirror().Spec.URL = "http://harbor.example/base" },
 			status: mirrorStatus, reason: v1alpha1.ReasonURLNotAllowed,
 		},
