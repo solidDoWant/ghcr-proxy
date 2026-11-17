@@ -55,13 +55,13 @@ In the e2e scenarios, "a CI pod" is a pod with a dind sidecar set up exactly as 
 ## Secrets
 
 - **AC-3-19 Rotation without restart.** Changing an `UpstreamCredential`'s Secret makes the next push use the new credential; changing a mirror's Secret makes the next mirror pull use it; renewing a serving certificate Secret makes new connections get the new certificate. No restart.
-  Tests:
+  Tests: `internal/server: TestCredentialSecretChangeAppliesToTheNextRequest`, `internal/server: TestMirrorSecretChangeAppliesToTheNextMirrorPull`, `internal/server: TestSNICertificatesFollowTheCurrentSnapshot`
 - **AC-3-20 Tenant Secrets through a named Role.** A `RegistryMirror` in a tenant namespace, whose Secret the proxy can read only through a Role with `resourceNames`, is ready and serves pulls. Without the Role it is `Ready=False, reason=SecretUnavailable`, and pulls fall back as for a failed mirror.
-  Tests:
+  Tests: `internal/secrets: TestSecretStoreFollowsTenantSecrets/a Secret readable through a resourceNames Role reports each change`, `internal/secrets: TestSecretStoreFollowsTenantSecrets/a Secret without a Role is forbidden until a Role is created`, `internal/model: TestBuildReadiness/mirror whose credentials Secret is forbidden has it unavailable`, `internal/server: TestMirrorRuleServesPullsWithTheMirrorsOwnCredential`, `internal/server: TestMirrorWithAnUnreadableSecretIsSkippedAndPullsFallBack`
 - **AC-3-21 Missing Secrets fail closed.** A credential whose Secret is missing or lacks its keys is `Ready=False`, and pushes that would use it get `403`; nothing is sent with a stale or empty credential.
-  Tests:
+  Tests: `internal/model: TestBuildReadiness/credential whose Secret is missing has it unavailable`, `internal/model: TestBuildReadiness/credential whose Secret has an empty password has it invalid`, `internal/model: TestBuildReadiness/credential whose Secret lacks the username has it invalid`, `internal/server: TestPushWithAnUnusableCredentialSecretIs403AndSendsNothingUpstream`
 - **AC-3-22 Separate key names.** A Secret with `username` and `password` keys (a harbor-operator robot's opaque Secret) works as is, and `usernameKey` / `passwordKey` select other key names.
-  Tests:
+  Tests: `internal/model: TestBuildReadsCredentialsFromTheSecret`, `internal/model: TestBuildReadiness/credential with other key names reads those keys`, `internal/model: TestBuildReadiness/credential with other key names doesn't fall back to the default keys`
 
 ## Mirrors
 
@@ -72,7 +72,7 @@ In the e2e scenarios, "a CI pod" is a pod with a dind sidecar set up exactly as 
 - **AC-3-25 Fallback.** With a mirror down or answering `5xx`, pulls fall back to the upstream; with `fallbackToUpstream: false` they fail with `502`; a mirror `401`/`403` gives `502` and never falls back.
   Tests:
 - **AC-3-26 Mirror URLs are limited.** A `RegistryMirror` whose URL doesn't match its upstream's `allowedMirrorURLs` is `Ready=False, reason=URLNotAllowed` and is never contacted.
-  Tests:
+  Tests: `internal/model: TestBuildReadiness/mirror on another host than the allowed prefix is not allowed`, `internal/model: TestBuildReadiness/mirror whose path continues the prefix without a slash is not allowed`, `internal/model: TestBuildReadiness/mirror with another scheme than the allowed prefix is not allowed`, `internal/controller: TestStatusShowsEachReadinessOutcome`, `internal/server: TestMirrorOutsideTheAllowedURLsIsNeverContacted`
 - **AC-3-27 Credentials stay with their endpoint.** No request to a mirror carries an upstream credential or a token made from one, and no request to an upstream carries a mirror credential.
   Tests:
 - **AC-3-28 Builds through mirrors.** A CI pod runs `docker build` with `FROM` images from upstreams A and B, and both base images come through its mirrors, with no change to the Dockerfile and no BuildKit configuration.
