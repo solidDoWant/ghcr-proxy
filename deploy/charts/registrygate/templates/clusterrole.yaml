@@ -7,6 +7,14 @@ metadata:
     {{- include "registrygate.labels" . | nindent 4 }}
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - authentication.k8s.io
   resources:
   - tokenreviews
@@ -15,7 +23,10 @@ rules:
 - apiGroups:
   - registrygate.soliddowant.dev
   resources:
-  - ghcraccesspolicies
+  - registryaccesspolicies
+  - registrymirrors
+  - upstreamcredentials
+  - upstreamregistries
   verbs:
   - get
   - list
@@ -23,6 +34,10 @@ rules:
 - apiGroups:
   - registrygate.soliddowant.dev
   resources:
-  - ghcraccesspolicies/status
+  - registryaccesspolicies/status
+  - registrymirrors/status
+  - upstreamcredentials/status
+  - upstreamregistries/status
   verbs:
+  - patch
   - update
