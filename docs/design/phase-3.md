@@ -322,12 +322,12 @@ The owner wants the proxy to reach Harbor through its in-cluster Service (`http:
 - **Token realms.** A realm whose host is an alias host passes the realm check, and the token request goes to the realm's path and query on the object's own `url` (scheme, host and port from `url`). A realm on a `tokenRealmHosts` host goes to that host as before.
 - **`Location` headers.** A `Location` on an alias host (any scheme) is treated as if it were on the object's `url`: then the usual rules apply (upload tokens for an upstream `202`, `/v2/<pathPrefix>/` stripping for a mirror, host rewrite for the rest). The proxy never sends a request to an alias host itself.
 - Upload tokens store the path and query only (section 6.2), so an alias `Location` and a `url` `Location` give the same token.
-- `aliasHosts` must not overlap the object's own `hosts` (an `UpstreamRegistry` can't alias a name it intercepts): `InvalidSpec`.
+- An `UpstreamRegistry`'s own `hosts` are always aliases too, without being listed. In the usual Harbor setup the name CI pods use (and the proxy intercepts) **is** Harbor's `externalURL` host, so Harbor's token realm and `Location`s name an intercepted host; they must go to `url` (the Service) like any other alias. Listing one of `hosts` in `aliasHosts` is allowed and changes nothing. (Amended 2026-11-17: an earlier version made that overlap `InvalidSpec`, which broke this setup.)
 
 ### 13.3 Pushing to Harbor with a robot the build pod never sees
 
 No new behaviour, only a documented setup (admin docs, plus the e2e of AC-3-36):
-- `UpstreamRegistry` `harbor` in an admin namespace: `hosts: [<Harbor's name>]`, `url: http://harbor-core.<ns>.svc`, `aliasHosts: [<Harbor's externalURL host>]`.
+- `UpstreamRegistry` `harbor` in an admin namespace: `hosts: [<Harbor's name>]`, `url: http://harbor-core.<ns>.svc`. When Harbor's `externalURL` host is that same name (the usual case), no `aliasHosts` are needed; otherwise list the `externalURL` host there.
 - Per project, in the admin namespace: harbor-operator's `HarborProjectRobot` (its Secret lands in the admin namespace; the `HarborProject` must admit it) and an `UpstreamCredential` with ceiling `<project>/**` for `pull`, `push`, `delete`, admitting only the project's namespace.
 - The project's policy has a credential rule for `<project>/**`. Its pods intercept the Harbor host like any other, so Harbor's own API isn't reachable from them; a project that needs it doesn't intercept the Harbor host (`SPEC.md` section 1).
 
