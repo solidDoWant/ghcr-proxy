@@ -1,11 +1,10 @@
-// Package config loads and validates the proxy's YAML config file and expands
-// its namespace grants.
+// Package config loads and validates the proxy's YAML config file: the server's own settings. Upstreams,
+// credentials, mirrors and access come from the custom resources, never from this file.
 package config
 
 import (
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -13,61 +12,15 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// Action is a registry action a grant can allow.
-type Action string
-
-// Registry actions.
-const (
-	ActionPull   Action = "pull"
-	ActionPush   Action = "push"
-	ActionDelete Action = "delete"
-)
-
 // Config is the validated proxy configuration. Build it with Load or Parse.
 type Config struct {
-	Upstream       Upstream
 	Authentication Authentication
-	Grants         Grants
-	TLS            TLS
 	Listen         Listen
 	Server         Server
 	Audit          Audit
-	Mirrors        Mirrors
 	Webhook        Webhook
 	// AdminNamespaces are the namespaces whose UpstreamRegistry objects count.
 	AdminNamespaces []string
-}
-
-// Mirrors holds the optional pull mirrors. A nil mirror is not configured.
-type Mirrors struct {
-	Policy    *Mirror
-	Anonymous *Mirror
-}
-
-// Mirror is one pull mirror: a registry that serves GHCR's content under
-// PathPrefix. Its credentials come from CredentialsFile only, never from the
-// PAT.
-type Mirror struct {
-	URL                   *url.URL
-	PathPrefix            string
-	CredentialsFile       string
-	CAFile                string
-	FallbackToUpstream    bool
-	ResponseHeaderTimeout time.Duration
-}
-
-// Upstream describes the registry the proxy forwards to.
-type Upstream struct {
-	URL          *url.URL
-	TokenHosts   []string
-	PATFile      string
-	CAFile       string
-	Timeout      time.Duration
-	TokenTimeout time.Duration
-	// APIURL is the GitHub REST API that deletes by digest go to.
-	APIURL *url.URL
-	// APITimeout bounds one REST delete, listing included.
-	APITimeout time.Duration
 }
 
 // Authentication configures ServiceAccount token review.
@@ -75,12 +28,6 @@ type Authentication struct {
 	Audience      string
 	CacheTTL      time.Duration
 	ReviewTimeout time.Duration
-}
-
-// TLS holds the serving certificate paths.
-type TLS struct {
-	CertFile string
-	KeyFile  string
 }
 
 // Webhook configures the validating admission webhook.
@@ -116,26 +63,11 @@ const (
 )
 
 type rawConfig struct {
-	Upstream struct {
-		URL          string   `json:"url"`
-		TokenHosts   []string `json:"tokenHosts"`
-		PATFile      string   `json:"patFile"`
-		CAFile       string   `json:"caFile"`
-		Timeout      string   `json:"timeout"`
-		TokenTimeout string   `json:"tokenTimeout"`
-		APIURL       string   `json:"apiURL"`
-		APITimeout   string   `json:"apiTimeout"`
-	} `json:"upstream"`
 	Authentication struct {
 		Audience      string `json:"audience"`
 		CacheTTL      string `json:"cacheTTL"`
 		ReviewTimeout string `json:"reviewTimeout"`
 	} `json:"authentication"`
-	Grants []rawGrant `json:"grants"`
-	TLS    struct {
-		CertFile string `json:"certFile"`
-		KeyFile  string `json:"keyFile"`
-	} `json:"tls"`
 	Listen struct {
 		HTTPS  string `json:"https"`
 		Health string `json:"health"`
@@ -149,10 +81,6 @@ type rawConfig struct {
 	Audit struct {
 		Enabled *bool `json:"enabled"`
 	} `json:"audit"`
-	Mirrors struct {
-		Policy    *rawMirror `json:"policy"`
-		Anonymous *rawMirror `json:"anonymous"`
-	} `json:"mirrors"`
 	AdminNamespaces []string `json:"adminNamespaces"`
 	Webhook         struct {
 		Enabled  bool   `json:"enabled"`
@@ -160,15 +88,6 @@ type rawConfig struct {
 		CertFile string `json:"certFile"`
 		KeyFile  string `json:"keyFile"`
 	} `json:"webhook"`
-}
-
-type rawMirror struct {
-	URL                   string `json:"url"`
-	PathPrefix            string `json:"pathPrefix"`
-	CredentialsFile       string `json:"credentialsFile"`
-	CAFile                string `json:"caFile"`
-	FallbackToUpstream    *bool  `json:"fallbackToUpstream"`
-	ResponseHeaderTimeout string `json:"responseHeaderTimeout"`
 }
 
 // Load reads and validates the config file at path. The error lists every
@@ -182,8 +101,24 @@ func Load(path string) (*Config, error) {
 	return Parse(data)
 }
 
-// Parse validates config file contents. It checks that the PAT file exists.
+// removedSections are sections of earlier versions whose settings are custom resources now.
+var removedSections = []string{"upstream", "grants", "mirrors", "tls"}
+
+// Parse validates config file contents.
 func Parse(data []byte) (*Config, error) {
+	var sections map[string]any
+	if err := yaml.Unmarshal(data, &sections); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
+	}
+
+	for _, section := range removedSections {
+		if _, present := sections[section]; present {
+			return nil, fmt.Errorf("parse config: the %q section is no longer read: upstreams, credentials, mirrors "+
+				"and access are set with the UpstreamRegistry, UpstreamCredential, RegistryMirror and "+
+				"RegistryAccessPolicy custom resources", section)
+		}
+	}
+
 	var raw rawConfig
 	if err := yaml.UnmarshalStrict(data, &raw); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
@@ -221,48 +156,12 @@ func Parse(data []byte) (*Config, error) {
 
 	cfg := &Config{}
 
-	up := raw.Upstream
-
-	rawURL := orDefault(up.URL, "https://ghcr.io")
-	if u, err := url.Parse(rawURL); err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
-		addf("upstream.url: %q is not an http or https URL", rawURL)
-	} else {
-		cfg.Upstream.URL = u
-	}
-
-	cfg.Upstream.TokenHosts = up.TokenHosts
-
-	cfg.Upstream.PATFile = orDefault(up.PATFile, "/var/run/registrygate/pat/token")
-	if info, err := os.Stat(cfg.Upstream.PATFile); err != nil || info.IsDir() {
-		addf("upstream.patFile: %q is not a readable file", cfg.Upstream.PATFile)
-	}
-
-	cfg.Upstream.CAFile = up.CAFile
-	cfg.Upstream.Timeout = duration("upstream.timeout", up.Timeout, "30m", positive, "must be positive")
-	cfg.Upstream.TokenTimeout = duration("upstream.tokenTimeout", up.TokenTimeout, "10s", positive, "must be positive")
-
-	rawAPIURL := orDefault(up.APIURL, "https://api.github.com/")
-	if u, err := url.Parse(rawAPIURL); err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
-		addf("upstream.apiURL: %q is not an http or https URL", rawAPIURL)
-	} else {
-		cfg.Upstream.APIURL = u
-	}
-
-	cfg.Upstream.APITimeout = duration("upstream.apiTimeout", up.APITimeout, "30s", positive, "must be positive")
-
 	au := raw.Authentication
 	cfg.Authentication.Audience = orDefault(au.Audience, "registrygate")
 	cfg.Authentication.CacheTTL = duration("authentication.cacheTTL", au.CacheTTL, "30s",
 		func(d time.Duration) bool { return d >= minCacheTTL && d <= maxCacheTTL }, "must be between 1s and 30s")
 	cfg.Authentication.ReviewTimeout = duration("authentication.reviewTimeout", au.ReviewTimeout, "5s", positive, "must be positive")
 
-	grants, grantErrs := compileGrants(raw.Grants)
-	cfg.Grants = grants
-
-	errs = append(errs, grantErrs...)
-
-	cfg.TLS.CertFile = orDefault(raw.TLS.CertFile, "/var/run/registrygate/tls/tls.crt")
-	cfg.TLS.KeyFile = orDefault(raw.TLS.KeyFile, "/var/run/registrygate/tls/tls.key")
 	cfg.Listen.HTTPS = orDefault(raw.Listen.HTTPS, ":8443")
 	cfg.Listen.Health = orDefault(raw.Listen.Health, ":8080")
 
@@ -291,43 +190,6 @@ func Parse(data []byte) (*Config, error) {
 	if raw.Audit.Enabled != nil {
 		cfg.Audit.Enabled = *raw.Audit.Enabled
 	}
-
-	mirror := func(field string, rm *rawMirror) *Mirror {
-		if rm == nil {
-			return nil
-		}
-
-		m := &Mirror{
-			PathPrefix:         rm.PathPrefix,
-			CredentialsFile:    rm.CredentialsFile,
-			CAFile:             rm.CAFile,
-			FallbackToUpstream: true,
-		}
-
-		if u, err := parseMirrorURL(rm.URL); err != nil {
-			addf("%s.url: %w", field, err)
-		} else {
-			m.URL = u
-		}
-
-		if err := validatePathPrefix(rm.PathPrefix); err != nil {
-			addf("%s.pathPrefix: %w", field, err)
-		}
-
-		if rm.CredentialsFile != "" && sameFile(rm.CredentialsFile, cfg.Upstream.PATFile) {
-			addf("%s.credentialsFile: %q is the PAT file; a mirror must have its own credentials", field, rm.CredentialsFile)
-		}
-
-		if rm.FallbackToUpstream != nil {
-			m.FallbackToUpstream = *rm.FallbackToUpstream
-		}
-
-		m.ResponseHeaderTimeout = duration(field+".responseHeaderTimeout", rm.ResponseHeaderTimeout, "10s", positive, "must be positive")
-
-		return m
-	}
-	cfg.Mirrors.Policy = mirror("mirrors.policy", raw.Mirrors.Policy)
-	cfg.Mirrors.Anonymous = mirror("mirrors.anonymous", raw.Mirrors.Anonymous)
 
 	if len(errs) > 0 {
 		return nil, fmt.Errorf("invalid config:\n%w", joinLines(errs))

@@ -18,6 +18,8 @@ const (
 	messageMirrorUnavailable  = "mirror unavailable"
 	messageNotReady           = "registrygate is not ready"
 	messageManifestTooLarge   = "manifest too large"
+	messageUploadUnusable     = "upstream returned an unusable upload location"
+	messageSessionQuery       = "query parameter not allowed on an upload session request"
 )
 
 type errorBody struct {
@@ -68,4 +70,8 @@ func errNotReady() *Error {
 
 func errManifestTooLarge() *Error {
 	return &Error{Status: http.StatusBadRequest, Code: "MANIFEST_INVALID", Message: messageManifestTooLarge}
+}
+
+func errSessionQuery() *Error {
+	return &Error{Status: http.StatusBadRequest, Code: "UNSUPPORTED", Message: messageSessionQuery}
 }

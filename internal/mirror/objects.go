@@ -10,7 +10,6 @@ import (
 
 	"k8s.io/apimachinery/pkg/types"
 
-	"github.com/solidDoWant/registrygate/internal/config"
 	"github.com/solidDoWant/registrygate/internal/metrics"
 	"github.com/solidDoWant/registrygate/internal/model"
 )
@@ -54,7 +53,7 @@ func NewClientFromMirror(mirror *model.Mirror, options ClientOptions) (*Client, 
 	}
 
 	return newClient(ClientConfig{
-		Mirror: &config.Mirror{
+		Mirror: &Settings{
 			URL:                   mirror.URL,
 			PathPrefix:            spec.PathPrefix,
 			FallbackToUpstream:    mirror.FallbackToUpstream,

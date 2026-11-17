@@ -39,6 +39,9 @@ var (
 	requireDigestInvalid = requireRegistryError(http.StatusBadRequest, "DIGEST_INVALID")
 )
 
+// sessionToken has the upload session token grammar; classification doesn't check its signature.
+const sessionToken = "c2Vzc2lvbi0x.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+
 type classifyCase struct {
 	name        string
 	method      string
@@ -78,6 +81,19 @@ func runClassifyCases(t *testing.T, cases []classifyCase) {
 			assert.Equal(t, testCase.wantDigest, request.Digest)
 			assert.Equal(t, testCase.wantSession, request.Session)
 			assert.Equal(t, testCase.wantMount, request.Mount)
+
+			if request.Route == registry.RouteUploadSession {
+				// The session's upstream URL is in its token; only the client's query is known here.
+				gotQuery := ""
+				if request.RawQuery != "" {
+					gotQuery = "?" + request.RawQuery
+				}
+
+				assert.Equal(t, testCase.wantURL, gotQuery)
+
+				return
+			}
+
 			assert.Equal(t, testCase.wantURL, request.UpstreamURL().String())
 		})
 	}
@@ -140,49 +156,25 @@ func TestClassifyRouteTable(t *testing.T) {
 			wantURL:   "/v2/owner/image/blobs/uploads/?from=owner%2Fother&mount=" + strings.ReplaceAll(digestA, ":", "%3A"),
 		},
 		{
-			name: "GET upload session", method: http.MethodGet, target: "/v2/owner/image/blobs/uploads/session-1",
-			wantRoute: registry.RouteUploadSession, wantAction: v1alpha1.ActionPush, wantName: "owner/image", wantSession: "session-1",
-			wantURL: "/v2/owner/image/blobs/uploads/session-1",
+			name: "GET upload session", method: http.MethodGet, target: "/v2/owner/image/blobs/uploads/" + sessionToken,
+			wantRoute: registry.RouteUploadSession, wantAction: v1alpha1.ActionPush, wantName: "owner/image", wantSession: sessionToken,
+			wantURL: "",
 		},
 		{
-			name: "PATCH upload session", method: http.MethodPatch, target: "/v2/owner/image/blobs/uploads/session-1",
-			wantRoute: registry.RouteUploadSession, wantAction: v1alpha1.ActionPush, wantName: "owner/image", wantSession: "session-1",
-			wantURL: "/v2/owner/image/blobs/uploads/session-1",
+			name: "PATCH upload session", method: http.MethodPatch, target: "/v2/owner/image/blobs/uploads/" + sessionToken,
+			wantRoute: registry.RouteUploadSession, wantAction: v1alpha1.ActionPush, wantName: "owner/image", wantSession: sessionToken,
+			wantURL: "",
 		},
 		{
-			name: "PUT upload session", method: http.MethodPut, target: "/v2/owner/image/blobs/uploads/session-1?digest=" + digestA,
-			wantRoute: registry.RouteUploadSession, wantAction: v1alpha1.ActionPush, wantName: "owner/image", wantSession: "session-1",
-			wantURL: "/v2/owner/image/blobs/uploads/session-1?digest=" + digestA,
+			name: "PUT upload session", method: http.MethodPut, target: "/v2/owner/image/blobs/uploads/c2Vzc2lvbi0x.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA?digest=" + digestA,
+			wantRoute: registry.RouteUploadSession, wantAction: v1alpha1.ActionPush, wantName: "owner/image", wantSession: sessionToken,
+			wantURL: "?digest=" + digestA,
 		},
 		{
 			name: "DELETE upload session cancels the upload and is push", method: http.MethodDelete,
-			target:    "/v2/owner/image/blobs/uploads/session-1",
-			wantRoute: registry.RouteUploadSession, wantAction: v1alpha1.ActionPush, wantName: "owner/image", wantSession: "session-1",
-			wantURL: "/v2/owner/image/blobs/uploads/session-1",
-		},
-		{
-			name: "GET GHCR singular upload session", method: http.MethodGet,
-			target:    "/v2/owner/image/blobs/upload/19.3c730f6c-c0f8-4e04-9c9c-8864a15a4a1b",
-			wantRoute: registry.RouteUploadSession, wantAction: v1alpha1.ActionPush, wantName: "owner/image", wantSession: "19.3c730f6c-c0f8-4e04-9c9c-8864a15a4a1b",
-			wantURL: "/v2/owner/image/blobs/upload/19.3c730f6c-c0f8-4e04-9c9c-8864a15a4a1b",
-		},
-		{
-			name: "PATCH GHCR singular upload session", method: http.MethodPatch,
-			target:    "/v2/owner/image/blobs/upload/19.3c730f6c-c0f8-4e04-9c9c-8864a15a4a1b",
-			wantRoute: registry.RouteUploadSession, wantAction: v1alpha1.ActionPush, wantName: "owner/image", wantSession: "19.3c730f6c-c0f8-4e04-9c9c-8864a15a4a1b",
-			wantURL: "/v2/owner/image/blobs/upload/19.3c730f6c-c0f8-4e04-9c9c-8864a15a4a1b",
-		},
-		{
-			name: "PUT GHCR singular upload session", method: http.MethodPut,
-			target:    "/v2/owner/image/blobs/upload/19.3c730f6c-c0f8-4e04-9c9c-8864a15a4a1b?digest=" + digestA,
-			wantRoute: registry.RouteUploadSession, wantAction: v1alpha1.ActionPush, wantName: "owner/image", wantSession: "19.3c730f6c-c0f8-4e04-9c9c-8864a15a4a1b",
-			wantURL: "/v2/owner/image/blobs/upload/19.3c730f6c-c0f8-4e04-9c9c-8864a15a4a1b?digest=" + digestA,
-		},
-		{
-			name: "DELETE GHCR singular upload session", method: http.MethodDelete,
-			target:    "/v2/owner/image/blobs/upload/19.3c730f6c-c0f8-4e04-9c9c-8864a15a4a1b",
-			wantRoute: registry.RouteUploadSession, wantAction: v1alpha1.ActionPush, wantName: "owner/image", wantSession: "19.3c730f6c-c0f8-4e04-9c9c-8864a15a4a1b",
-			wantURL: "/v2/owner/image/blobs/upload/19.3c730f6c-c0f8-4e04-9c9c-8864a15a4a1b",
+			target:    "/v2/owner/image/blobs/uploads/" + sessionToken,
+			wantRoute: registry.RouteUploadSession, wantAction: v1alpha1.ActionPush, wantName: "owner/image", wantSession: sessionToken,
+			wantURL: "",
 		},
 		{
 			name: "PUT manifest", method: http.MethodPut, target: "/v2/owner/image/manifests/latest",
@@ -221,10 +213,10 @@ func TestClassifyRejectsMethodsOutsideTheRouteTable(t *testing.T) {
 		{http.MethodDelete, "/v2/owner/image/referrers/" + digestA},
 		{http.MethodGet, "/v2/owner/image/blobs/uploads/"},
 		{http.MethodPut, "/v2/owner/image/blobs/uploads/"},
-		{http.MethodPost, "/v2/owner/image/blobs/uploads/session-1"},
-		{http.MethodHead, "/v2/owner/image/blobs/uploads/session-1"},
-		{http.MethodPost, "/v2/owner/image/blobs/upload/session-1"},
-		{http.MethodHead, "/v2/owner/image/blobs/upload/session-1"},
+		{http.MethodPost, "/v2/owner/image/blobs/uploads/" + sessionToken},
+		{http.MethodHead, "/v2/owner/image/blobs/uploads/" + sessionToken},
+		{http.MethodPost, "/v2/owner/image/blobs/upload/" + sessionToken},
+		{http.MethodHead, "/v2/owner/image/blobs/upload/" + sessionToken},
 		{http.MethodOptions, "/v2/owner/image/manifests/latest"},
 	}
 	for _, testCase := range cases {
@@ -268,34 +260,25 @@ func TestClassifyNamesContainingRouteKeywords(t *testing.T) {
 			wantURL: "/v2/blobs/uploads/blobs/uploads/",
 		},
 		{
-			name: "upload session named uploads", method: http.MethodPatch,
-			target:    "/v2/owner/manifests/blobs/uploads/uploads",
-			wantRoute: registry.RouteUploadSession, wantAction: v1alpha1.ActionPush, wantName: "owner/manifests", wantSession: "uploads",
-			wantURL: "/v2/owner/manifests/blobs/uploads/uploads",
+			name: "upload session token after a name ending in manifests", method: http.MethodPatch,
+			target:    "/v2/owner/manifests/blobs/uploads/" + sessionToken,
+			wantRoute: registry.RouteUploadSession, wantAction: v1alpha1.ActionPush, wantName: "owner/manifests", wantSession: sessionToken,
 		},
 		{
-			name: "singular upload session of a name containing blobs and upload", method: http.MethodPatch,
-			target:    "/v2/owner/blobs/upload/blobs/upload/session-1",
-			wantRoute: registry.RouteUploadSession, wantAction: v1alpha1.ActionPush, wantName: "owner/blobs/upload", wantSession: "session-1",
-			wantURL: "/v2/owner/blobs/upload/blobs/upload/session-1",
+			name: "upload session of a name containing blobs and upload", method: http.MethodPatch,
+			target:    "/v2/owner/blobs/upload/blobs/uploads/" + sessionToken,
+			wantRoute: registry.RouteUploadSession, wantAction: v1alpha1.ActionPush, wantName: "owner/blobs/upload", wantSession: sessionToken,
 		},
 		{
 			name: "plural upload session of a name ending in upload", method: http.MethodPatch,
-			target:    "/v2/owner/upload/blobs/uploads/session-1",
-			wantRoute: registry.RouteUploadSession, wantAction: v1alpha1.ActionPush, wantName: "owner/upload", wantSession: "session-1",
-			wantURL: "/v2/owner/upload/blobs/uploads/session-1",
+			target:    "/v2/owner/upload/blobs/uploads/" + sessionToken,
+			wantRoute: registry.RouteUploadSession, wantAction: v1alpha1.ActionPush, wantName: "owner/upload", wantSession: sessionToken,
+			wantURL: "",
 		},
 		{
-			name: "singular upload session of a name ending in uploads", method: http.MethodPatch,
-			target:    "/v2/owner/uploads/blobs/upload/session-1",
-			wantRoute: registry.RouteUploadSession, wantAction: v1alpha1.ActionPush, wantName: "owner/uploads", wantSession: "session-1",
-			wantURL: "/v2/owner/uploads/blobs/upload/session-1",
-		},
-		{
-			name: "singular upload session named upload", method: http.MethodPut,
-			target:    "/v2/owner/image/blobs/upload/upload?digest=" + digestA,
-			wantRoute: registry.RouteUploadSession, wantAction: v1alpha1.ActionPush, wantName: "owner/image", wantSession: "upload",
-			wantURL: "/v2/owner/image/blobs/upload/upload?digest=" + digestA,
+			name: "upload session of a name ending in uploads", method: http.MethodPatch,
+			target:    "/v2/owner/uploads/blobs/uploads/" + sessionToken,
+			wantRoute: registry.RouteUploadSession, wantAction: v1alpha1.ActionPush, wantName: "owner/uploads", wantSession: sessionToken,
 		},
 		{
 			name: "upload start of a name ending in upload", method: http.MethodPost,
@@ -319,7 +302,7 @@ func TestClassifyNamesContainingRouteKeywords(t *testing.T) {
 		},
 		{
 			name: "singular upload session with no name", method: http.MethodPatch,
-			target: "/v2/blobs/upload/session-1", assertErr: requireNotFound,
+			target: "/v2/blobs/upload/" + sessionToken, assertErr: requireNotFound,
 		},
 		{
 			name: "manifest push of a name containing referrers", method: http.MethodPut,
@@ -358,7 +341,7 @@ func TestClassifyRejectsMalformedPaths(t *testing.T) {
 		{"upper-case last component", http.MethodGet, "/v2/owner/Image/manifests/latest"},
 		{"trailing slash on manifest", http.MethodGet, "/v2/owner/image/manifests/latest/"},
 		{"trailing slash on tag list", http.MethodGet, "/v2/owner/image/tags/list/"},
-		{"trailing slash on upload session", http.MethodPatch, "/v2/owner/image/blobs/uploads/session-1/"},
+		{"trailing slash on upload session", http.MethodPatch, "/v2/owner/image/blobs/uploads/c2Vzc2lvbi0x.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/"},
 		{"no trailing slash on upload start", http.MethodPost, "/v2/owner/image/blobs/uploads"},
 		{"version check without slash", http.MethodGet, "/v2"},
 		{"name component with invalid separator", http.MethodGet, "/v2/owner/-image/manifests/latest"},
@@ -371,8 +354,7 @@ func TestClassifyRejectsMalformedPaths(t *testing.T) {
 		{"invalid blob digest", http.MethodGet, "/v2/owner/image/blobs/sha256:abc"},
 		{"upper-case blob digest", http.MethodGet, "/v2/owner/image/blobs/" + strings.ToUpper(digestA)},
 		{"invalid referrers digest", http.MethodGet, "/v2/owner/image/referrers/latest"},
-		{"upload session with invalid characters", http.MethodPatch, "/v2/owner/image/blobs/uploads/a:b"},
-		{"upload session over 256 characters", http.MethodPatch, "/v2/owner/image/blobs/uploads/" + strings.Repeat("s", 257)},
+		{"singular upload session path", http.MethodPatch, "/v2/owner/image/blobs/upload/" + sessionToken},
 		{"upper-case route keyword", http.MethodGet, "/v2/owner/image/Manifests/latest"},
 	}
 	for _, testCase := range cases {
@@ -400,27 +382,53 @@ func TestClassifyRejectsMalformedPaths(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, tag, request.Reference)
 	})
+}
 
-	t.Run("upload session of exactly 256 characters", func(t *testing.T) {
-		session := strings.Repeat("s", 256)
-		request, err := registry.Classify(newRequest(t, http.MethodPatch, "/v2/owner/image/blobs/uploads/"+session))
-		require.NoError(t, err)
-		assert.Equal(t, session, request.Session)
-	})
+func TestClassifyUploadSessionTokens(t *testing.T) {
+	refused := map[string]string{
+		"no signature":             "c2Vzc2lvbg",
+		"short signature":          "c2Vzc2lvbg." + strings.Repeat("A", 42),
+		"long signature":           "c2Vzc2lvbg." + strings.Repeat("A", 44),
+		"empty payload":            "." + strings.Repeat("A", 43),
+		"payload over 2800":        strings.Repeat("A", 2801) + "." + strings.Repeat("A", 43),
+		"character outside base64": "c2Vz:2lvbg." + strings.Repeat("A", 43),
+		"GHCR's own session":       "19.3c730f6c-c0f8-4e04-9c9c-8864a15a4a1b",
+	}
 
-	t.Run("GHCR upload session of digits, a dot and a UUID", func(t *testing.T) {
-		session := "19.3c730f6c-c0f8-4e04-9c9c-8864a15a4a1b"
-		request, err := registry.Classify(newRequest(t, http.MethodPatch, "/v2/owner/image/blobs/upload/"+session))
-		require.NoError(t, err)
-		assert.Equal(t, session, request.Session)
-	})
+	for name, token := range refused {
+		t.Run(name, func(t *testing.T) {
+			_, err := registry.Classify(newRequest(t, http.MethodPatch, "/v2/owner/image/blobs/uploads/"+token))
 
-	t.Run("upload session with every allowed character", func(t *testing.T) {
-		session := "AZaz09._=~+-"
-		request, err := registry.Classify(newRequest(t, http.MethodPatch, "/v2/owner/image/blobs/uploads/"+session))
+			var registryErr *registry.Error
+			require.ErrorAs(t, err, &registryErr)
+			assert.Equal(t, http.StatusNotFound, registryErr.Status)
+			assert.Equal(t, "BLOB_UPLOAD_UNKNOWN", registryErr.Code)
+		})
+	}
+
+	t.Run("payload of exactly 2800 characters", func(t *testing.T) {
+		token := strings.Repeat("A", 2800) + "." + strings.Repeat("A", 43)
+		request, err := registry.Classify(newRequest(t, http.MethodPatch, "/v2/owner/image/blobs/uploads/"+token))
 		require.NoError(t, err)
-		assert.Equal(t, session, request.Session)
+		assert.Equal(t, token, request.Session)
 	})
+}
+
+func TestClassifyPathLimitIs4096OnlyForUploadSessions(t *testing.T) {
+	longToken := strings.Repeat("A", 2800) + "." + strings.Repeat("A", 43)
+	session := "/v2/owner/image/blobs/uploads/" + longToken
+	require.Greater(t, len(session), 2048)
+
+	request, err := registry.Classify(newRequest(t, http.MethodPatch, session))
+	require.NoError(t, err, "a session path over 2048 bytes is accepted")
+	assert.Equal(t, longToken, request.Session)
+
+	// Over 4096 bytes nothing is classified, whatever the route: the token grammar is never reached.
+	over := "/v2/" + strings.Repeat("a/", (4097-len(session))/2+1) + strings.TrimPrefix(session, "/v2/")
+	require.Greater(t, len(over), 4096)
+
+	_, err = registry.Classify(newRequest(t, http.MethodPatch, over))
+	requireNotFound(t, err)
 }
 
 func TestClassifyUnknownPaths(t *testing.T) {
@@ -485,28 +493,30 @@ func TestClassifyQueryParameters(t *testing.T) {
 			target: uploadStart + "?digest=" + digestA + "&digest=" + digestA, assertErr: requireDigestInvalid,
 		},
 		{
-			name: "upload session PUT keeps the upstream's state parameters as sent", method: http.MethodPut,
-			target:    "/v2/owner/image/blobs/uploads/session-1?_state=abc%3D%3D&digest=" + digestA,
-			wantRoute: registry.RouteUploadSession, wantAction: v1alpha1.ActionPush, wantName: "owner/image", wantSession: "session-1",
-			wantURL: "/v2/owner/image/blobs/uploads/session-1?_state=abc%3D%3D&digest=" + digestA,
+			name: "upload session PUT keeps the client's query as sent", method: http.MethodPut,
+			target:    "/v2/owner/image/blobs/uploads/c2Vzc2lvbi0x.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA?_state=abc%3D%3D&digest=" + digestA,
+			wantRoute: registry.RouteUploadSession, wantAction: v1alpha1.ActionPush, wantName: "owner/image", wantSession: sessionToken,
+			wantURL: "?_state=abc%3D%3D&digest=" + digestA,
 		},
 		{
-			name: "upload session PUT without digest", method: http.MethodPut,
-			target: "/v2/owner/image/blobs/uploads/session-1?_state=abc", assertErr: requireDigestInvalid,
+			name: "upload session PUT without digest leaves the digest to the session URL", method: http.MethodPut,
+			target:    "/v2/owner/image/blobs/uploads/c2Vzc2lvbi0x.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA?_state=abc",
+			wantRoute: registry.RouteUploadSession, wantAction: v1alpha1.ActionPush, wantName: "owner/image", wantSession: sessionToken,
+			wantURL: "?_state=abc",
 		},
 		{
 			name: "upload session PUT with invalid digest", method: http.MethodPut,
-			target: "/v2/owner/image/blobs/uploads/session-1?digest=sha256:abc", assertErr: requireDigestInvalid,
+			target: "/v2/owner/image/blobs/uploads/c2Vzc2lvbi0x.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA?digest=sha256:abc", assertErr: requireDigestInvalid,
 		},
 		{
 			name: "upload session PUT with repeated digest", method: http.MethodPut,
-			target: "/v2/owner/image/blobs/uploads/session-1?digest=" + digestA + "&digest=" + digestA, assertErr: requireDigestInvalid,
+			target: "/v2/owner/image/blobs/uploads/c2Vzc2lvbi0x.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA?digest=" + digestA + "&digest=" + digestA, assertErr: requireDigestInvalid,
 		},
 		{
-			name: "upload session PATCH drops the query", method: http.MethodPatch,
-			target:    "/v2/owner/image/blobs/uploads/session-1?_state=abc",
-			wantRoute: registry.RouteUploadSession, wantAction: v1alpha1.ActionPush, wantName: "owner/image", wantSession: "session-1",
-			wantURL: "/v2/owner/image/blobs/uploads/session-1",
+			name: "upload session PATCH keeps the query for the forwarder to judge", method: http.MethodPatch,
+			target:    "/v2/owner/image/blobs/uploads/c2Vzc2lvbi0x.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA?_state=abc",
+			wantRoute: registry.RouteUploadSession, wantAction: v1alpha1.ActionPush, wantName: "owner/image", wantSession: sessionToken,
+			wantURL: "?_state=abc",
 		},
 		{
 			name: "tag list keeps only n and last", method: http.MethodGet,

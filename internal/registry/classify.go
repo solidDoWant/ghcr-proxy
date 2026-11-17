@@ -5,13 +5,13 @@ package registry
 import (
 	"net/http"
 	"net/url"
-	"regexp"
 	"strings"
 
 	"github.com/distribution/reference"
 	"github.com/opencontainers/go-digest"
 
 	"github.com/solidDoWant/registrygate/api/v1alpha1"
+	"github.com/solidDoWant/registrygate/internal/uploadtoken"
 )
 
 // Route identifies which registry API endpoint a request addresses.
@@ -30,20 +30,19 @@ const (
 	RouteReferrers
 	// RouteUploadStart is /v2/<name>/blobs/uploads/.
 	RouteUploadStart
-	// RouteUploadSession is /v2/<name>/blobs/uploads/<session>, or GHCR's
-	// /v2/<name>/blobs/upload/<session>.
+	// RouteUploadSession is /v2/<name>/blobs/uploads/<token>, where <token>
+	// is a signed upload session token the proxy issued.
 	RouteUploadSession
 )
 
 const (
 	maxPathLength = 2048
-	maxNameLength = reference.RepositoryNameTotalLengthMax
-	basePath      = "/v2/"
+	// maxSessionPathLength is the path limit of the upload session route,
+	// whose token is long.
+	maxSessionPathLength = 4096
+	maxNameLength        = reference.RepositoryNameTotalLengthMax
+	basePath             = "/v2/"
 )
-
-// sessionPattern is the grammar of an upload session identifier: one path
-// segment of URL-safe characters, so it can be put back into a path as is.
-var sessionPattern = regexp.MustCompile(`^[A-Za-z0-9._=~+-]{1,256}$`)
 
 // Mount is a valid cross-repository mount on an upload start. It needs pull
 // on From in addition to push on the request's name.
@@ -66,26 +65,25 @@ type Request struct {
 	Reference string
 	// Digest is the digest of a blob or referrers route.
 	Digest digest.Digest
-	// Session is the upload session identifier of an upload session route.
+	// Session is the upload session token of an upload session route. The
+	// forwarder opens it into the upstream's session URL.
 	Session string
 	// Mount is set on an upload start with a valid mount. Setting it to nil
 	// turns the request into a plain upload start.
 	Mount *Mount
 
-	// uploadSegment is the segment before the session of an upload session
-	// route, "uploads" or GHCR's "upload". The session URL is the upstream's
-	// own, so it is forwarded in the form the client was given.
-	uploadSegment string
 	// monolithicDigest is the digest of a monolithic upload start.
 	monolithicDigest digest.Digest
-	// rawQuery is the query of a route that forwards the query as sent.
-	rawQuery string
+	// RawQuery is the client's query on an upload session route. The
+	// forwarder adds it to the opened session URL.
+	RawQuery string
 	// query holds the kept parameters of a route that filters its query.
 	query url.Values
 }
 
 // UpstreamURL returns the path and query to send upstream, rebuilt from the
-// classified fields.
+// classified fields. The upload session route has none here: its URL is in
+// the session token, which only the forwarder can open.
 func (r Request) UpstreamURL() *url.URL {
 	upstream := &url.URL{Path: basePath}
 
@@ -114,9 +112,6 @@ func (r Request) UpstreamURL() *url.URL {
 		}
 
 		upstream.RawQuery = query.Encode()
-	case RouteUploadSession:
-		upstream.Path += r.Name + "/blobs/" + r.uploadSegment + "/" + r.Session
-		upstream.RawQuery = r.rawQuery
 	}
 
 	if r.query != nil {
@@ -142,6 +137,10 @@ func errNotFound() *Error {
 	return &Error{Status: http.StatusNotFound, Code: "NOT_FOUND", Message: "not found"}
 }
 
+func errBlobUploadUnknown() *Error {
+	return &Error{Status: http.StatusNotFound, Code: "BLOB_UPLOAD_UNKNOWN", Message: "blob upload unknown"}
+}
+
 func errDigestInvalid() *Error {
 	return &Error{Status: http.StatusBadRequest, Code: "DIGEST_INVALID", Message: "invalid digest"}
 }
@@ -161,7 +160,7 @@ func Classify(r *http.Request) (Request, error) {
 		return Request{}, err
 	}
 
-	if len(path) > maxPathLength || !strings.HasPrefix(path, basePath) {
+	if len(path) > maxSessionPathLength || !strings.HasPrefix(path, basePath) {
 		return Request{}, errNotFound()
 	}
 
@@ -175,8 +174,12 @@ func Classify(r *http.Request) (Request, error) {
 
 	segments := strings.Split(strings.TrimPrefix(path, basePath), "/")
 
-	request, nameSegments, ok := classifyRoute(r.Method, segments)
-	if !ok {
+	request, nameSegments, err := classifyRoute(r.Method, segments)
+	if err != nil {
+		return Request{}, err
+	}
+
+	if request.Route != RouteUploadSession && len(path) > maxPathLength {
 		return Request{}, errNotFound()
 	}
 
@@ -196,8 +199,23 @@ func Classify(r *http.Request) (Request, error) {
 }
 
 // classifyRoute matches the route from the right, returning the classified
-// route fields and the segments that make up the name.
-func classifyRoute(method string, segments []string) (Request, []string, bool) {
+// route fields and the segments that make up the name. Upload session
+// requests whose token doesn't have the token grammar get 404
+// BLOB_UPLOAD_UNKNOWN; every other request outside the route table gets 404.
+func classifyRoute(method string, segments []string) (Request, []string, error) {
+	request, nameSegments, ok := matchRoute(method, segments)
+	if !ok {
+		return Request{}, nil, errNotFound()
+	}
+
+	if request.Route == RouteUploadSession && !uploadtoken.Valid(request.Session) {
+		return Request{}, nil, errBlobUploadUnknown()
+	}
+
+	return request, nameSegments, nil
+}
+
+func matchRoute(method string, segments []string) (Request, []string, bool) {
 	count := len(segments)
 	if count < 3 {
 		return Request{}, nil, false
@@ -205,27 +223,22 @@ func classifyRoute(method string, segments []string) (Request, []string, bool) {
 
 	last, beforeLast := segments[count-1], segments[count-2]
 
-	if count >= 4 && segments[count-3] == "blobs" && (beforeLast == "uploads" || beforeLast == "upload") {
+	if count >= 4 && segments[count-3] == "blobs" && beforeLast == "uploads" {
 		nameSegments := segments[:count-3]
 
 		if last == "" {
-			// Only the plural form starts an upload; GHCR uses the
-			// singular form for session URLs alone.
-			if beforeLast != "uploads" || method != http.MethodPost {
+			if method != http.MethodPost {
 				return Request{}, nil, false
 			}
 
 			return Request{Route: RouteUploadStart, Action: v1alpha1.ActionPush}, nameSegments, true
 		}
 
-		if !isMethod(method, http.MethodGet, http.MethodPatch, http.MethodPut, http.MethodDelete) ||
-			!validSession(last) {
+		if !isMethod(method, http.MethodGet, http.MethodPatch, http.MethodPut, http.MethodDelete) {
 			return Request{}, nil, false
 		}
 
-		return Request{
-			Route: RouteUploadSession, Action: v1alpha1.ActionPush, Session: last, uploadSegment: beforeLast,
-		}, nameSegments, true
+		return Request{Route: RouteUploadSession, Action: v1alpha1.ActionPush, Session: last}, nameSegments, true
 	}
 
 	nameSegments := segments[:count-2]
@@ -298,21 +311,18 @@ func classifyQuery(request *Request, rawQuery string) error {
 
 		request.Mount = parseMount(values, request.Name)
 	case RouteUploadSession:
-		if request.Method != http.MethodPut {
-			return nil
-		}
+		if digests, present := values["digest"]; present {
+			if len(digests) != 1 {
+				return errDigestInvalid()
+			}
 
-		digests := values["digest"]
-		if len(digests) != 1 {
-			return errDigestInvalid()
+			if _, err := digest.Parse(digests[0]); err != nil {
+				return errDigestInvalid()
+			}
 		}
-
-		if _, err := digest.Parse(digests[0]); err != nil {
-			return errDigestInvalid()
-		}
-		// The upload session URL is the upstream's own, so its state
-		// parameters go back as the client received them.
-		request.rawQuery = rawQuery
+		// Which parameters a session request may carry depends on the
+		// session URL in the token, so the forwarder checks them.
+		request.RawQuery = rawQuery
 	case RouteTagsList:
 		request.query = keepParameters(values, "n", "last")
 	case RouteReferrers:
@@ -386,10 +396,6 @@ func validReference(ref string) bool {
 	_, err = reference.WithTag(named, ref)
 
 	return err == nil
-}
-
-func validSession(session string) bool {
-	return session != "." && session != ".." && sessionPattern.MatchString(session)
 }
 
 func actionFor(method string, actions map[string]v1alpha1.Action) (v1alpha1.Action, bool) {

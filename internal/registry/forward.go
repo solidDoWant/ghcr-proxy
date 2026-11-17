@@ -15,28 +15,31 @@ import (
 	"github.com/solidDoWant/registrygate/api/v1alpha1"
 	"github.com/solidDoWant/registrygate/internal/metrics"
 	"github.com/solidDoWant/registrygate/internal/mirror"
+	"github.com/solidDoWant/registrygate/internal/model"
+	"github.com/solidDoWant/registrygate/internal/uploadtoken"
 	"github.com/solidDoWant/registrygate/internal/upstream"
 )
 
 // maxManifestBytes is the largest manifest the proxy buffers for a push.
 const maxManifestBytes = 4 << 20
 
-// Credential is the upstream credential a forwarded request carries.
-type Credential int
-
-const (
-	// CredentialAnonymous is a token fetched with no credential.
-	CredentialAnonymous Credential = iota
-	// CredentialPAT is a token fetched with the PAT, scoped to the request.
-	CredentialPAT
-)
-
-// Forward is what the forwarder needs to know about an authorized request.
+// Forward is what the forwarder needs to know about a resolved request.
 type Forward struct {
 	Request Request
-	// Credential is PAT-backed only when a policy and its grant allow the
-	// request; everything else goes upstream with an anonymous token.
-	Credential Credential
+	// Upstream is the upstream serving the host.
+	Upstream *model.Upstream
+	// Credential is the credential the request goes upstream with; nil sends
+	// it with no credential.
+	Credential *model.Credential
+	// Mirror serves manifest and blob downloads first; nil for none.
+	Mirror *model.Mirror
+	// MirrorRule is set when Mirror is a rule's mirror rather than the
+	// upstream's default mirror: a 401 or 403 from it is then a failed
+	// mirror (502), never a challenge.
+	MirrorRule bool
+	// MirrorFailed is set when the rule's mirror isn't ready: its pulls take
+	// the fallback rule without contacting it.
+	MirrorFailed bool
 	// AnonymousCaller is set when the client sent no credential. Refused
 	// anonymous pulls are then answered with a challenge for 404 too.
 	AnonymousCaller bool
@@ -61,76 +64,37 @@ func (r Request) Scopes() []string {
 	return nil
 }
 
-// TokenSource fetches upstream registry tokens.
-type TokenSource interface {
-	Token(ctx context.Context, kind upstream.Kind, scopes []string) (upstream.Token, error)
-	Invalidate(token upstream.Token)
-}
-
 // ForwarderConfig configures a Forwarder.
 type ForwarderConfig struct {
-	// Upstream is the upstream registry URL; only scheme and host are used.
-	Upstream *url.URL
-	// Transport carries forwarded requests. It must not follow redirects or
-	// add credentials. http.DefaultTransport when nil.
-	Transport http.RoundTripper
-	Tokens    TokenSource
-	// Timeout bounds one whole upstream request, body included.
-	Timeout time.Duration
-	Logger  *slog.Logger
-	// PolicyMirror serves pulls a policy allows; AnonymousMirror serves
-	// anonymous and not-allowed pulls. Nil when not configured.
-	PolicyMirror    MirrorClient
-	AnonymousMirror MirrorClient
+	// Upstreams holds the client of each upstream.
+	Upstreams *upstream.Clients
+	// RuleMirrors and DefaultMirrors hold the clients of rules' mirrors and
+	// of upstreams' default mirrors. They are separate caches so their token
+	// fetches are counted apart.
+	RuleMirrors    *mirror.Cache
+	DefaultMirrors *mirror.Cache
+	// UploadTokens returns the codec for upload session tokens, or nil while
+	// the signing key isn't loaded.
+	UploadTokens func() *uploadtoken.Codec
+	Logger       *slog.Logger
 	// Metrics counts upstream requests and mirror fallbacks; nil turns it off.
 	Metrics *metrics.Metrics
-	// API is the GitHub REST API that manifest deletes by digest go to. With
-	// no API URL those deletes are refused without an upstream call.
-	API APIConfig
 }
 
-// MirrorClient sends pulls to one mirror with the mirror's own credential.
-type MirrorClient interface {
-	URL() *url.URL
-	PathPrefix() string
-	FallbackToUpstream() bool
-	// SameHost reports whether u is on the mirror's scheme and host.
-	SameHost(u *url.URL) bool
-	// Send sends req, already pointed at the mirror, with a pull token for
-	// scope.
-	Send(req *http.Request, scope string) (*http.Response, error)
-}
-
-// Forwarder sends classified, authorized requests to the upstream with the
-// proxy's own credential and passes the answer back.
+// Forwarder sends resolved requests to the upstream or a mirror with that
+// endpoint's own credential and passes the answer back.
 type Forwarder struct {
 	cfg   ForwarderConfig
 	proxy *httputil.ReverseProxy
-	rest  *restDeleter
 }
 
 // NewForwarder returns a Forwarder for cfg.
 func NewForwarder(cfg ForwarderConfig) *Forwarder {
-	if cfg.Transport == nil {
-		cfg.Transport = http.DefaultTransport
-	}
-
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
 
 	forwarder := &Forwarder{cfg: cfg}
-
-	if cfg.API.URL != nil {
-		// The config check accepts only URLs go-github takes; should it still
-		// refuse one, deletes by digest are refused, never sent elsewhere.
-		rest, err := newRESTDeleter(cfg.API, cfg.Metrics)
-		if err != nil {
-			cfg.Logger.Error("REST API client not set up; deletes by digest are refused", "error", err.Error())
-		}
-
-		forwarder.rest = rest
-	}
 
 	forwarder.proxy = &httputil.ReverseProxy{
 		Rewrite:        forwarder.rewrite,
@@ -148,6 +112,9 @@ func NewForwarder(cfg ForwarderConfig) *Forwarder {
 // exchange carries one request's state between the reverse proxy's hooks.
 type exchange struct {
 	forward    Forward
+	client     *upstream.Client
+	codec      *uploadtoken.Codec
+	target     *url.URL
 	clientHost string
 	// manifest is the buffered body of a manifest push, for a retry.
 	manifest []byte
@@ -160,11 +127,29 @@ type exchangeKey struct{}
 // ServeForward forwards the request and writes the answer. It returns the
 // status the upstream answered with, or 0 if nothing came back.
 func (f *Forwarder) ServeForward(resp http.ResponseWriter, req *http.Request, forward Forward) int {
-	if isRESTDelete(forward.Request) {
-		return f.serveRESTDelete(resp, req, forward)
+	client, err := f.cfg.Upstreams.Get(forward.Upstream)
+	if err != nil {
+		f.cfg.Logger.Error("upstream client not built", "upstream", forward.Upstream.Name().String(), "error", err.Error())
+		WriteError(resp, errBadGateway(messageUnavailable))
+
+		return 0
 	}
 
-	state := &exchange{forward: forward, clientHost: req.Host}
+	state := &exchange{forward: forward, client: client, clientHost: req.Host, target: forward.Request.UpstreamURL()}
+
+	if f.cfg.UploadTokens != nil {
+		state.codec = f.cfg.UploadTokens()
+	}
+
+	if forward.Request.Route == RouteUploadSession {
+		target, answer := state.openSession()
+		if answer != nil {
+			WriteError(resp, answer)
+			return 0
+		}
+
+		state.target = target
+	}
 
 	if forward.Request.Route == RouteManifest && req.Method == http.MethodPut {
 		manifest, err := io.ReadAll(io.LimitReader(req.Body, maxManifestBytes+1))
@@ -185,31 +170,31 @@ func (f *Forwarder) ServeForward(resp http.ResponseWriter, req *http.Request, fo
 
 	ctx := context.WithValue(req.Context(), exchangeKey{}, state)
 
-	if f.cfg.Timeout > 0 {
-		var cancel context.CancelFunc
-
-		ctx, cancel = context.WithTimeout(ctx, f.cfg.Timeout)
-		defer cancel()
-	}
-
 	f.proxy.ServeHTTP(&noInterimWriter{ResponseWriter: resp}, req.WithContext(ctx))
 
 	return state.upstreamStatus
 }
 
-// serveRESTDelete deletes the package version through the REST API. Only a
-// PAT-backed delete gets there: no registry DELETE is sent for it either way.
-func (f *Forwarder) serveRESTDelete(resp http.ResponseWriter, req *http.Request, forward Forward) int {
-	switch {
-	case forward.Credential != CredentialPAT:
-		WriteError(resp, errUnauthorized())
-		return 0
-	case f.rest == nil:
-		WriteError(resp, &Error{Status: http.StatusMethodNotAllowed, Code: "UNSUPPORTED", Message: messageDeleteRefused})
-		return 0
+// openSession turns the request's upload session token into the upstream's
+// session URL, with the client's query added. A token that wasn't issued for
+// this upstream and repository is 404 and nothing is sent.
+func (state *exchange) openSession() (*url.URL, *Error) {
+	if state.codec == nil {
+		return nil, errNotReady()
 	}
 
-	return f.rest.serve(req.Context(), resp, forward.Request)
+	request := state.forward.Request
+
+	target, err := state.codec.Open(string(state.forward.Upstream.Object.UID), request.Name, request.Session)
+	if err != nil {
+		return nil, errBlobUploadUnknown()
+	}
+
+	if err := uploadtoken.AddClientQuery(target, request.Method, request.RawQuery); err != nil {
+		return nil, errSessionQuery()
+	}
+
+	return target, nil
 }
 
 func exchangeOf(req *http.Request) *exchange {
@@ -220,16 +205,21 @@ func exchangeOf(req *http.Request) *exchange {
 // drops every header that carries the client's credential or identity.
 func (f *Forwarder) rewrite(proxyReq *httputil.ProxyRequest) {
 	state := exchangeOf(proxyReq.In)
-	target := state.forward.Request.UpstreamURL()
+	base := state.client.URL()
 
 	out := proxyReq.Out
 	out.URL = &url.URL{
-		Scheme:   f.cfg.Upstream.Scheme,
-		Host:     f.cfg.Upstream.Host,
-		Path:     target.Path,
-		RawQuery: target.RawQuery,
+		Scheme:   base.Scheme,
+		Host:     base.Host,
+		Path:     state.target.Path,
+		RawQuery: state.target.RawQuery,
 	}
-	out.Host = f.cfg.Upstream.Host
+	out.Host = base.Host
+
+	if state.manifest != nil {
+		manifest := state.manifest
+		out.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(manifest)), nil }
+	}
 
 	for name := range out.Header {
 		if isClientIdentityHeader(name) {
@@ -249,14 +239,23 @@ func isClientIdentityHeader(name string) bool {
 	return strings.HasPrefix(canonical, "Proxy-") || strings.HasPrefix(canonical, "X-Forwarded-")
 }
 
-// modifyResponse removes upstream challenges and points upstream Location
+// modifyResponse removes upstream challenges, turns the upload location of a
+// 202 answer into a signed session token, and points other upstream Location
 // headers back at the host the client used.
 func (f *Forwarder) modifyResponse(resp *http.Response) error {
 	resp.Header.Del("Www-Authenticate")
 
+	state := exchangeOf(resp.Request)
+
 	location := resp.Header.Get("Location")
 	if location == "" {
 		return nil
+	}
+
+	route := state.forward.Request.Route
+	if resp.StatusCode == http.StatusAccepted && resp.Request.URL.Host == state.client.URL().Host &&
+		(route == RouteUploadStart || route == RouteUploadSession) {
+		return state.issueSession(resp, location)
 	}
 
 	parsed, err := url.Parse(location)
@@ -264,14 +263,34 @@ func (f *Forwarder) modifyResponse(resp *http.Response) error {
 		return nil
 	}
 
-	if !strings.EqualFold(parsed.Scheme, f.cfg.Upstream.Scheme) ||
-		upstream.CanonicalHost(parsed.Scheme, parsed.Host) != upstream.CanonicalHost(f.cfg.Upstream.Scheme, f.cfg.Upstream.Host) {
+	base := state.client.URL()
+	if !strings.EqualFold(parsed.Scheme, base.Scheme) ||
+		upstream.CanonicalHost(parsed.Scheme, parsed.Host) != upstream.CanonicalHost(base.Scheme, base.Host) {
 		return nil
 	}
 
 	parsed.Scheme = "https"
-	parsed.Host = exchangeOf(resp.Request).clientHost
+	parsed.Host = state.clientHost
 	resp.Header.Set("Location", parsed.String())
+
+	return nil
+}
+
+// issueSession replaces the upstream's upload location with the client's
+// session token URL.
+func (state *exchange) issueSession(resp *http.Response, location string) error {
+	if state.codec == nil {
+		discard(resp)
+		return errUploadUnusable
+	}
+
+	issued, err := state.codec.Issue(string(state.forward.Upstream.Object.UID), state.forward.Request.Name, resp.Request.URL, location)
+	if err != nil {
+		discard(resp)
+		return errUploadUnusable
+	}
+
+	resp.Header.Set("Location", issued)
 
 	return nil
 }
@@ -279,8 +298,9 @@ func (f *Forwarder) modifyResponse(resp *http.Response) error {
 // Errors the token transport returns for the error handler to answer.
 var (
 	errAnonymousRefused   = errors.New("upstream refused the anonymous request")
-	errCredentialRejected = errors.New("upstream rejected the PAT-backed token")
+	errCredentialRejected = errors.New("upstream rejected the credential")
 	errMirrorUnavailable  = errors.New("mirror unavailable")
+	errUploadUnusable     = errors.New("upstream returned an unusable upload location")
 )
 
 // handleError answers every failure with a fixed message. The underlying
@@ -295,10 +315,10 @@ func (f *Forwarder) handleError(resp http.ResponseWriter, req *http.Request, err
 		answer = errBadGateway(messageCredentialRejected)
 	case errors.Is(err, upstream.ErrRealmNotAllowed):
 		answer = errBadGateway(messageRealmNotAllowed)
-	case errors.Is(err, upstream.ErrPATNotLoaded):
-		answer = errNotReady()
 	case errors.Is(err, errMirrorUnavailable):
 		answer = errBadGateway(messageMirrorUnavailable)
+	case errors.Is(err, errUploadUnusable):
+		answer = errBadGateway(messageUploadUnusable)
 	default:
 		f.cfg.Logger.Error("upstream request failed", "method", req.Method, "path", req.URL.EscapedPath(), "error", err.Error())
 
@@ -308,10 +328,9 @@ func (f *Forwarder) handleError(resp http.ResponseWriter, req *http.Request, err
 	WriteError(resp, answer)
 }
 
-// tokenTransport sets the upstream token on each outbound request and
-// does nothing else: it never widens scopes and never follows redirects. It
-// resends only after an upstream 401 on a PAT-backed request whose body can
-// be replayed.
+// tokenTransport sends each outbound request to a mirror or to the upstream
+// with that endpoint's own credential and nothing else: it never widens
+// scopes and never follows redirects.
 type tokenTransport struct {
 	forwarder *Forwarder
 }
@@ -320,46 +339,43 @@ func (t *tokenTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	state := exchangeOf(req)
 	forward := state.forward
 
-	if target := t.forwarder.mirrorFor(forward); target != nil {
-		resp, served, err := t.tryMirror(req, state, target)
+	if servesFromMirror(forward) {
+		resp, served, err := t.tryMirror(req, state)
 		if served {
 			return resp, err
 		}
 	}
 
-	kind := upstream.KindAnonymous
+	var cred upstream.Credential
+
 	scopes := []string{"repository:" + forward.Request.Name + ":pull"}
 
-	if forward.Credential == CredentialPAT {
-		kind = upstream.KindPAT
+	if forward.Credential != nil {
+		cred = upstream.Credential{
+			ID:       string(forward.Credential.Object.UID),
+			Version:  forward.Credential.SecretResourceVersion,
+			Username: forward.Credential.Credentials.Username,
+			Password: forward.Credential.Credentials.Password,
+		}
 		scopes = forward.Request.Scopes()
 	}
 
-	resp, token, err := t.send(req, kind, scopes)
+	started := time.Now()
+	resp, err := state.client.Do(req, cred, scopes)
+	t.forwarder.cfg.Metrics.UpstreamRequest(metrics.TargetUpstream, statusOf(resp), time.Since(started))
+
 	if err != nil {
 		return nil, err
 	}
 
-	if kind == upstream.KindPAT && resp.StatusCode == http.StatusUnauthorized {
+	state.upstreamStatus = resp.StatusCode
+
+	if !cred.Anonymous() && resp.StatusCode == http.StatusUnauthorized {
 		discard(resp)
-		t.forwarder.cfg.Tokens.Invalidate(token)
-
-		retry, replayable := t.replay(req, state)
-		if !replayable {
-			return nil, errCredentialRejected
-		}
-
-		if resp, _, err = t.send(retry, kind, scopes); err != nil {
-			return nil, err
-		}
-
-		if resp.StatusCode == http.StatusUnauthorized {
-			discard(resp)
-			return nil, errCredentialRejected
-		}
+		return nil, errCredentialRejected
 	}
 
-	if kind == upstream.KindAnonymous && refusedAnonymously(resp.StatusCode, forward.AnonymousCaller) {
+	if cred.Anonymous() && refusedAnonymously(resp.StatusCode, forward.AnonymousCaller) {
 		discard(resp)
 		return nil, errAnonymousRefused
 	}
@@ -367,96 +383,70 @@ func (t *tokenTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return resp, nil
 }
 
-func (t *tokenTransport) send(req *http.Request, kind upstream.Kind, scopes []string) (*http.Response, upstream.Token, error) {
-	token, err := t.forwarder.cfg.Tokens.Token(req.Context(), kind, scopes)
-	if err != nil {
-		return nil, token, err
-	}
-
-	req.Header.Set("Authorization", "Bearer "+token.Value)
-
-	started := time.Now()
-	resp, err := t.forwarder.cfg.Transport.RoundTrip(req)
-	t.forwarder.cfg.Metrics.UpstreamRequest(metrics.TargetUpstream, statusOf(resp), time.Since(started))
-
-	if err != nil {
-		return nil, token, err
-	}
-
-	exchangeOf(req).upstreamStatus = resp.StatusCode
-
-	return resp, token, nil
-}
-
-// mirrorFor returns the mirror that serves the request first, or nil. Only
-// manifest and blob downloads and manifest checks go to a mirror: a blob check
-// always goes upstream, because a push uses it to decide what to upload and a
+// servesFromMirror reports whether the request goes to a mirror first. Only
+// manifest and blob downloads and manifest checks do: a blob check always
+// goes upstream, because a push uses it to decide what to upload and a
 // mirror can still hold a blob the upstream has dropped.
-func (f *Forwarder) mirrorFor(forward Forward) MirrorClient {
+func servesFromMirror(forward Forward) bool {
 	request := forward.Request
 
-	isPull := request.Action == v1alpha1.ActionPull &&
+	return forward.Mirror != nil && forward.Credential == nil && request.Action == v1alpha1.ActionPull &&
 		((request.Route == RouteManifest && (request.Method == http.MethodGet || request.Method == http.MethodHead)) ||
 			(request.Route == RouteBlob && request.Method == http.MethodGet))
-	if !isPull {
-		return nil
-	}
-
-	if forward.Credential == CredentialPAT {
-		return f.cfg.PolicyMirror
-	}
-
-	return f.cfg.AnonymousMirror
 }
 
-// tryMirror sends the request to target. served is false when the mirror
-// failed in a way that falls back to the upstream; otherwise resp or err is
-// the answer to give.
-func (t *tokenTransport) tryMirror(req *http.Request, state *exchange, target MirrorClient) (resp *http.Response, served bool, err error) {
+// tryMirror sends the request to the forward's mirror. served is false when
+// the mirror failed in a way that falls back to the upstream; otherwise resp
+// or err is the answer to give.
+func (t *tokenTransport) tryMirror(req *http.Request, state *exchange) (resp *http.Response, served bool, err error) {
 	forward := state.forward
-	viaPolicy := forward.Credential == CredentialPAT
-	prefix := target.PathPrefix()
+	viaRule := forward.MirrorRule
+	logger := t.forwarder.cfg.Logger
+	mirrorName := forward.Mirror.Name().String()
 
-	mirrorName, mirrorTarget := metrics.MirrorAnonymous, metrics.TargetAnonymousMirror
-	if viaPolicy {
-		mirrorName, mirrorTarget = metrics.MirrorPolicy, metrics.TargetPolicyMirror
+	fallbackName, mirrorTarget, cache := metrics.MirrorAnonymous, metrics.TargetAnonymousMirror, t.forwarder.cfg.DefaultMirrors
+	if viaRule {
+		fallbackName, mirrorTarget, cache = metrics.MirrorPolicy, metrics.TargetPolicyMirror, t.forwarder.cfg.RuleMirrors
 	}
-
-	out := req.Clone(req.Context())
-	out.URL = &url.URL{
-		Scheme:   target.URL().Scheme,
-		Host:     target.URL().Host,
-		Path:     "/v2/" + prefix + "/" + strings.TrimPrefix(req.URL.Path, "/v2/"),
-		RawQuery: req.URL.RawQuery,
-	}
-	out.Host = target.URL().Host
-	out.Header.Del("Authorization")
 
 	// failed applies the fallback rule to a mirror failure.
 	failed := func(reason string) (*http.Response, bool, error) {
-		if target.FallbackToUpstream() {
-			t.forwarder.cfg.Metrics.MirrorFallback(mirrorName)
-			t.forwarder.cfg.Logger.Warn("mirror failed; falling back to the upstream",
-				"mirror", target.URL().String(), "path", out.URL.Path, "reason", reason)
+		if forward.Mirror.FallbackToUpstream {
+			t.forwarder.cfg.Metrics.MirrorFallback(fallbackName)
+			logger.Warn("mirror failed; falling back to the upstream", "mirror", mirrorName, "reason", reason)
 
 			return nil, false, nil
 		}
 
-		t.forwarder.cfg.Logger.Error("mirror failed", "mirror", target.URL().String(), "path", out.URL.Path, "reason", reason)
+		logger.Error("mirror failed", "mirror", mirrorName, "reason", reason)
 
 		return nil, true, errMirrorUnavailable
 	}
 
+	if forward.MirrorFailed {
+		return failed("mirror not ready")
+	}
+
+	target, err := cache.Client(forward.Mirror)
+	if err != nil {
+		return failed(err.Error())
+	}
+
+	out := req.Clone(req.Context())
+	out.URL = target.RequestURL(req.URL.Path, req.URL.RawQuery)
+	out.Host = out.URL.Host
+	out.Header.Del("Authorization")
+
 	started := time.Now()
-	resp, err = target.Send(out, "repository:"+prefix+"/"+forward.Request.Name+":pull")
+	resp, err = target.Send(out, "repository:"+target.PathPrefix()+"/"+forward.Request.Name+":pull")
 	t.forwarder.cfg.Metrics.UpstreamRequest(mirrorTarget, statusOf(resp), time.Since(started))
 
 	switch {
 	case err != nil && req.Context().Err() != nil:
 		return nil, true, err
 	case errors.Is(err, mirror.ErrCredentialRejected):
-		if viaPolicy {
-			t.forwarder.cfg.Logger.Error("mirror rejected its credentials", "mirror", target.URL().String())
+		if viaRule {
+			logger.Error("mirror rejected its credentials", "mirror", mirrorName)
 			return nil, true, errMirrorUnavailable
 		}
 
@@ -469,17 +459,17 @@ func (t *tokenTransport) tryMirror(req *http.Request, state *exchange, target Mi
 
 	switch status := resp.StatusCode; {
 	case status >= 500 || status == http.StatusNotFound:
-		if status == http.StatusNotFound && !target.FallbackToUpstream() {
+		if status == http.StatusNotFound && !forward.Mirror.FallbackToUpstream {
 			break
 		}
 
 		discard(resp)
 
 		return failed(http.StatusText(status))
-	case viaPolicy && (status == http.StatusUnauthorized || status == http.StatusForbidden):
+	case viaRule && (status == http.StatusUnauthorized || status == http.StatusForbidden):
 		// A mirror credential problem: shown, never hidden by a fallback.
 		discard(resp)
-		t.forwarder.cfg.Logger.Error("mirror refused its credentials", "mirror", target.URL().String(), "status", status)
+		logger.Error("mirror refused its credentials", "mirror", mirrorName, "status", status)
 
 		return nil, true, errMirrorUnavailable
 	}
@@ -489,7 +479,7 @@ func (t *tokenTransport) tryMirror(req *http.Request, state *exchange, target Mi
 		return failed("Location outside the mirror's path prefix")
 	}
 
-	if !viaPolicy && refusedAnonymously(resp.StatusCode, forward.AnonymousCaller) {
+	if !viaRule && refusedAnonymously(resp.StatusCode, forward.AnonymousCaller) {
 		discard(resp)
 		return nil, true, errAnonymousRefused
 	}
@@ -498,10 +488,10 @@ func (t *tokenTransport) tryMirror(req *http.Request, state *exchange, target Mi
 }
 
 // mapMirrorLocation points a Location on the mirror's host back at the client
-// host, removing the mirror's path prefix. It reports false for a mirror-host
-// Location outside the prefix, which must not reach the client. Locations on
-// other hosts (blob storage) are left as they are.
-func mapMirrorLocation(resp *http.Response, requestURL *url.URL, target MirrorClient, clientHost string) bool {
+// host, turning `<url path>/v2/<pathPrefix>/` back into /v2/. It reports false
+// for a mirror-host Location outside that prefix, which must not reach the
+// client. Locations on other hosts (blob storage) are left as they are.
+func mapMirrorLocation(resp *http.Response, requestURL *url.URL, target *mirror.Client, clientHost string) bool {
 	location := resp.Header.Get("Location")
 	if location == "" {
 		return true
@@ -517,7 +507,9 @@ func mapMirrorLocation(resp *http.Response, requestURL *url.URL, target MirrorCl
 		return true
 	}
 
-	rest, found := strings.CutPrefix(resolved.Path, "/v2/"+target.PathPrefix()+"/")
+	prefix := strings.TrimSuffix(target.URL().Path, "/") + "/v2/" + target.PathPrefix() + "/"
+
+	rest, found := strings.CutPrefix(resolved.Path, prefix)
 	if !found {
 		return false
 	}
@@ -526,23 +518,6 @@ func mapMirrorLocation(resp *http.Response, requestURL *url.URL, target MirrorCl
 	resp.Header.Set("Location", mapped.String())
 
 	return true
-}
-
-// replay returns a copy of req to resend, if its body can be sent again.
-func (t *tokenTransport) replay(req *http.Request, state *exchange) (*http.Request, bool) {
-	retry := req.Clone(req.Context())
-
-	switch {
-	case state.manifest != nil:
-		retry.Body = io.NopCloser(bytes.NewReader(state.manifest))
-		retry.ContentLength = int64(len(state.manifest))
-	case req.Body == nil || req.Body == http.NoBody:
-		retry.Body = req.Body
-	default:
-		return nil, false
-	}
-
-	return retry, true
 }
 
 // refusedAnonymously reports whether an anonymous upstream answer means the
