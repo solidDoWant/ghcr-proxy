@@ -20,17 +20,17 @@ type ca struct {
 	pem  []byte
 }
 
-func newCA(host string) (*ca, error) {
+func newCA(hosts ...string) (*ca, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, err
 	}
 
 	template := &x509.Certificate{
-		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "registrygate e2e CA for " + host},
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "registrygate e2e CA for " + hosts[0]},
 		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(24 * time.Hour),
 		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign,
-		PermittedDNSDomains: []string{host}, PermittedDNSDomainsCritical: true,
+		PermittedDNSDomains: hosts, PermittedDNSDomainsCritical: true,
 	}
 
 	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
@@ -46,15 +46,15 @@ func newCA(host string) (*ca, error) {
 	return &ca{cert: cert, key: key, pem: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})}, nil
 }
 
-// issue makes a serving certificate for host and returns the certificate and key as PEM.
-func (a *ca) issue(host string) (certPEM, keyPEM []byte, err error) {
+// issue makes a serving certificate for the hosts and returns the certificate and key as PEM.
+func (a *ca) issue(hosts ...string) (certPEM, keyPEM []byte, err error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	template := &x509.Certificate{
-		SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: host}, DNSNames: []string{host},
+		SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: hosts[0]}, DNSNames: hosts,
 		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(24 * time.Hour),
 		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	}

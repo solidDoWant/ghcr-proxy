@@ -101,6 +101,6 @@ In the e2e scenarios, "a CI pod" is a pod with a dind sidecar set up exactly as 
 ## Added by the owner on 2026-11-17
 
 - **AC-3-36 Harbor through its Service.** With Harbor's `UpstreamRegistry` and mirrors pointing at its in-cluster Service over plain HTTP (`aliasHosts` naming Harbor's `externalURL` host), a CI pod's mirrored pull is served by its Harbor proxy-cache project, and `docker push <Harbor>/<project>/<image>` succeeds with a robot whose Secret exists only in the admin namespace; nothing in the pod's namespace holds a Harbor credential.
-  Tests:
+  Tests: `test/e2e: TestEachNamespacePullsThroughItsOwnHarborProject`, `test/e2e: TestPushToHarborUsesARobotThePodNeverSees`
 - **AC-3-37 Docker Hub names.** With an `UpstreamRegistry` for `registry-1.docker.io`, `docker.io` and `index.docker.io`, a CI pod's `docker pull alpine` and a build with `FROM docker.io/library/alpine` come through its mirror, authenticated with its ServiceAccount token.
-  Tests:
+  Tests: `test/e2e: TestDockerHubNamesPullAndBuildThroughTheMirror`

@@ -15,8 +15,8 @@ type robot struct{ username, password string }
 // tenant is a CI namespace with a mirror for each upstream.
 type tenant struct {
 	namespace string
-	// robots are the pull credentials of the namespace's Harbor projects, by upstream key.
-	robots map[string]robot
+	// pushRobot may push to the namespace's push project. Its Secret lives in the admin namespace only.
+	pushRobot robot
 }
 
 func newTenants() []*tenant {
@@ -24,8 +24,9 @@ func newTenants() []*tenant {
 }
 
 // applyProxyObjects makes the objects of the admin namespace: for each upstream
-// its serving certificate, its CA and its UpstreamRegistry, and the credential
-// for upstream A. The proxy's Secrets Role covers this namespace.
+// its serving certificate, its CA and its UpstreamRegistry, the credential
+// for upstream A, and Harbor's UpstreamRegistry with a credential for the push
+// project of each namespace. The proxy's Secrets Role covers this namespace.
 func (e *env) applyProxyObjects(ctx context.Context) error {
 	tenantNames := make([]string, 0, len(e.tenants))
 	for _, tenant := range e.tenants {
@@ -33,7 +34,7 @@ func (e *env) applyProxyObjects(ctx context.Context) error {
 	}
 
 	for _, fake := range e.upstreams {
-		certPEM, keyPEM, err := fake.servingCA.issue(fake.host)
+		certPEM, keyPEM, err := fake.servingCA.issue(fake.hosts...)
 		if err != nil {
 			return err
 		}
@@ -60,10 +61,14 @@ spec:
   allowedMirrorURLs: ["%[5]s/"]
   allowedNamespaces:
     names: [%[6]s]
-`, fake.objectName(), proxyNamespace, fake.host, fake.registryHost(), e.harborURL, strings.Join(tenantNames, ", "))
+`, fake.objectName(), proxyNamespace, strings.Join(fake.hosts, ", "), fake.registryHost(), e.harborURL, strings.Join(tenantNames, ", "))
 		if err := e.apply(ctx, manifest); err != nil {
 			return err
 		}
+	}
+
+	if err := e.applyHarborUpstream(ctx, tenantNames); err != nil {
+		return err
 	}
 
 	first := e.upstreams[0]
@@ -88,6 +93,64 @@ spec:
 `, first.key, proxyNamespace, first.objectName(), e.tenants[0].namespace))
 }
 
+// applyHarborUpstream makes the UpstreamRegistry for Harbor, which the proxy
+// reaches through Harbor's core Service over plain HTTP, and for each namespace
+// an UpstreamCredential for its push robot. The robot's Secret is in the admin
+// namespace only.
+func (e *env) applyHarborUpstream(ctx context.Context, tenantNames []string) error {
+	certPEM, keyPEM, err := e.harborProxyCA.issue(e.harborHostName)
+	if err != nil {
+		return err
+	}
+
+	if err := e.secret(ctx, proxyNamespace, "harbor-tls", "kubernetes.io/tls", map[string][]byte{"tls.crt": certPEM, "tls.key": keyPEM}); err != nil {
+		return err
+	}
+
+	if err := e.apply(ctx, fmt.Sprintf(`
+apiVersion: registrygate.soliddowant.dev/v1alpha1
+kind: UpstreamRegistry
+metadata: {name: harbor, namespace: %[1]s}
+spec:
+  hosts: [%[2]s]
+  url: %[3]s
+  aliasHosts: [%[4]s, harbor-core.harbor.svc]
+  tls:
+    secretRef: {name: harbor-tls}
+  anonymousPulls: Challenge
+  allowedNamespaces:
+    names: [%[5]s]
+`, proxyNamespace, e.harborHostName, e.harborURL, strings.TrimPrefix(e.harborExternalURL, "https://"), strings.Join(tenantNames, ", "))); err != nil {
+		return err
+	}
+
+	for _, tenant := range e.tenants {
+		name := "harbor-" + tenant.namespace
+
+		if err := e.secret(ctx, proxyNamespace, name, "Opaque", map[string][]byte{"username": []byte(tenant.pushRobot.username), "password": []byte(tenant.pushRobot.password)}); err != nil {
+			return err
+		}
+
+		if err := e.apply(ctx, fmt.Sprintf(`
+apiVersion: registrygate.soliddowant.dev/v1alpha1
+kind: UpstreamCredential
+metadata: {name: %[1]s, namespace: %[2]s}
+spec:
+  upstreamRef: {name: harbor}
+  secretRef: {name: %[1]s}
+  ceiling:
+    - repositories: ["%[3]s/**"]
+      actions: [pull, push, delete]
+  allowedNamespaces:
+    names: [%[4]s]
+`, name, proxyNamespace, harborPushProject(tenant.namespace), tenant.namespace)); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // setupTenants gives each CI namespace its mirrors, its policy and a CI pod.
 func (e *env) setupTenants(ctx context.Context) error {
 	for index, tenant := range e.tenants {
@@ -105,27 +168,14 @@ func (e *env) setupTenants(ctx context.Context) error {
 	return nil
 }
 
-// setupTenantObjects creates a namespace's mirror Secrets, the Role that lets
-// the proxy read exactly those Secrets, a RegistryMirror for each upstream and
-// the policy. Only the namespace with the credential gets the push rule.
+// setupTenantObjects creates a namespace's RegistryMirror for each upstream
+// and the policy. The namespace holds no Harbor credential: the mirrors read
+// public projects, and the push robot is in the admin namespace. Only the
+// namespace with the credential for upstream A gets that push rule.
 func (e *env) setupTenantObjects(ctx context.Context, tenant *tenant, withCredential bool) error {
-	secretNames := []string{"harbor-ca"}
-
-	if err := e.secret(ctx, tenant.namespace, "harbor-ca", "Opaque", map[string][]byte{"ca.crt": e.harborCA}); err != nil {
-		return err
-	}
-
 	var objects, rules strings.Builder
 
 	for _, fake := range e.upstreams {
-		name := "robot-" + fake.key
-		secretNames = append(secretNames, name)
-
-		robot := tenant.robots[fake.key]
-		if err := e.secret(ctx, tenant.namespace, name, "Opaque", map[string][]byte{"username": []byte(robot.username), "password": []byte(robot.password)}); err != nil {
-			return err
-		}
-
 		fmt.Fprintf(&objects, `---
 apiVersion: registrygate.soliddowant.dev/v1alpha1
 kind: RegistryMirror
@@ -133,18 +183,23 @@ metadata: {name: mirror-%[1]s, namespace: %[2]s}
 spec:
   upstreamRef: {namespace: %[3]s, name: %[4]s}
   url: %[5]s
+  aliasHosts: [%[7]s, harbor-core.harbor.svc]
   pathPrefix: %[6]s
-  secretRef: {name: %[7]s}
-  caSecretRef: {name: harbor-ca}
   fallbackToUpstream: false
-`, fake.key, tenant.namespace, proxyNamespace, fake.objectName(), e.harborURL, harborProject(tenant.namespace, fake), name)
+`, fake.key, tenant.namespace, proxyNamespace, fake.objectName(), e.harborURL, harborProject(tenant.namespace, fake), strings.TrimPrefix(e.harborExternalURL, "https://"))
 
 		fmt.Fprintf(&rules, `    - name: mirror-%[1]s
       mirrorRef: {name: mirror-%[1]s}
-      repositories: ["mirrored/**"]
+      repositories: ["%[2]s"]
       actions: [pull]
-`, fake.key)
+`, fake.key, fake.mirrorRepo)
 	}
+
+	fmt.Fprintf(&rules, `    - name: harbor-push
+      credentialRef: {namespace: %[1]s, name: harbor-%[2]s}
+      repositories: ["%[3]s/**"]
+      actions: [pull, push]
+`, proxyNamespace, tenant.namespace, harborPushProject(tenant.namespace))
 
 	if withCredential {
 		fmt.Fprintf(&rules, `    - name: push
@@ -154,35 +209,18 @@ spec:
 `, proxyNamespace, e.upstreams[0].key)
 	}
 
-	// The proxy reads these Secrets and no others in the namespace.
 	manifest := fmt.Sprintf(`
 apiVersion: v1
 kind: ServiceAccount
 metadata: {name: builder, namespace: %[1]s}
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata: {name: registrygate-mirror-secrets, namespace: %[1]s}
-rules:
-  - apiGroups: [""]
-    resources: [secrets]
-    resourceNames: [%[2]s]
-    verbs: [get, list, watch]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata: {name: registrygate-mirror-secrets, namespace: %[1]s}
-roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: registrygate-mirror-secrets}
-subjects:
-  - {kind: ServiceAccount, name: registrygate, namespace: %[3]s}
-%[4]s---
+%[2]s---
 apiVersion: registrygate.soliddowant.dev/v1alpha1
 kind: RegistryAccessPolicy
 metadata: {name: builder, namespace: %[1]s}
 spec:
   serviceAccounts: [builder]
   rules:
-%[5]s`, tenant.namespace, strings.Join(secretNames, ", "), proxyNamespace, objects.String(), rules.String())
+%[3]s`, tenant.namespace, objects.String(), rules.String())
 
 	if err := e.apply(ctx, manifest); err != nil {
 		return err
@@ -209,7 +247,7 @@ func (e *env) ciPodManifest(ctx context.Context, tenant *tenant) (string, error)
 	aliases := []string{fmt.Sprintf("    - ip: %s\n      hostnames: [%s]", proxyClusterIP, "HOSTS")}
 
 	for _, fake := range e.upstreams {
-		hosts = append(hosts, fake.host)
+		hosts = append(hosts, fake.hosts...)
 
 		ip, err := fake.storageIP(ctx, e)
 		if err != nil {
@@ -217,8 +255,14 @@ func (e *env) ciPodManifest(ctx context.Context, tenant *tenant) (string, error)
 		}
 
 		aliases = append(aliases, fmt.Sprintf("    - ip: %s\n      hostnames: [%s]", ip, fake.storageHost))
-		caItems = append(caItems, fmt.Sprintf("          - {key: %[1]s.crt, path: %[1]s/ca.crt}", fake.host))
+
+		for _, host := range fake.hosts {
+			caItems = append(caItems, fmt.Sprintf("          - {key: %[1]s.crt, path: %[1]s/ca.crt}", host))
+		}
 	}
+
+	hosts = append(hosts, e.harborHostName)
+	caItems = append(caItems, fmt.Sprintf("          - {key: %[1]s.crt, path: %[1]s/ca.crt}", e.harborHostName))
 
 	aliases[0] = strings.Replace(aliases[0], "HOSTS", strings.Join(hosts, ", "), 1)
 
@@ -274,9 +318,14 @@ spec:
 func (e *env) setupCIPod(ctx context.Context, tenant *tenant) error {
 	// The CA file of a host holds the proxy's CA for it and the CA of the fake behind it.
 	caData := map[string][]byte{}
+
 	for _, fake := range e.upstreams {
-		caData[fake.host+".crt"] = append(append([]byte{}, fake.servingCA.pem...), fake.fakeCA...)
+		for _, host := range fake.hosts {
+			caData[host+".crt"] = append(append([]byte{}, fake.servingCA.pem...), fake.fakeCA...)
+		}
 	}
+
+	caData[e.harborHostName+".crt"] = e.harborProxyCA.pem
 
 	if err := e.secret(ctx, tenant.namespace, "registrygate-ca", "Opaque", caData); err != nil {
 		return err

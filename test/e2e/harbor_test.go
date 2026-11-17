@@ -37,7 +37,7 @@ func (e *env) installHarbor(ctx context.Context) error {
 	cmd := exec.CommandContext(ctx, "helm", "upgrade", "--install", "harbor", harborChart, "--version", harborVersion,
 		"--kube-context", e.kubeContext, "--namespace", harborNamespace,
 		"-f", filepath.Join(e.repoRoot, "test/e2e/harbor-values.yaml"),
-		"--set", "externalURL="+e.harborURL, "--wait", "--timeout", "10m")
+		"--set", "externalURL="+e.harborExternalURL, "--wait", "--timeout", "10m")
 
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("helm install harbor: %w\n%s", err, out)
@@ -170,12 +170,16 @@ func (h *harborClient) do(ctx context.Context, method, path string, body any) (i
 	return resp.StatusCode, out, err
 }
 
+// harborPushProject is the project a namespace's CI pod pushes to.
+func harborPushProject(namespace string) string { return namespace + "-push" }
+
 // harborProject is the proxy-cache project of a namespace for an upstream.
 func harborProject(namespace string, fake *upstream) string { return namespace + "-" + fake.key }
 
 // createHarborObjects makes a registry endpoint for each upstream (no
-// credential), a proxy-cache project for each namespace and upstream, and a
-// robot with pull permission on each project.
+// credential), a public proxy-cache project for each namespace and upstream,
+// and for each namespace a project with a push robot, for pushes through the
+// proxy.
 func (e *env) createHarborObjects(ctx context.Context) error {
 	forwardCtx, stop := context.WithCancel(ctx)
 	defer stop()
@@ -228,36 +232,43 @@ func (e *env) createHarborObjects(ctx context.Context) error {
 	}
 
 	for _, tenant := range e.tenants {
-		tenant.robots = map[string]robot{}
-
 		for _, fake := range e.upstreams {
 			project := harborProject(tenant.namespace, fake)
 
-			// The project is private: a robot is needed to pull from it.
-			status, body, err := api.do(ctx, http.MethodPost, "/projects", map[string]any{"project_name": project, "public": false, "registry_id": registryIDs[fake.key]})
+			// The project is public so a mirror needs no credential: the namespace holds none of Harbor's.
+			status, body, err := api.do(ctx, http.MethodPost, "/projects", map[string]any{"project_name": project, "public": true, "registry_id": registryIDs[fake.key]})
 			if err != nil || (status != http.StatusCreated && status != http.StatusConflict) {
 				return fmt.Errorf("create project %s: %d %s %v", project, status, body, err)
 			}
-
-			status, body, err = api.do(ctx, http.MethodPost, "/robots", map[string]any{
-				"name": "e2e-" + e.runID, "level": "project", "duration": -1,
-				"permissions": []map[string]any{{"kind": "project", "namespace": project, "access": []map[string]string{{"resource": "repository", "action": "pull"}}}},
-			})
-			if err != nil || status != http.StatusCreated {
-				return fmt.Errorf("create robot for %s: %d %s %v", project, status, body, err)
-			}
-
-			var created struct {
-				Name   string `json:"name"`
-				Secret string `json:"secret"`
-			}
-
-			if err := json.Unmarshal(body, &created); err != nil {
-				return err
-			}
-
-			tenant.robots[fake.key] = robot{username: created.Name, password: created.Secret}
 		}
+
+		push := harborPushProject(tenant.namespace)
+
+		status, body, err := api.do(ctx, http.MethodPost, "/projects", map[string]any{"project_name": push, "public": false})
+		if err != nil || (status != http.StatusCreated && status != http.StatusConflict) {
+			return fmt.Errorf("create project %s: %d %s %v", push, status, body, err)
+		}
+
+		status, body, err = api.do(ctx, http.MethodPost, "/robots", map[string]any{
+			"name": "e2e-" + e.runID, "level": "project", "duration": -1,
+			"permissions": []map[string]any{{"kind": "project", "namespace": push, "access": []map[string]string{
+				{"resource": "repository", "action": "pull"}, {"resource": "repository", "action": "push"}, {"resource": "repository", "action": "delete"},
+			}}},
+		})
+		if err != nil || status != http.StatusCreated {
+			return fmt.Errorf("create robot for %s: %d %s %v", push, status, body, err)
+		}
+
+		var created struct {
+			Name   string `json:"name"`
+			Secret string `json:"secret"`
+		}
+
+		if err := json.Unmarshal(body, &created); err != nil {
+			return err
+		}
+
+		tenant.pushRobot = robot{username: created.Name, password: created.Secret}
 	}
 
 	return nil
