@@ -52,7 +52,7 @@ Set these variables to the images that you use. The pod below reads them. In you
 - `DOCKER_DIND_IMAGE`: an image with the Docker daemon.
 - `HELPER_IMAGE`: `ghcr.io/soliddowant/registrygate-credential-helper:<version>`, where `<version>` is a release of the proxy.
 
-The pod waits for the daemon, builds a small image and pushes it.
+The pod waits for the daemon, builds a small image and pushes it. Then it keeps running, so that you can run more Docker commands in it with `kubectl exec`.
 
 <!-- e2e -->
 ```sh
@@ -74,11 +74,14 @@ spec:
       command: [sh, -c]
       args:
         - |
+          set -e
           mkdir -p ~/.docker
           echo '{"credHelpers":{"ghcr.io":"registrygate"}}' > ~/.docker/config.json
           until docker info >/dev/null 2>&1; do sleep 1; done
           printf 'FROM scratch\nLABEL built-by=ci\n' | docker build -t ghcr.io/soliddowant/foo:latest -
           docker push ghcr.io/soliddowant/foo:latest
+          echo "push done"
+          exec sleep infinity
       env:
         - name: DOCKER_HOST
           value: tcp://localhost:2375
@@ -122,11 +125,11 @@ spec:
 EOF
 ```
 
-The push worked when the `docker` container ends with exit code 0:
+The push worked when the log of the `docker` container says `push done`. If the push fails, the container ends and the log shows the error:
 
 <!-- e2e -->
 ```sh
-kubectl -n ci-foo wait --for=jsonpath='{.status.containerStatuses[?(@.name=="docker")].state.terminated.reason}'=Completed pod/build --timeout=600s
+timeout 600 sh -c 'until kubectl -n ci-foo logs pod/build -c docker | grep -q "push done"; do sleep 2; done'
 ```
 
 The helper image holds one file, `/docker-credential-registrygate`. Docker finds the helper by the name `docker-credential-registrygate` on `PATH`, and the config entry `registrygate` selects it.

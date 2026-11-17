@@ -95,6 +95,69 @@ The Secret `ghcr-io-tls` holds the key pair (`tls.crt` and `tls.key`) and the CA
 
 For a second upstream, for example `quay.io`, make a second CA and a second certificate with its own name constraint. Never share a CA between upstreams.
 
+For example, this makes the CA, the certificate and the `UpstreamRegistry` for `quay.io`.
+
+<!-- e2e -->
+```sh
+kubectl apply -f - <<'EOF'
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: quay-io-ca
+  namespace: registrygate
+spec:
+  isCA: true
+  commonName: quay-io-ca
+  secretName: quay-io-ca
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  nameConstraints:
+    critical: true
+    permitted:
+      dnsDomains: [quay.io]
+  issuerRef:
+    name: selfsigned
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: quay-io-ca
+  namespace: registrygate
+spec:
+  ca:
+    secretName: quay-io-ca
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: quay-io-tls
+  namespace: registrygate
+spec:
+  secretName: quay-io-tls
+  dnsNames: [quay.io]
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: quay-io-ca
+---
+apiVersion: registrygate.soliddowant.dev/v1alpha1
+kind: UpstreamRegistry
+metadata:
+  name: quay
+  namespace: registrygate
+spec:
+  hosts: [quay.io]
+  url: https://quay.io
+  tls:
+    secretRef:
+      name: quay-io-tls
+  anonymousPulls: Challenge
+EOF
+kubectl -n registrygate wait --for=condition=Ready certificate/quay-io-tls upstreamregistry/quay --timeout=120s
+```
+
 ## Create the UpstreamRegistry
 
 This object stands in for `ghcr.io` and sends the requests to the real `https://ghcr.io`:
