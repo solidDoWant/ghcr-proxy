@@ -20,6 +20,9 @@ func connect(t *testing.T, namespace string) error {
 }
 
 func TestNetworkPolicyBlocksNamespacesOutsideTheClientSelector(t *testing.T) {
-	require.NoError(t, connect(t, ciNamespace), "a client namespace must reach the proxy")
-	assert.Error(t, connect(t, fakeNamespace), "a namespace outside the selector must not reach the proxy")
+	for _, tenant := range cluster.tenants {
+		require.NoError(t, connect(t, tenant.namespace), "a client namespace must reach the proxy")
+	}
+
+	assert.Error(t, connect(t, cluster.upstreams[0].namespace), "a namespace outside the selector must not reach the proxy")
 }

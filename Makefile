@@ -107,9 +107,9 @@ build: ## Build bin/registrygate and bin/docker-credential-registrygate.
 build-images: ## Build the images ghcr.io/soliddowant/registrygate and ghcr.io/soliddowant/registrygate-credential-helper (tag $(VERSION)) for linux/amd64 and arm64; PUSH_ALL=true also pushes (releases only).
 	VERSION="$(VERSION)" PUSH_ALL="$(or $(PUSH_ALL),false)" ./scripts/build-images.sh
 
-.PHONY: build-fakeghcr-image
-build-fakeghcr-image: ## Build the GHCR test double image ghcr.io/soliddowant/registrygate-fakeghcr:dev for the host architecture (e2e only, never pushed).
-	./scripts/build-fakeghcr-image.sh
+.PHONY: build-fakeregistry-image
+build-fakeregistry-image: ## Build the registry test double image ghcr.io/soliddowant/registrygate-fakeregistry:dev for the host architecture (e2e only, never pushed).
+	./scripts/build-fakeregistry-image.sh
 
 .PHONY: clean
 clean: ## Remove build artifacts.
