@@ -78,7 +78,7 @@ func (h *Handler) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 		entry.DurationMS = time.Since(started).Milliseconds()
 
 		h.Audit.Log(entry)
-		h.Metrics.Request(entry.Action, entry.Decision, entry.Status)
+		h.Metrics.Request(entry.Upstream, entry.Action, entry.Decision, entry.Status)
 	}()
 
 	h.serve(recorder, req, &entry, recorder)
@@ -87,6 +87,8 @@ func (h *Handler) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 // Audit decision kinds.
 const (
 	decisionAllowed         = "allowed"
+	decisionMirror          = "mirror"
+	decisionAmbiguous       = "ambiguous"
 	decisionAnonymous       = "anonymous"
 	decisionDenied          = "denied"
 	decisionUnauthenticated = "unauthenticated"
@@ -142,7 +144,15 @@ func (h *Handler) serve(resp http.ResponseWriter, req *http.Request, entry *audi
 		return
 	}
 
-	resolution := h.Decider.Decide(serverName(req), identity, request)
+	entry.Host = serverName(req)
+
+	resolution := h.Decider.Decide(entry.Host, identity, request)
+
+	if resolution.Upstream != nil {
+		entry.Upstream = resolution.Upstream.Name().String()
+	}
+
+	entry.Policy, entry.Rule = policyAndRuleNames(resolution.Rules)
 
 	if resolution.Upstream != nil && !hostNamesUpstream(req.Host, resolution.Upstream.Object.Spec.Hosts) {
 		entry.Decision = decisionInvalid
@@ -167,6 +177,9 @@ func (h *Handler) serve(resp http.ResponseWriter, req *http.Request, entry *audi
 		registry.WriteError(resp, unauthorized())
 	case authz.ResultDenied, authz.ResultAmbiguous:
 		entry.Decision = decisionDenied
+		if resolution.Result == authz.ResultAmbiguous {
+			entry.Decision = decisionAmbiguous
+		}
 
 		registry.WriteError(resp, &registry.Error{Status: http.StatusForbidden, Code: "DENIED", Message: resolution.Message})
 	case authz.ResultNotFound:
@@ -184,18 +197,25 @@ func (h *Handler) serve(resp http.ResponseWriter, req *http.Request, entry *audi
 			AnonymousCaller: identity.ServiceAccount == "",
 		}
 
-		entry.Decision = decisionAnonymous
-		if resolution.Result == authz.ResultCredential {
+		switch resolution.Result {
+		case authz.ResultCredential:
 			entry.Decision = decisionAllowed
+			entry.Credential = resolution.Credential.Name().String()
+		case authz.ResultMirror:
+			entry.Decision = decisionMirror
+		default:
+			entry.Decision = decisionAnonymous
 		}
 
-		entry.Policy = policyNames(resolution.Rules)
+		if resolution.Mirror != nil {
+			entry.Mirror = resolution.Mirror.Name().String()
+		}
 
 		if mount := forward.Request.Mount; mount != nil {
 			entry.From = mount.From
 		}
 
-		entry.Upstream = h.Forwarder.ServeForward(resp, req, forward)
+		entry.UpstreamStatus = h.Forwarder.ServeForward(resp, req, forward)
 
 		if isManifestWrite(request) {
 			entry.Digest = recorder.digest
@@ -210,18 +230,27 @@ func (h *Handler) serve(resp http.ResponseWriter, req *http.Request, entry *audi
 	}
 }
 
-// policyNames lists the policies of the rules (namespace/policy/rule) that decided a request.
-func policyNames(rules []string) string {
-	names := make([]string, 0, len(rules))
+// policyAndRuleNames splits the rules (namespace/policy/rule) that decided a request into the policies
+// (namespace/policy) and the rule names, each joined by "," without repeats.
+func policyAndRuleNames(rules []string) (policies, ruleNames string) {
+	var policyList, ruleList []string
 
 	for _, rule := range rules {
 		parts := strings.SplitN(rule, "/", 3)
-		if len(parts) == 3 && !slices.Contains(names, parts[1]) {
-			names = append(names, parts[1])
+		if len(parts) != 3 {
+			continue
+		}
+
+		if policy := parts[0] + "/" + parts[1]; !slices.Contains(policyList, policy) {
+			policyList = append(policyList, policy)
+		}
+
+		if !slices.Contains(ruleList, parts[2]) {
+			ruleList = append(ruleList, parts[2])
 		}
 	}
 
-	return strings.Join(names, ",")
+	return strings.Join(policyList, ","), strings.Join(ruleList, ",")
 }
 
 // serverName is the TLS server name the client asked for, which decides the upstream. A request without TLS

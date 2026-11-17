@@ -142,8 +142,8 @@ func serve(ctx context.Context, cfg *config.Config, flags runFlags, logger *slog
 
 	status := &controller.Status{}
 	upstreamClients := upstream.NewClients(upstream.ClientOptions{Logger: logger, Metrics: proxyMetrics})
-	ruleMirrors := mirror.NewCache(mirror.ClientOptions{Logger: logger, Metrics: proxyMetrics, Target: metrics.TargetPolicyMirror})
-	defaultMirrors := mirror.NewCache(mirror.ClientOptions{Logger: logger, Metrics: proxyMetrics, Target: metrics.TargetAnonymousMirror})
+	ruleMirrors := mirror.NewCache(mirror.ClientOptions{Logger: logger, Metrics: proxyMetrics})
+	defaultMirrors := mirror.NewCache(mirror.ClientOptions{Logger: logger, Metrics: proxyMetrics})
 
 	var objects *model.Model
 
@@ -151,6 +151,7 @@ func serve(ctx context.Context, cfg *config.Config, flags runFlags, logger *slog
 		AdminNamespaces: adminNamespaces,
 		OnChange:        func() { objects.MarkDirty() },
 		Logger:          logger,
+		Metrics:         proxyMetrics,
 	})
 
 	objects = model.New(model.Options{
@@ -165,6 +166,7 @@ func serve(ctx context.Context, cfg *config.Config, flags runFlags, logger *slog
 		},
 	})
 	status.Snapshot = objects.Snapshot
+	proxyMetrics.SetObjectCounts(server.ObjectCounts(objects.Snapshot))
 
 	signing := &uploadSigning{
 		store:  secretStore,

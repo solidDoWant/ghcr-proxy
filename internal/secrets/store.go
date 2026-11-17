@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/solidDoWant/registrygate/internal/metrics"
+
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -36,6 +38,8 @@ type Options struct {
 	OnChange func()
 	// Logger receives watch errors. It never receives Secret values.
 	Logger *slog.Logger
+	// Metrics counts Secret updates; nil turns it off.
+	Metrics *metrics.Metrics
 }
 
 // Store tracks Secrets. Admin namespaces are watched as a whole from Run;
@@ -44,6 +48,7 @@ type Store struct {
 	client   kubernetes.Interface
 	onChange func()
 	logger   *slog.Logger
+	metrics  *metrics.Metrics
 
 	mutex   sync.Mutex
 	ctx     context.Context // set by Run; nil until then
@@ -81,6 +86,7 @@ func New(client kubernetes.Interface, options Options) *Store {
 		client:   client,
 		onChange: onChange,
 		logger:   logger,
+		metrics:  options.Metrics,
 		admin:    map[string]*adminNamespace{},
 		watches:  map[Key]*secretWatch{},
 		wanted:   map[Key]struct{}{},
@@ -255,9 +261,9 @@ func (s *Store) newAdminInformer(namespace string, admin *adminNamespace) cache.
 		s.logger.Warn("watching Secrets failed", "namespace", namespace, "error", err)
 	})
 	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    func(any) { s.onChange() },
-		UpdateFunc: func(any, any) { s.onChange() },
-		DeleteFunc: func(any) { s.onChange() },
+		AddFunc:    func(any) { s.metrics.SecretUpdate(metrics.ResultOK); s.onChange() },
+		UpdateFunc: func(any, any) { s.metrics.SecretUpdate(metrics.ResultOK); s.onChange() },
+		DeleteFunc: func(any) { s.metrics.SecretUpdate(metrics.ResultUnavailable); s.onChange() },
 	})
 
 	return informer
@@ -333,6 +339,12 @@ func (s *Store) update(watch *secretWatch, secret Secret) {
 	s.mutex.Unlock()
 
 	if current.State != secret.State || current.ResourceVersion != secret.ResourceVersion {
+		if secret.State == Present {
+			s.metrics.SecretUpdate(metrics.ResultOK)
+		} else {
+			s.metrics.SecretUpdate(metrics.ResultUnavailable)
+		}
+
 		s.onChange()
 	}
 }

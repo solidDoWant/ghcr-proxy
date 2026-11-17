@@ -454,7 +454,6 @@ func TestMetricsServeGoAndProcessCollectors(t *testing.T) {
 func TestRequestsAreCountedByActionDecisionAndStatusClass(t *testing.T) {
 	proxyMetrics := metrics.New()
 	proxy := newHarness(t, harnessOptions{metrics: proxyMetrics})
-	proxyMetrics.SetPolicyCounts(func() (int, int) { return 1, 0 })
 
 	image, err := random.Image(64, 1)
 	require.NoError(t, err)
@@ -469,14 +468,14 @@ func TestRequestsAreCountedByActionDecisionAndStatusClass(t *testing.T) {
 
 	// The count is recorded after the response is written, so the last one can land just after the client returns.
 	expected := `
-# HELP registrygate_requests_total Requests served, by action, decision and status class.
+# HELP registrygate_requests_total Requests served, by upstream, action, decision and status class.
 # TYPE registrygate_requests_total counter
-registrygate_requests_total{action="none",code="4xx",decision="unauthenticated"} 1
-registrygate_requests_total{action="pull",code="4xx",decision="unauthenticated"} 1
-registrygate_requests_total{action="pull",code="5xx",decision="unavailable"} 1
-registrygate_requests_total{action="push",code="4xx",decision="denied"} 1
-registrygate_requests_total{action="pull",code="2xx",decision="allowed"} 1
-registrygate_requests_total{action="unknown",code="4xx",decision="notfound"} 1
+registrygate_requests_total{action="none",code="4xx",decision="unauthenticated",upstream="registrygate/upstream-a"} 1
+registrygate_requests_total{action="pull",code="4xx",decision="unauthenticated",upstream="none"} 1
+registrygate_requests_total{action="pull",code="5xx",decision="unavailable",upstream="none"} 1
+registrygate_requests_total{action="push",code="4xx",decision="denied",upstream="registrygate/upstream-a"} 1
+registrygate_requests_total{action="pull",code="2xx",decision="allowed",upstream="registrygate/upstream-a"} 1
+registrygate_requests_total{action="unknown",code="4xx",decision="notfound",upstream="none"} 1
 `
 
 	var compareErr error

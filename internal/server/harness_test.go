@@ -58,9 +58,11 @@ type harnessOptions struct {
 type objects struct {
 	upstream   *v1alpha1.UpstreamRegistry
 	credential *v1alpha1.UpstreamCredential
-	mirrors    []v1alpha1.RegistryMirror
-	policy     *v1alpha1.RegistryAccessPolicy
-	secrets    secretMap
+	// moreCredentials are further credentials of the same upstream.
+	moreCredentials []v1alpha1.UpstreamCredential
+	mirrors         []v1alpha1.RegistryMirror
+	policy          *v1alpha1.RegistryAccessPolicy
+	secrets         secretMap
 }
 
 type harness struct {
@@ -82,7 +84,7 @@ func (h *harness) rebuild(t *testing.T) {
 
 	in := model.Inputs{
 		Upstreams:       []v1alpha1.UpstreamRegistry{*h.objects.upstream},
-		Credentials:     []v1alpha1.UpstreamCredential{*h.objects.credential},
+		Credentials:     append([]v1alpha1.UpstreamCredential{*h.objects.credential}, h.objects.moreCredentials...),
 		Mirrors:         h.objects.mirrors,
 		Policies:        []v1alpha1.RegistryAccessPolicy{*h.objects.policy},
 		Namespaces:      map[string]labels.Set{adminNamespace: {}, ciNamespace: {}},
@@ -204,8 +206,8 @@ func newHarness(t *testing.T, options harnessOptions) *harness {
 
 	forwarder := registry.NewForwarder(registry.ForwarderConfig{
 		Upstreams:      upstream.NewClients(upstream.ClientOptions{Metrics: options.metrics}),
-		RuleMirrors:    mirror.NewCache(mirror.ClientOptions{Metrics: options.metrics, Target: metrics.TargetPolicyMirror}),
-		DefaultMirrors: mirror.NewCache(mirror.ClientOptions{Metrics: options.metrics, Target: metrics.TargetAnonymousMirror}),
+		RuleMirrors:    mirror.NewCache(mirror.ClientOptions{Metrics: options.metrics}),
+		DefaultMirrors: mirror.NewCache(mirror.ClientOptions{Metrics: options.metrics}),
 		UploadTokens:   uploadTokens,
 		Metrics:        options.metrics,
 	})
