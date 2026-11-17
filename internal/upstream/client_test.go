@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
+	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/random"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/stretchr/testify/assert"
@@ -480,4 +481,94 @@ func TestCredentialHidesItsValues(t *testing.T) {
 		assert.NotContains(t, formatted, "hunter2")
 		assert.NotContains(t, formatted, "user")
 	}
+}
+
+func TestClientReachesPlainHTTPUpstream(t *testing.T) {
+	fake := fakeregistry.New(t, fakeregistry.Options{PlainHTTP: true})
+	repo := repoFor(t)
+	require.NoError(t, fake.Push(repo, mustRandomImage(t)))
+
+	client := newClient(t, upstreamFor(t, "http://"+fake.RegistryHost(), nil))
+
+	cred := upstream.Credential{ID: "cred", Version: "1", Username: "registrygate", Password: fake.PAT()}
+	resp, err := get(t, client, "/v2/"+repo+"/manifests/latest", cred, "repository:"+repo+":pull")
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestClientSendsTokenRequestForAliasRealmToItsURL(t *testing.T) {
+	// The alias names a host that doesn't resolve, so a token request sent to
+	// it would fail the pull.
+	const alias = "registry.alias.invalid"
+
+	tests := []struct {
+		name      string
+		plainHTTP bool
+		realm     string
+	}{
+		{name: "https alias realm on an https upstream", realm: "https://" + alias + "/token?extra=1"},
+		{name: "https alias realm on a plain HTTP upstream", plainHTTP: true, realm: "https://" + alias + "/token"},
+		{name: "http alias realm on an https upstream", realm: "http://" + alias + "/token"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fake := fakeregistry.New(t, fakeregistry.Options{PlainHTTP: test.plainHTTP})
+			repo := repoFor(t)
+			require.NoError(t, fake.Push(repo, mustRandomImage(t)))
+			fake.SetRealm(test.realm)
+			fake.ResetLog()
+
+			scheme := "https"
+			if test.plainHTTP {
+				scheme = "http"
+			}
+
+			client := newClient(t, upstreamFor(t, scheme+"://"+fake.RegistryHost(), func(u *model.Upstream) {
+				u.CAs = fake.CAPool()
+				u.Object.Spec.AliasHosts = []string{alias}
+			}))
+
+			cred := upstream.Credential{ID: "cred", Version: "1", Username: "registrygate", Password: fake.PAT()}
+			resp, err := get(t, client, "/v2/"+repo+"/manifests/latest", cred, "repository:"+repo+":pull")
+			require.NoError(t, err)
+			assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+			var tokenRequests int
+
+			for _, entry := range fake.Log() {
+				if entry.Path == "/token" {
+					tokenRequests++
+
+					if strings.Contains(test.realm, "?extra=") {
+						assert.Contains(t, entry.QueryKeys, "extra", "the realm's query is kept")
+					}
+				}
+			}
+
+			assert.Positive(t, tokenRequests, "the token request reaches the upstream's url")
+		})
+	}
+}
+
+func TestClientRefusesRealmOnAnAliasItDoesNotList(t *testing.T) {
+	fake := fakeregistry.New(t, fakeregistry.Options{})
+	fake.SetRealm("https://registry.alias.invalid/token")
+
+	client := newClient(t, fakeUpstream(t, fake, func(u *model.Upstream) {
+		u.Object.Spec.AliasHosts = []string{"other.alias.invalid"}
+	}))
+
+	cred := upstream.Credential{ID: "cred", Version: "1", Username: "registrygate", Password: fake.PAT()}
+	_, err := get(t, client, "/v2/"+repoFor(t)+"/manifests/latest", cred, "repository:"+repoFor(t)+":pull")
+	require.ErrorIs(t, err, upstream.ErrRealmNotAllowed)
+}
+
+func mustRandomImage(t *testing.T) v1.Image {
+	t.Helper()
+
+	image, err := random.Image(64, 1)
+	require.NoError(t, err)
+
+	return image
 }

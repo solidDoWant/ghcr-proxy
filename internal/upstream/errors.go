@@ -3,10 +3,10 @@ package upstream
 
 import (
 	"errors"
-	"strings"
 	"time"
 
 	"github.com/solidDoWant/registrygate/internal/metrics"
+	"github.com/solidDoWant/registrygate/internal/model"
 )
 
 // Failures of a token fetch. Each maps to one fixed client answer; the
@@ -16,7 +16,7 @@ var (
 	ErrCredentialRejected = errors.New("upstream rejected the proxy's credential")
 	// ErrAnonymousRefused is the token endpoint refusing an anonymous token.
 	ErrAnonymousRefused = errors.New("upstream refused an anonymous token")
-	// ErrRealmNotAllowed is a token realm outside the upstream's host and its tokenRealmHosts.
+	// ErrRealmNotAllowed is a token realm outside the upstream's host, its tokenRealmHosts and its aliasHosts.
 	ErrRealmNotAllowed = errors.New("upstream token endpoint not allowed")
 	// ErrUnavailable is the upstream or its token endpoint failing otherwise.
 	ErrUnavailable = errors.New("upstream unavailable")
@@ -44,14 +44,5 @@ func tokenFetchResult(err error) string {
 // CanonicalHost lower-cases host and removes the scheme's default port, for
 // comparing hosts.
 func CanonicalHost(scheme, host string) string {
-	host = strings.ToLower(host)
-
-	switch strings.ToLower(scheme) {
-	case "https":
-		host = strings.TrimSuffix(host, ":443")
-	case "http":
-		host = strings.TrimSuffix(host, ":80")
-	}
-
-	return host
+	return model.CanonicalHost(scheme, host)
 }

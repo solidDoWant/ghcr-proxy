@@ -143,7 +143,7 @@ type UpstreamRegistrySpec struct {
 	// +kubebuilder:validation:items:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
 	// +listType=set
 	Hosts []string `json:"hosts"`
-	// URL is where requests go: https://host[:port].
+	// URL is where requests go: https://host[:port], or http://host[:port] for plain HTTP (no caSecretRef).
 	// +kubebuilder:validation:MaxLength=2048
 	URL string `json:"url"`
 	// CASecretRef names the Secret (key ca.crt) with the CA that signs the upstream.
@@ -158,6 +158,15 @@ type UpstreamRegistrySpec struct {
 	// +listType=set
 	// +optional
 	TokenRealmHosts []string `json:"tokenRealmHosts,omitempty"`
+	// AliasHosts are other names (host or host:port) of the registry at url, such as Harbor's externalURL when url is
+	// its in-cluster Service. A token realm or Location on an alias host is treated as on url; the proxy never sends
+	// a request to an alias host.
+	// +kubebuilder:validation:MaxItems=8
+	// +kubebuilder:validation:items:MaxLength=260
+	// +kubebuilder:validation:items:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*(:[0-9]{1,5})?$`
+	// +listType=set
+	// +optional
+	AliasHosts []string `json:"aliasHosts,omitempty"`
 	// AnonymousPulls says what happens to an unauthenticated pull. Default Challenge.
 	// +kubebuilder:validation:Enum=Challenge;Forward
 	// +optional
@@ -201,9 +210,25 @@ type UpstreamCredentialSpec struct {
 type RegistryMirrorSpec struct {
 	// UpstreamRef is the upstream this mirror serves.
 	UpstreamRef ObjectRef `json:"upstreamRef"`
-	// URL of the mirror.
+	// URL of the mirror. An http URL needs a matching http allowedMirrorURLs entry on the upstream.
 	// +kubebuilder:validation:MaxLength=2048
 	URL string `json:"url"`
+	// TokenRealmHosts are hosts (host or host:port) allowed as the token endpoint besides the url host.
+	// +kubebuilder:validation:MaxItems=8
+	// +kubebuilder:validation:items:MaxLength=260
+	// +kubebuilder:validation:items:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*(:[0-9]{1,5})?$`
+	// +listType=set
+	// +optional
+	TokenRealmHosts []string `json:"tokenRealmHosts,omitempty"`
+	// AliasHosts are other names (host or host:port) of the registry at url, such as Harbor's externalURL when url is
+	// its in-cluster Service. A token realm or Location on an alias host is treated as on url; the proxy never sends
+	// a request to an alias host.
+	// +kubebuilder:validation:MaxItems=8
+	// +kubebuilder:validation:items:MaxLength=260
+	// +kubebuilder:validation:items:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*(:[0-9]{1,5})?$`
+	// +listType=set
+	// +optional
+	AliasHosts []string `json:"aliasHosts,omitempty"`
 	// PathPrefix is put before the repository name on the mirror.
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=255

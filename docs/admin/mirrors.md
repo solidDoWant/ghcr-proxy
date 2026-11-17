@@ -22,7 +22,11 @@ spec:
     - https://harbor.example.com/
 ```
 
-A mirror URL matches a prefix when the scheme and host are equal and the path of the prefix is a prefix of the path of the mirror on a `/` boundary. A mirror with another URL gets `Ready=False` with the reason `URLNotAllowed`.
+A mirror URL matches a prefix when the scheme and host are equal and the path of the prefix is a prefix of the path of the mirror on a `/` boundary. A mirror with another URL gets `Ready=False` with the reason `URLNotAllowed`, and the proxy never connects to it.
+
+A mirror can use plain HTTP only if you allow it here. An `http://` mirror URL matches only an `http://` prefix, and an `https://` prefix matches only an `https://` mirror URL. For Harbor through its Service, allow for example `http://harbor-core.harbor.svc/`.
+
+Warning: use plain HTTP only inside a network that you trust. The proxy sends the credential of the mirror and its tokens unencrypted. The mirror stays ready, and its status message says `plain HTTP: credentials cross the cluster network unencrypted`.
 
 ## Create a RegistryMirror
 
@@ -49,6 +53,8 @@ spec:
 - `pathPrefix`: The path under which the mirror serves the upstream. With `ci-foo-ghcr`, the image `soliddowant/foo` is `ci-foo-ghcr/soliddowant/foo` on the mirror.
 - `secretRef`: A Secret in the namespace of the mirror with the credential of the mirror. Leave it out if the mirror needs none.
 - `caSecretRef`: A Secret with the key `ca.crt`, for a mirror with a private CA.
+- `tokenRealmHosts`: Hosts that can serve as the token endpoint of the mirror, besides the host of `url`. They must use the scheme of `url`. The proxy refuses any other token endpoint, and the mirror then fails.
+- `aliasHosts`: Other names of the mirror, for example the `externalURL` host of Harbor when `url` is its Service `http://harbor-core.harbor.svc`. The proxy treats a token endpoint or a `Location` on an alias host as if it were on `url`, and never sends a request to the alias host. See [Harbor through its Service](upstreams.md#harbor-through-its-service).
 - `fallbackToUpstream`: If `true` (the default), a pull goes to the upstream with no credential when the mirror fails.
 - `timeouts`: The `responseHeader` timeout also decides when the mirror counts as failed.
 

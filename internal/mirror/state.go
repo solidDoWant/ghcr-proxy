@@ -45,4 +45,10 @@ type Settings struct {
 	PathPrefix            string
 	FallbackToUpstream    bool
 	ResponseHeaderTimeout time.Duration
+	// TokenRealmHosts are hosts (host or host:port) allowed as the token
+	// endpoint besides the URL's host, on the URL's scheme.
+	TokenRealmHosts []string
+	// AliasHosts are other names of the mirror; a realm or Location on one is
+	// treated as on URL.
+	AliasHosts []string
 }

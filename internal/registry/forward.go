@@ -252,6 +252,14 @@ func (f *Forwarder) modifyResponse(resp *http.Response) error {
 		return nil
 	}
 
+	// A Location on an alias host is handled as if it were on the upstream's url.
+	if parsed, err := url.Parse(location); err == nil {
+		if moved, ok := state.client.OntoURL(parsed); ok {
+			location = moved.String()
+			resp.Header.Set("Location", location)
+		}
+	}
+
 	route := state.forward.Request.Route
 	if resp.StatusCode == http.StatusAccepted && resp.Request.URL.Host == state.client.URL().Host &&
 		(route == RouteUploadStart || route == RouteUploadSession) {
@@ -487,7 +495,8 @@ func (t *tokenTransport) tryMirror(req *http.Request, state *exchange) (resp *ht
 	return resp, true, nil
 }
 
-// mapMirrorLocation points a Location on the mirror's host back at the client
+// mapMirrorLocation points a Location on the mirror's host (or one of its
+// alias hosts) back at the client
 // host, turning `<url path>/v2/<pathPrefix>/` back into /v2/. It reports false
 // for a mirror-host Location outside that prefix, which must not reach the
 // client. Locations on other hosts (blob storage) are left as they are.
@@ -503,6 +512,10 @@ func mapMirrorLocation(resp *http.Response, requestURL *url.URL, target *mirror.
 	}
 
 	resolved := requestURL.ResolveReference(parsed)
+	if moved, ok := target.OntoURL(resolved); ok {
+		resolved = moved
+	}
+
 	if !target.SameHost(resolved) {
 		return true
 	}
