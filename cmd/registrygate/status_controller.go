@@ -9,7 +9,6 @@ import (
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 
-	"github.com/solidDoWant/registrygate/internal/config"
 	"github.com/solidDoWant/registrygate/internal/controller"
 )
 
@@ -23,8 +22,9 @@ type statusController struct {
 	restConfig *rest.Config
 	scheme     *runtime.Scheme
 	namespace  string
-	grants     config.Grants
-	logger     *slog.Logger
+	// setup registers the status controllers on each new manager; nil registers none.
+	setup  func(ctrl.Manager) error
+	logger *slog.Logger
 }
 
 // run blocks until ctx ends. It returns only after the manager has stopped, which includes releasing the lease.
@@ -51,9 +51,10 @@ func (s *statusController) runOnce(ctx context.Context) error {
 		return err
 	}
 
-	reconciler := &controller.GHCRAccessPolicyReconciler{Client: manager.GetClient(), Grants: s.grants}
-	if err := reconciler.SetupWithManager(manager); err != nil {
-		return err
+	if s.setup != nil {
+		if err := s.setup(manager); err != nil {
+			return err
+		}
 	}
 
 	return manager.Start(ctx)
