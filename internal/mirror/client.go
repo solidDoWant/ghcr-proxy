@@ -18,7 +18,6 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	lru "github.com/hashicorp/golang-lru/v2"
 
-	"github.com/solidDoWant/registrygate/internal/config"
 	"github.com/solidDoWant/registrygate/internal/metrics"
 )
 
@@ -46,8 +45,7 @@ const (
 
 // ClientConfig configures a Client.
 type ClientConfig struct {
-	Mirror *config.Mirror
-	Files  *Files
+	Mirror *Settings
 	// TokenTimeout bounds one ping or token exchange.
 	TokenTimeout time.Duration
 	Logger       *slog.Logger
@@ -84,11 +82,6 @@ type tokenKey struct {
 type tokenEntry struct {
 	value      string
 	validUntil time.Time
-}
-
-// NewClient returns a client for the mirror in cfg.
-func NewClient(cfg ClientConfig) (*Client, error) {
-	return newClient(cfg, cfg.Files)
 }
 
 func newClient(cfg ClientConfig, source StateSource) (*Client, error) {

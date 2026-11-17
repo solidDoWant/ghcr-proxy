@@ -24,6 +24,9 @@ pat:
 tls:
   # -- Name of the `kubernetes.io/tls` Secret with the serving certificate. Required. The chart never creates it.
   existingSecret: ""
+uploadSigning:
+  # -- Name of a Secret in the release namespace whose key `key` (at least 32 bytes) signs upload session tokens. Empty makes the chart create one with a random key and keep it across upgrades.
+  existingSecret: ""
 webhook:
   # -- Serve the validating admission webhook that rejects an `UpstreamRegistry` outside the admin namespaces, and a `RegistryAccessPolicy` rule outside the ceiling of its credential, at apply time. The proxy still enforces both either way.
   enabled: false

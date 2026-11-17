@@ -59,12 +59,12 @@ func (b *lockedBuffer) lines(t *testing.T, count int) []map[string]any {
 func putManifest(t *testing.T, proxy *harness, target, authorization string, body []byte) {
 	t.Helper()
 
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodPut, proxy.server.URL+target, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPut, proxy.url()+target, bytes.NewReader(body))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/vnd.oci.image.index.v1+json")
 	req.Header.Set("Authorization", authorization)
 
-	resp, err := proxy.server.Client().Do(req)
+	resp, err := proxy.client().Do(req)
 	require.NoError(t, err)
 	require.NoError(t, resp.Body.Close())
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
@@ -106,7 +106,7 @@ func TestAuditWritesOneLineForEachKindOfDecision(t *testing.T) {
 		{
 			name: "anonymous pull", method: http.MethodGet, target: "/v2/other/img/manifests/latest",
 			want: map[string]any{
-				"repository": "other/img", "action": "pull", "decision": "anonymous", "status": float64(401),
+				"repository": "other/img", "action": "pull", "decision": "unauthenticated", "status": float64(401),
 			},
 		},
 		{

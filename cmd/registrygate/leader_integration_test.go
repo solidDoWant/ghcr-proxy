@@ -5,14 +5,7 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
-	"crypto/x509"
-	"crypto/x509/pkix"
-	"encoding/pem"
 	"fmt"
-	"math/big"
 	"net"
 	"net/http"
 	"os"
@@ -23,11 +16,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 	coordinationv1 "k8s.io/api/coordination/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
-
-	"github.com/solidDoWant/registrygate/test/fakeghcr"
 )
 
 type syncBuffer struct {
@@ -57,27 +50,6 @@ func freeAddr(t *testing.T) string {
 	require.NoError(t, listener.Close())
 
 	return addr
-}
-
-func writeSelfSigned(t *testing.T, dir string) (string, string) {
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	require.NoError(t, err)
-
-	template := &x509.Certificate{
-		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "ghcr.io"}, DNSNames: []string{"ghcr.io"},
-		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
-	}
-	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
-	require.NoError(t, err)
-
-	keyDER, err := x509.MarshalECPrivateKey(key)
-	require.NoError(t, err)
-
-	certFile, keyFile := filepath.Join(dir, "tls.crt"), filepath.Join(dir, "tls.key")
-	require.NoError(t, os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600))
-	require.NoError(t, os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0o600))
-
-	return certFile, keyFile
 }
 
 type proxyUnderTest struct {
@@ -120,32 +92,23 @@ func startProxy(t *testing.T, ctx context.Context) *proxyUnderTest {
 	k8s, err := client.New(user.Config(), client.Options{})
 	require.NoError(t, err)
 
-	fake := fakeghcr.New(t, fakeghcr.Options{})
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "kubeconfig"), kubeconfig, 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "ca.crt"), fake.CAPEM(), 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "pat"), []byte(fake.PAT()), 0o600))
-	certFile, keyFile := writeSelfSigned(t, dir)
+
+	// The replica is ready only once the upload signing key is loaded.
+	require.NoError(t, k8s.Create(t.Context(), &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: defaultUploadSigningSecret},
+		Data:       map[string][]byte{uploadSigningKeyField: []byte("0123456789abcdef0123456789abcdef")},
+	}))
 
 	health := freeAddr(t)
 	configYAML := fmt.Sprintf(`
-upstream:
-  url: https://%s
-  patFile: %s
-  caFile: %s
-tls:
-  certFile: %s
-  keyFile: %s
 listen:
   https: %s
   health: %s
 server:
   shutdownGracePeriod: 5s
-grants:
-  - namespaces: "ci-(?P<repo>[a-z0-9-]+)"
-    repositories: ["soliddowant/${repo}"]
-    actions: [pull, push]
-`, fake.RegistryHost(), filepath.Join(dir, "pat"), filepath.Join(dir, "ca.crt"), certFile, keyFile, freeAddr(t), health)
+`, freeAddr(t), health)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(configYAML), 0o600))
 
 	t.Setenv("KUBECONFIG", filepath.Join(dir, "kubeconfig"))

@@ -35,26 +35,12 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 {{- end }}
 
-{{/* The rendered proxy config file. The Secrets are mounted as directories under /var/run/registrygate. */}}
+{{/* The rendered proxy config file: the server's own settings. Upstreams, credentials, mirrors and access come from the custom resources. */}}
 {{- define "registrygate.config" -}}
-upstream:
-  url: {{ .Values.upstream.url | quote }}
-  tokenHosts: {{ .Values.upstream.tokenHosts | toJson }}
-  patFile: /var/run/registrygate/pat/token
-  {{- if .Values.upstream.ca.existingSecret }}
-  caFile: /var/run/registrygate/upstream-ca/ca.crt
-  {{- end }}
-  timeout: {{ .Values.upstream.timeout | quote }}
-  tokenTimeout: {{ .Values.upstream.tokenTimeout | quote }}
-  apiURL: {{ .Values.upstream.apiURL | quote }}
 authentication:
   audience: {{ .Values.authentication.audience | quote }}
   cacheTTL: {{ .Values.authentication.cacheTTL | quote }}
   reviewTimeout: {{ .Values.authentication.reviewTimeout | quote }}
-grants: {{ .Values.grants | toJson }}
-tls:
-  certFile: /var/run/registrygate/tls/tls.crt
-  keyFile: /var/run/registrygate/tls/tls.key
 listen:
   https: ":8443"
   health: ":8080"
@@ -65,25 +51,6 @@ server:
   shutdownGracePeriod: {{ .Values.server.shutdownGracePeriod | quote }}
 audit:
   enabled: {{ .Values.audit.enabled }}
-{{- if or .Values.mirrors.policy.url .Values.mirrors.anonymous.url }}
-mirrors:
-{{- range $name := list "policy" "anonymous" }}
-{{- $mirror := index $.Values.mirrors $name }}
-{{- if $mirror.url }}
-  {{ $name }}:
-    url: {{ $mirror.url | quote }}
-    pathPrefix: {{ $mirror.pathPrefix | quote }}
-    {{- if $mirror.credentials.existingSecret }}
-    credentialsFile: /var/run/registrygate/mirror-{{ $name }}/credentials
-    {{- end }}
-    {{- if $mirror.ca.existingSecret }}
-    caFile: /var/run/registrygate/mirror-{{ $name }}-ca/ca.crt
-    {{- end }}
-    fallbackToUpstream: {{ $mirror.fallbackToUpstream }}
-    responseHeaderTimeout: {{ $mirror.responseHeaderTimeout | quote }}
-{{- end }}
-{{- end }}
-{{- end }}
 {{- if .Values.webhook.enabled }}
 webhook:
   enabled: true
@@ -112,4 +79,9 @@ webhook:
 {{- if hasSuffix "m" $d -}}{{- $mult = 60 -}}{{- end -}}
 {{- if hasSuffix "h" $d -}}{{- $mult = 3600 -}}{{- end -}}
 {{- add (mul $n $mult) 30 -}}
+{{- end }}
+
+{{/* Name of the Secret with the upload signing key. */}}
+{{- define "registrygate.uploadSigningSecretName" -}}
+{{- default (printf "%s-upload-signing" (include "registrygate.fullname" .)) .Values.uploadSigning.existingSecret -}}
 {{- end }}

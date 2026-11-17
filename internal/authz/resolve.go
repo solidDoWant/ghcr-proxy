@@ -217,3 +217,14 @@ func ruleNames(rules []*model.Rule) []string {
 
 	return slices.Compact(names)
 }
+
+// Resolver decides requests on the current snapshot.
+type Resolver struct {
+	// Snapshot returns the current snapshot, or nil before the first build.
+	Snapshot func() *model.Snapshot
+}
+
+// Decide resolves request on one snapshot read once for the whole decision.
+func (r Resolver) Decide(host string, identity authn.Identity, request registry.Request) Resolution {
+	return Decide(r.Snapshot(), host, identity, request)
+}

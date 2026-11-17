@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Lints the Helm chart without a cluster (`make chart-lint`, part of
 # `make lint`): helm lint, then renders with the required values and checks the
-# properties the chart promises (hardening, resources, config rollout, Service IP).
+# properties the chart promises (hardening, resources, config rollout, Service IP, upload signing Secret).
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
 chart=deploy/charts/registrygate
-required=(--set pat.existingSecret=pat --set tls.existingSecret=tls)
+required=()
 
 helm lint --strict "$chart" "${required[@]}"
 
@@ -40,7 +40,11 @@ for want in 'port: 8443' 'port: 8080' 'port: 9443' 'port: 6443' 'team: ci' '10.0
 	grep -qF -- "$want" <<<"$np" || fail "network policy lacks: $want"
 done
 
-if helm template registrygate "$chart" >/dev/null 2>&1; then
-	fail "render without the Secret names must fail"
-fi
+signing=$(render --show-only templates/upload-signing-secret.yaml)
+grep -qE '^  key: .{44,}' <<<"$signing" || fail "the upload signing Secret has no key of at least 32 bytes"
+grep -qF -- '--upload-signing-secret=registrygate-upload-signing' <<<"$default" || fail "the proxy is not given the signing Secret"
+grep -qF 'name: registrygate-upload-signing' <<<"$(render --set uploadSigning.existingSecret=mine)" &&
+	fail "the chart creates a signing Secret when uploadSigning.existingSecret is set"
+grep -qF -- '--upload-signing-secret=mine' <<<"$(render --set uploadSigning.existingSecret=mine)" ||
+	fail "the proxy is not given uploadSigning.existingSecret"
 echo "chart-lint: passed"

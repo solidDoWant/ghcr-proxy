@@ -2,7 +2,6 @@ package server_test
 
 import (
 	"net/http"
-	"strings"
 	"testing"
 
 	"github.com/google/go-containerregistry/pkg/authn"
@@ -12,10 +11,12 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/solidDoWant/registrygate/test/fakeregistry"
 )
 
 func TestDeleteByDigestWithTheDeleteActionRemovesTheManifest(t *testing.T) {
-	proxy := newHarness(t, harnessOptions{})
+	proxy := newHarness(t, harnessOptions{fake: fakeregistry.Options{Delete: fakeregistry.Supported}})
 
 	image, err := random.Image(256, 1)
 	require.NoError(t, err)
@@ -24,13 +25,13 @@ func TestDeleteByDigestWithTheDeleteActionRemovesTheManifest(t *testing.T) {
 	digest, err := image.Digest()
 	require.NoError(t, err)
 
-	ref, err := name.NewDigest(strings.TrimPrefix(proxy.server.URL, "https://") + "/soliddowant/foo/disposable@" + digest.String())
+	ref, err := name.NewDigest(registryHost + "/soliddowant/foo/disposable@" + digest.String())
 	require.NoError(t, err)
 
 	// remote.Delete is what crane delete runs.
 	options := []remote.Option{
 		remote.WithAuth(&authn.Basic{Username: "registrygate", Password: builderToken}),
-		remote.WithTransport(proxy.server.Client().Transport),
+		remote.WithTransport(proxy.transport()),
 	}
 	require.NoError(t, remote.Delete(ref, options...))
 

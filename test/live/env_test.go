@@ -16,12 +16,9 @@ package live
 import (
 	"context"
 	"crypto/rand"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/hex"
+	"errors"
 	"fmt"
-	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -30,27 +27,18 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
-	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
 	"github.com/solidDoWant/registrygate/api/v1alpha1"
-	"github.com/solidDoWant/registrygate/internal/authn"
-	"github.com/solidDoWant/registrygate/internal/authz"
-	"github.com/solidDoWant/registrygate/internal/config"
-	"github.com/solidDoWant/registrygate/internal/registry"
-	"github.com/solidDoWant/registrygate/internal/server"
-	"github.com/solidDoWant/registrygate/internal/upstream"
 )
 
 const (
@@ -208,94 +196,14 @@ func startEnv() (*liveEnv, error) {
 	return env, nil
 }
 
-// startProxy wires the proxy's components the way the registrygate command
-// does, pointed at ghcr.io, with the run prefix as the only grant.
-func (e *liveEnv) startProxy(ctx context.Context, restConfig *rest.Config, patFile string) error {
-	configYAML := fmt.Sprintf(`
-upstream:
-  url: %s
-  apiURL: %s
-  patFile: %s
-grants:
-  - namespaces: %s
-    repositories: [%q, %q]
-    actions: [pull, push, delete]
-`, registryURL, apiURL, patFile, ciNamespace, e.prefix, e.prefix+"/**")
+// errNotPorted stops a live run until the environment builds the custom resources the proxy now reads; the
+// proxy no longer takes an upstream, a PAT file or grants from its config file.
+var errNotPorted = errors.New("the live environment does not build UpstreamRegistry, UpstreamCredential and " +
+	"RegistryAccessPolicy objects yet")
 
-	cfg, err := config.Parse([]byte(configYAML))
-	if err != nil {
-		return err
-	}
-
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	pat := upstream.NewPATFile(cfg.Upstream.PATFile, logger)
-
-	tokens, err := upstream.NewTokens(upstream.TokensConfig{
-		URL: cfg.Upstream.URL, TokenHosts: cfg.Upstream.TokenHosts, TokenTimeout: cfg.Upstream.TokenTimeout,
-		PAT: pat, Logger: logger,
-	})
-	if err != nil {
-		return err
-	}
-
-	forwarder := registry.NewForwarder(registry.ForwarderConfig{
-		Upstream: cfg.Upstream.URL, Tokens: tokens, Timeout: cfg.Upstream.Timeout, Logger: logger,
-		API: registry.APIConfig{URL: cfg.Upstream.APIURL, Timeout: cfg.Upstream.APITimeout, PAT: pat},
-	})
-
-	reviewer, err := authn.NewReviewerForConfig(restConfig, authn.Options{
-		Audience: cfg.Authentication.Audience, CacheTTL: cfg.Authentication.CacheTTL,
-		ReviewTimeout: cfg.Authentication.ReviewTimeout,
-	})
-	if err != nil {
-		return err
-	}
-
-	scheme := runtime.NewScheme()
-	if err := clientgoscheme.AddToScheme(scheme); err != nil {
-		return err
-	}
-
-	if err := v1alpha1.AddToScheme(scheme); err != nil {
-		return err
-	}
-
-	policyCache, err := cache.New(restConfig, cache.Options{Scheme: scheme})
-	if err != nil {
-		return err
-	}
-
-	index := authz.NewIndex(cfg.Grants)
-	if err := index.Watch(ctx, policyCache); err != nil {
-		return err
-	}
-
-	go func() { _ = policyCache.Start(ctx) }()
-
-	ready := func() bool { return index.Synced() && pat.Loaded() }
-
-	e.proxy = httptest.NewTLSServer(&server.Handler{
-		Reviewer: reviewer, Decider: &authz.Authorizer{Index: index}, Forwarder: forwarder, Ready: ready, Logger: logger,
-	})
-
-	roots, err := x509.SystemCertPool()
-	if err != nil {
-		return err
-	}
-
-	roots.AddCert(e.proxy.Certificate())
-	e.clientTransport = &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}}
-
-	deadline := time.Now().Add(time.Minute)
-	for !ready() {
-		if time.Now().After(deadline) {
-			return fmt.Errorf("proxy not ready: policies synced %t, PAT loaded %t", index.Synced(), pat.Loaded())
-		}
-
-		time.Sleep(100 * time.Millisecond)
-	}
-
-	return nil
+// startProxy would start the proxy for the run. It refuses until the environment is ported.
+func (e *liveEnv) startProxy(context.Context, *rest.Config, string) error {
+	return errNotPorted
 }
 
 // setUpCaller creates the CI namespace, its ServiceAccount, a pod token for

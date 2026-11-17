@@ -1,23 +1,21 @@
-// Command registrygate is the authenticating reverse proxy for ghcr.io.
+// Command registrygate is the authenticating reverse proxy for container registries.
 package main
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
-	"net/http"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
 
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
@@ -32,6 +30,7 @@ import (
 	"github.com/solidDoWant/registrygate/internal/mirror"
 	"github.com/solidDoWant/registrygate/internal/model"
 	"github.com/solidDoWant/registrygate/internal/registry"
+	"github.com/solidDoWant/registrygate/internal/secrets"
 	"github.com/solidDoWant/registrygate/internal/server"
 	"github.com/solidDoWant/registrygate/internal/upstream"
 	"github.com/solidDoWant/registrygate/internal/webhook"
@@ -42,6 +41,14 @@ var version = "0.0.0-dev"
 
 // defaultConfigPath is where the chart mounts the rendered config file.
 const defaultConfigPath = "/etc/registrygate/config.yaml"
+
+// defaultUploadSigningSecret is the upload signing Secret the chart creates.
+const defaultUploadSigningSecret = "registrygate-upload-signing"
+
+// runFlags are the command-line settings serve needs.
+type runFlags struct {
+	uploadSigningSecret string
+}
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
@@ -57,6 +64,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 
 	configPath := flags.String("config", defaultConfigPath, "Path to the YAML config file.")
 	showVersion := flags.Bool("version", false, "Print the version and exit.")
+	uploadSigningSecret := flags.String("upload-signing-secret", defaultUploadSigningSecret,
+		"Name of the Secret in the proxy's namespace whose key \"key\" signs upload session tokens.")
 
 	if err := flags.Parse(args); err != nil {
 		return 2
@@ -76,7 +85,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 
 	logger := slog.New(slog.NewJSONHandler(stderr, nil))
 
-	if err := serve(ctx, cfg, logger); err != nil {
+	if err := serve(ctx, cfg, runFlags{uploadSigningSecret: *uploadSigningSecret}, logger); err != nil {
 		logger.Error("registrygate stopped", "error", err.Error())
 		return 1
 	}
@@ -85,79 +94,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 }
 
 // serve wires the proxy together and runs it until ctx ends.
-func serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
-	upstreamTransport, err := newUpstreamTransport(cfg.Upstream.CAFile)
-	if err != nil {
-		return err
-	}
-
+func serve(ctx context.Context, cfg *config.Config, flags runFlags, logger *slog.Logger) error {
 	proxyMetrics := metrics.New()
-
-	pat := upstream.NewPATFile(cfg.Upstream.PATFile, logger)
-	pat.Metrics = proxyMetrics
-	certificate := server.NewCertificate(cfg.TLS.CertFile, cfg.TLS.KeyFile, logger)
-	certificate.Metrics = proxyMetrics
-
-	// A mirror whose files are missing or invalid is unavailable, not fatal: its pulls take the fallback rule.
-	var mirrorFiles []*mirror.Files
-
-	newMirror := func(name, target string, mirrorConfig *config.Mirror) (registry.MirrorClient, error) {
-		if mirrorConfig == nil {
-			return nil, nil
-		}
-
-		files := mirror.NewFiles(name, mirrorConfig, logger)
-		files.Metrics = proxyMetrics
-		mirrorFiles = append(mirrorFiles, files)
-
-		client, err := mirror.NewClient(mirror.ClientConfig{
-			Mirror: mirrorConfig, Files: files, TokenTimeout: cfg.Upstream.TokenTimeout, Logger: logger,
-			Metrics: proxyMetrics, Target: target,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("%s mirror: %w", name, err)
-		}
-
-		return client, nil
-	}
-
-	policyMirror, err := newMirror("policy", metrics.TargetPolicyMirror, cfg.Mirrors.Policy)
-	if err != nil {
-		return err
-	}
-
-	anonymousMirror, err := newMirror("anonymous", metrics.TargetAnonymousMirror, cfg.Mirrors.Anonymous)
-	if err != nil {
-		return err
-	}
-
-	tokens, err := upstream.NewTokens(upstream.TokensConfig{
-		URL:          cfg.Upstream.URL,
-		TokenHosts:   cfg.Upstream.TokenHosts,
-		Transport:    upstreamTransport,
-		TokenTimeout: cfg.Upstream.TokenTimeout,
-		PAT:          pat,
-		Logger:       logger,
-		Metrics:      proxyMetrics,
-	})
-	if err != nil {
-		return fmt.Errorf("upstream tokens: %w", err)
-	}
-
-	forwarder := registry.NewForwarder(registry.ForwarderConfig{
-		Upstream:  cfg.Upstream.URL,
-		Transport: upstreamTransport,
-		Tokens:    tokens,
-		Timeout:   cfg.Upstream.Timeout,
-		Logger:    logger,
-
-		PolicyMirror:    policyMirror,
-		AnonymousMirror: anonymousMirror,
-		Metrics:         proxyMetrics,
-		API: registry.APIConfig{
-			URL: cfg.Upstream.APIURL, Transport: upstreamTransport, Timeout: cfg.Upstream.APITimeout, PAT: pat,
-		},
-	})
 
 	restConfig, err := ctrl.GetConfig()
 	if err != nil {
@@ -174,6 +112,11 @@ func serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		return err
 	}
 
+	kubeClient, err := kubernetes.NewForConfig(restConfig)
+	if err != nil {
+		return fmt.Errorf("kubernetes client: %w", err)
+	}
+
 	scheme := runtime.NewScheme()
 	if err := clientgoscheme.AddToScheme(scheme); err != nil {
 		return err
@@ -183,27 +126,67 @@ func serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		return err
 	}
 
-	// The index has its own informer, apart from the status controller's manager: losing the status lease stops the
-	// manager, and serving must carry on with live policies.
-	policyCache, err := cache.New(restConfig, cache.Options{Scheme: scheme})
+	namespace := os.Getenv("POD_NAMESPACE")
+
+	adminNamespaces := cfg.AdminNamespaces
+	if len(adminNamespaces) == 0 && namespace != "" {
+		adminNamespaces = []string{namespace}
+	}
+
+	// The model has its own informers, apart from the status controller's manager: losing the status lease stops
+	// the manager, and serving must carry on with live objects.
+	objectCache, err := cache.New(restConfig, cache.Options{Scheme: scheme})
 	if err != nil {
-		return fmt.Errorf("policy cache: %w", err)
+		return fmt.Errorf("object cache: %w", err)
 	}
 
-	index := authz.NewIndex(cfg.Grants)
-	proxyMetrics.SetPolicyCounts(index.Counts)
+	status := &controller.Status{}
+	upstreamClients := upstream.NewClients(upstream.ClientOptions{Logger: logger, Metrics: proxyMetrics})
+	ruleMirrors := mirror.NewCache(mirror.ClientOptions{Logger: logger, Metrics: proxyMetrics, Target: metrics.TargetPolicyMirror})
+	defaultMirrors := mirror.NewCache(mirror.ClientOptions{Logger: logger, Metrics: proxyMetrics, Target: metrics.TargetAnonymousMirror})
 
-	if err := index.Watch(ctx, policyCache); err != nil {
-		return err
+	var objects *model.Model
+
+	secretStore := secrets.New(kubeClient, secrets.Options{
+		AdminNamespaces: adminNamespaces,
+		OnChange:        func() { objects.MarkDirty() },
+		Logger:          logger,
+	})
+
+	objects = model.New(model.Options{
+		Reader:          objectCache,
+		Informers:       objectCache,
+		Secrets:         secretStore,
+		AdminNamespaces: adminNamespaces,
+		Logger:          logger,
+		OnRebuild: func(snapshot *model.Snapshot) {
+			status.Notify(snapshot)
+			retainClients(snapshot, upstreamClients, ruleMirrors, defaultMirrors)
+		},
+	})
+	status.Snapshot = objects.Snapshot
+
+	signing := &uploadSigning{
+		store:  secretStore,
+		key:    secrets.Key{Namespace: namespace, Name: flags.uploadSigningSecret},
+		logger: logger,
 	}
+
+	forwarder := registry.NewForwarder(registry.ForwarderConfig{
+		Upstreams:      upstreamClients,
+		RuleMirrors:    ruleMirrors,
+		DefaultMirrors: defaultMirrors,
+		UploadTokens:   signing.Codec,
+		Logger:         logger,
+		Metrics:        proxyMetrics,
+	})
 
 	statusController := &statusController{
 		restConfig: restConfig,
 		scheme:     scheme,
-		namespace:  os.Getenv("POD_NAMESPACE"),
+		namespace:  namespace,
 		logger:     logger,
-		// The model isn't wired in yet, so there is no snapshot and the reconcilers write nothing.
-		setup: (&controller.Status{Snapshot: func() *model.Snapshot { return nil }}).SetupWithManager,
+		setup:      status.SetupWithManager,
 	}
 
 	httpsListener, err := net.Listen("tcp", cfg.Listen.HTTPS)
@@ -217,55 +200,39 @@ func serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		return err
 	}
 
-	// The informer, the status controller and the file watchers outlive the listeners' drain, so requests still
-	// being served during shutdown are decided against live policies.
+	// The informers, the Secret store and the status controller outlive the listeners' drain, so requests still
+	// being served during shutdown are decided against live objects.
 	background, stopBackground := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopBackground()
 
 	var components sync.WaitGroup
 
-	backgroundErrs := make(chan error, 5+len(mirrorFiles))
+	backgroundErrs := make(chan error, 5)
 
 	start := func(run func(context.Context) error) {
 		components.Go(func() { backgroundErrs <- run(background) })
 	}
 
-	start(policyCache.Start)
+	start(objectCache.Start)
+	start(secretStore.Run)
+	start(objects.Run)
 
 	if cfg.Webhook.Enabled {
-		// The webhook reads the same snapshot as serving. The snapshot has no Secret store here: admission only
-		// needs the ceilings, which don't depend on Secrets.
-		snapshots := model.New(model.Options{
-			Reader:          policyCache,
-			Informers:       policyCache,
-			AdminNamespaces: cfg.AdminNamespaces,
-			Logger:          logger,
-		})
-
-		webhookServer, err := webhook.NewServer(cfg.Webhook, scheme, cfg.AdminNamespaces, snapshots.Snapshot)
+		webhookServer, err := webhook.NewServer(cfg.Webhook, scheme, adminNamespaces, objects.Snapshot)
 		if err != nil {
 			return err
 		}
 
-		start(snapshots.Run)
-
 		start(webhookServer.Start)
-	}
-
-	start(pat.Watch)
-	start(certificate.Watch)
-
-	for _, files := range mirrorFiles {
-		start(files.Watch)
 	}
 
 	// The status controller never fails the proxy; it retries until the proxy stops.
 	components.Go(func() { statusController.run(background) })
 
-	readiness := server.NewReadiness(index.Synced, pat.Loaded, certificate.Loaded)
+	readiness := server.NewReadiness(objects.Ready, signing.Loaded)
 	handler := &server.Handler{
 		Reviewer:  reviewer,
-		Decider:   &authz.Authorizer{Index: index},
+		Decider:   authz.Resolver{Snapshot: objects.Snapshot},
 		Forwarder: forwarder,
 		Ready:     readiness.Ready,
 		Logger:    logger,
@@ -299,7 +266,7 @@ func serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 
 	return server.Run(serveCtx, server.Config{
 		HTTPS:               httpsListener,
-		TLSConfig:           certificate.TLSConfig(),
+		TLSConfig:           server.SNICertificates(objects.Snapshot),
 		Health:              healthListener,
 		Handler:             handler,
 		Readiness:           readiness,
@@ -312,30 +279,24 @@ func serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	})
 }
 
-// newUpstreamTransport returns the transport for upstream requests: the system roots plus caFile when set. It never
-// follows redirects; the client follows them itself.
-func newUpstreamTransport(caFile string) (*http.Transport, error) {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-
-	if caFile == "" {
-		return transport, nil
+// retainClients drops the upstream and mirror clients of objects the snapshot no longer has.
+func retainClients(snapshot *model.Snapshot, upstreams *upstream.Clients, mirrorCaches ...*mirror.Cache) {
+	liveUpstreams := map[types.UID]struct{}{}
+	for _, item := range snapshot.Upstreams {
+		liveUpstreams[item.Object.UID] = struct{}{}
 	}
 
-	pem, err := os.ReadFile(caFile)
-	if err != nil {
-		return nil, fmt.Errorf("upstream CA file: %w", err)
+	upstreams.Retain(func(uid types.UID) bool {
+		_, live := liveUpstreams[uid]
+		return live
+	})
+
+	liveMirrors := map[types.UID]struct{}{}
+	for _, item := range snapshot.Mirrors {
+		liveMirrors[item.Object.UID] = struct{}{}
 	}
 
-	pool, err := x509.SystemCertPool()
-	if err != nil {
-		pool = x509.NewCertPool()
+	for _, mirrorCache := range mirrorCaches {
+		mirrorCache.Retain(liveMirrors)
 	}
-
-	if !pool.AppendCertsFromPEM(pem) {
-		return nil, errors.New("upstream CA file holds no PEM certificate")
-	}
-
-	transport.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
-
-	return transport, nil
 }

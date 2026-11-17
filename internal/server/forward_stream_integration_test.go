@@ -1,6 +1,6 @@
 //go:build integration
 
-package registry_test
+package server_test
 
 import (
 	"crypto/rand"
@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/solidDoWant/registrygate/test/fakeghcr"
+	"github.com/solidDoWant/registrygate/test/fakeregistry"
 )
 
 const (
@@ -51,8 +51,7 @@ func (r *repeatingReader) Read(p []byte) (int, error) {
 }
 
 func TestForwarderStreamsA2GiBUploadInBoundedMemory(t *testing.T) {
-	fake := fakeghcr.New(t, fakeghcr.Options{})
-	harness := newProxyHarness(t, fake, fake.PAT(), withPAT)
+	proxy := newHarness(t, harnessOptions{fake: fakeregistry.Options{BlobDir: t.TempDir()}})
 
 	block := make([]byte, streamBlockSize)
 	_, err := rand.Read(block)
@@ -65,20 +64,7 @@ func TestForwarderStreamsA2GiBUploadInBoundedMemory(t *testing.T) {
 
 	digest := "sha256:" + hex.EncodeToString(hasher.Sum(nil))
 
-	start, err := http.NewRequestWithContext(t.Context(), http.MethodPost, harness.server.URL+"/v2/owner/big/blobs/uploads/", nil)
-	require.NoError(t, err)
-
-	startResp, err := harness.client().Do(start)
-	require.NoError(t, err)
-	require.NoError(t, startResp.Body.Close())
-	require.Equal(t, http.StatusAccepted, startResp.StatusCode)
-
-	location, err := startResp.Location()
-	require.NoError(t, err)
-
-	query := location.Query()
-	query.Set("digest", digest)
-	location.RawQuery = query.Encode()
+	location := proxy.url() + proxy.startUpload(t, "soliddowant/foo/app") + "?digest=" + digest
 
 	runtime.GC()
 
@@ -113,11 +99,12 @@ func TestForwarderStreamsA2GiBUploadInBoundedMemory(t *testing.T) {
 	}()
 
 	// No Content-Length: the body is sent chunked, as it streams.
-	upload, err := http.NewRequestWithContext(t.Context(), http.MethodPut, location.String(),
+	upload, err := http.NewRequestWithContext(t.Context(), http.MethodPut, location,
 		io.NopCloser(&repeatingReader{block: block, remaining: streamBlockCount}))
 	require.NoError(t, err)
+	upload.Header.Set("Authorization", basic(builderToken))
 
-	uploadResp, err := harness.client().Do(upload)
+	uploadResp, err := proxy.client().Do(upload)
 
 	close(stop)
 	<-sampled

@@ -30,15 +30,13 @@ import (
 )
 
 const (
-	proxyNamespace  = "registrygate-system"
-	fakeNamespace   = "fake-ghcr"
-	ciNamespace     = "ci-foo"
-	proxyClusterIP  = "10.96.0.50" // the address in docs/admin/ci-pods.md
-	storageHost     = "pkg-containers.githubusercontent.com"
-	fakeRegistry    = "fakeghcr." + fakeNamespace + ".svc"
-	fakeStorageSvc  = "fakeghcr-storage"
-	harborNamespace = "harbor"
-	proxyMemory     = 256 << 20 // the chart's default memory limit
+	proxyNamespace = "registrygate-system"
+	fakeNamespace  = "fake-ghcr"
+	ciNamespace    = "ci-foo"
+	proxyClusterIP = "10.96.0.50" // the address in docs/admin/ci-pods.md
+	storageHost    = "pkg-containers.githubusercontent.com"
+	fakeRegistry   = "fakeghcr." + fakeNamespace + ".svc"
+	fakeStorageSvc = "fakeghcr-storage"
 
 	dockerCLIImage  = "mirror.gcr.io/library/docker:29.10.0-cli@sha256:34507eb5069d8be82c95dd3b6987d4250fd5fee49b82e2509b7d7a7030740d6d"
 	dockerDindImage = "mirror.gcr.io/library/docker:29.10.0-dind@sha256:4bbc7223f81db790097c6dea42fb93e05b8fead4f0431fbe6ccaba6e8473201c"
@@ -122,11 +120,8 @@ func (e *env) setup(ctx context.Context) error {
 	}
 
 	// A cluster kept from an earlier run holds an old PAT and CA: start clean.
-	// This includes the release of the docs walk-through, which owns the CRD.
-	for _, namespace := range []string{proxyNamespace, docsProxyNS} {
-		if out, err := exec.CommandContext(ctx, "helm", "uninstall", "registrygate", "--kube-context", e.kubeContext, "--namespace", namespace, "--ignore-not-found", "--wait").CombinedOutput(); err != nil {
-			return fmt.Errorf("helm uninstall: %w\n%s", err, out)
-		}
+	if out, err := exec.CommandContext(ctx, "helm", "uninstall", "registrygate", "--kube-context", e.kubeContext, "--namespace", proxyNamespace, "--ignore-not-found", "--wait").CombinedOutput(); err != nil {
+		return fmt.Errorf("helm uninstall: %w\n%s", err, out)
 	}
 
 	for namespace, pod := range map[string]string{fakeNamespace: "fakeghcr", ciNamespace: "build"} {
@@ -257,12 +252,12 @@ spec:
 	return fmt.Errorf("the fake GHCR did not print its CA: %s", logs)
 }
 
-// newProxyCA makes a CA limited to the name ghcr.io and a server certificate
-// for ghcr.io, as the admin guide asks.
-func newProxyCA() (caPEM, certPEM, keyPEM []byte, err error) {
+// newProxyCA makes a CA limited to the name ghcr.io, as the admin guide asks.
+// The CI pod trusts it for ghcr.io.
+func newProxyCA() ([]byte, error) {
 	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 
 	caTemplate := &x509.Certificate{
@@ -274,88 +269,23 @@ func newProxyCA() (caPEM, certPEM, keyPEM []byte, err error) {
 
 	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 
-	caCert, err := x509.ParseCertificate(caDER)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	leaf := &x509.Certificate{
-		SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "ghcr.io"},
-		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(24 * time.Hour),
-		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		DNSNames: []string{"ghcr.io"},
-	}
-
-	leafDER, err := x509.CreateCertificate(rand.Reader, leaf, caCert, &leafKey.PublicKey, caKey)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	keyDER, err := x509.MarshalECPrivateKey(leafKey)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER}),
-		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: leafDER}),
-		pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), nil
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER}), nil
 }
 
-// installProxy installs the chart; extraHelmArgs add values, for example a mirror.
-func (e *env) installProxy(ctx context.Context, extraHelmArgs ...string) error {
-	// A second install keeps the certificate: the CI pod already trusts its CA.
-	if e.proxyCA == nil {
-		caPEM, certPEM, keyPEM, err := newProxyCA()
-		if err != nil {
-			return err
-		}
-
-		e.proxyCA = caPEM
-
-		if err := e.secret(ctx, proxyNamespace, "tls", "kubernetes.io/tls", map[string][]byte{"tls.crt": certPEM, "tls.key": keyPEM}); err != nil {
-			return err
-		}
-	}
-
-	if err := e.secret(ctx, proxyNamespace, "pat", "Opaque", map[string][]byte{"token": []byte(e.pat)}); err != nil {
+// installProxy installs the chart with no custom resources, and waits until every replica is ready.
+func (e *env) installProxy(ctx context.Context) error {
+	caPEM, err := newProxyCA()
+	if err != nil {
 		return err
 	}
 
-	if err := e.secret(ctx, proxyNamespace, "upstream-ca", "Opaque", map[string][]byte{"ca.crt": e.fakeCA}); err != nil {
-		return err
-	}
+	e.proxyCA = caPEM
 
-	// The NetworkPolicy sees addresses after Service translation: the API server's
-	// own endpoint, and the fake GHCR's pod port.
+	// The NetworkPolicy sees the API server's own endpoint, after Service translation.
 	apiServer, err := e.kubectl(ctx, "", "get", "endpoints", "kubernetes", "-o", "jsonpath={.subsets[0].addresses[0].ip}")
-	if err != nil {
-		return err
-	}
-
-	egressTo := func(namespace string, port int) map[string]any {
-		return map[string]any{
-			"to":    []map[string]any{{"namespaceSelector": map[string]any{"matchLabels": map[string]string{"kubernetes.io/metadata.name": namespace}}}},
-			"ports": []map[string]any{{"protocol": "TCP", "port": port}},
-		}
-	}
-
-	// Harbor's nginx listens on pod port 8080 behind its Service on port 80.
-	extraEgress, err := json.Marshal([]map[string]any{egressTo(fakeNamespace, 8443), egressTo(harborNamespace, 8080)})
-	if err != nil {
-		return err
-	}
-
-	grants, err := json.Marshal([]map[string]any{{
-		"namespaces": ciNamespace, "repositories": []string{"soliddowant/**"}, "actions": []string{"pull", "push", "delete"},
-	}})
 	if err != nil {
 		return err
 	}
@@ -364,25 +294,20 @@ func (e *env) installProxy(ctx context.Context, extraHelmArgs ...string) error {
 	args := []string{"upgrade", "--install", "registrygate", filepath.Join(e.repoRoot, "deploy/charts/registrygate"),
 		"--kube-context", e.kubeContext, "--namespace", proxyNamespace,
 		"--set", "image.tag=" + tag, "--set", "image.pullPolicy=Never",
-		"--set", "pat.existingSecret=pat", "--set", "tls.existingSecret=tls",
 		"--set", "service.clusterIP=" + proxyClusterIP,
-		"--set", "upstream.url=https://" + fakeRegistry,
-		"--set", "upstream.ca.existingSecret=upstream-ca",
-		"--set-json", "grants=" + string(grants),
 		"--set", "networkPolicy.enabled=true",
 		"--set", "networkPolicy.clientNamespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name=" + ciNamespace,
 		"--set", "networkPolicy.apiServerCIDRs[0]=" + strings.TrimSpace(apiServer) + "/32",
-		"--set-json", "networkPolicy.extraEgress=" + string(extraEgress),
 		"--set", "podDisruptionBudget.enabled=true",
 		"--wait", "--timeout", "5m"}
-	cmd := exec.CommandContext(ctx, "helm", append(args, extraHelmArgs...)...)
+	cmd := exec.CommandContext(ctx, "helm", args...)
 
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("helm install: %w\n%s", err, out)
 	}
 
 	// After an upgrade the replaced pods are still shutting down. Later tests
-	// count the pods and send requests, so wait until only the new ones are left.
+	// count the pods, so wait until only the new ones are left.
 	deadline := time.Now().Add(2 * time.Minute)
 
 	for {
@@ -480,23 +405,12 @@ func (e *env) setupCI(ctx context.Context) error {
 		return err
 	}
 
-	policy := fmt.Sprintf(`
+	serviceAccount := fmt.Sprintf(`
 apiVersion: v1
 kind: ServiceAccount
 metadata: {name: builder, namespace: %[1]s}
----
-apiVersion: registrygate.soliddowant.dev/v1alpha1
-kind: GHCRAccessPolicy
-metadata: {name: builder, namespace: %[1]s}
-spec:
-  serviceAccounts: [builder]
-  rules:
-    - repositories: [soliddowant/private, soliddowant/base]
-      actions: [pull]
-    - repositories: ["soliddowant/app", "soliddowant/app/**", soliddowant/big, "soliddowant/restart-*"]
-      actions: [pull, push]
 `, ciNamespace)
-	if err := e.apply(ctx, policy); err != nil {
+	if err := e.apply(ctx, serviceAccount); err != nil {
 		return err
 	}
 

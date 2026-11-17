@@ -6,10 +6,8 @@ require (
 	github.com/bmatcuk/doublestar/v4 v4.10.4
 	github.com/distribution/reference v0.6.0
 	github.com/docker/docker-credential-helpers v0.9.13
-	github.com/fsnotify/fsnotify v1.10.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/go-containerregistry v0.22.1
-	github.com/google/go-github/v93 v93.0.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/prometheus/client_golang v1.25.0
@@ -32,6 +30,7 @@ require (
 	github.com/docker/cli v29.7.2+incompatible // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
 	github.com/evanphx/json-patch/v5 v5.9.11 // indirect
+	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.1 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-openapi/jsonpointer v1.0.0 // indirect
@@ -49,7 +48,6 @@ require (
 	github.com/go-openapi/swag/typeutils v0.27.1 // indirect
 	github.com/go-openapi/swag/yamlutils v0.27.1 // indirect
 	github.com/google/gnostic-models v0.7.0 // indirect
-	github.com/google/go-querystring v1.2.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.20.2 // indirect

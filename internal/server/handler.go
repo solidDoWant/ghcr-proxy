@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/opencontainers/go-digest"
@@ -24,6 +26,7 @@ const (
 	messageUnauthorized      = "authentication required"
 	messageNotReady          = "registrygate is not ready"
 	messageReviewUnavailable = "token review unavailable"
+	messageWrongHost         = "Host header does not name the server name's registry"
 )
 
 // apiVersionHeader tells registry clients the endpoint speaks the v2 protocol, as GHCR's own /v2/ does.
@@ -34,9 +37,9 @@ type Reviewer interface {
 	Review(ctx context.Context, token string) (authn.Identity, error)
 }
 
-// Decider decides a classified request for an identity.
+// Decider resolves a classified request for an identity on the host the client reached.
 type Decider interface {
-	Decide(identity authn.Identity, request registry.Request) authz.Decision
+	Decide(host string, identity authn.Identity, request registry.Request) authz.Resolution
 }
 
 // Forwarder sends an authorized request upstream and writes the answer.
@@ -49,7 +52,8 @@ type Handler struct {
 	Reviewer  Reviewer
 	Decider   Decider
 	Forwarder Forwarder
-	// Ready reports whether the replica may serve authenticated requests: policies synced and the PAT loaded.
+	// Ready reports whether the replica may serve authenticated requests: the model has a snapshot with no
+	// pending Secret and the upload signing key is loaded.
 	Ready  func() bool
 	Logger *slog.Logger
 	// Audit receives one entry per request; nil turns the audit log off.
@@ -138,36 +142,60 @@ func (h *Handler) serve(resp http.ResponseWriter, req *http.Request, entry *audi
 		return
 	}
 
-	decision := h.Decider.Decide(identity, request)
+	resolution := h.Decider.Decide(serverName(req), identity, request)
 
-	switch decision.Outcome {
-	case authz.OutcomeVersionCheck:
+	if resolution.Upstream != nil && !hostNamesUpstream(req.Host, resolution.Upstream.Object.Spec.Hosts) {
+		entry.Decision = decisionInvalid
+
+		registry.WriteError(resp, &registry.Error{Status: http.StatusBadRequest, Code: "UNSUPPORTED", Message: messageWrongHost})
+
+		return
+	}
+
+	switch resolution.Result {
+	case authz.ResultVersionCheck:
 		entry.Decision = decisionAllowed
 
 		resp.Header().Set("Content-Type", "application/json")
 		resp.Header().Set(apiVersionHeader, "registry/2.0")
 		resp.WriteHeader(http.StatusOK)
 		_, _ = resp.Write([]byte("{}"))
-	case authz.OutcomeChallenge:
+	case authz.ResultChallenge:
 		entry.Decision = decisionUnauthenticated
 
 		resp.Header().Set(apiVersionHeader, "registry/2.0")
 		registry.WriteError(resp, unauthorized())
-	case authz.OutcomeDenied:
+	case authz.ResultDenied, authz.ResultAmbiguous:
 		entry.Decision = decisionDenied
 
-		registry.WriteError(resp, &registry.Error{Status: http.StatusForbidden, Code: "DENIED", Message: decision.Message})
-	case authz.OutcomeForward:
-		entry.Decision, entry.Policy = decisionAnonymous, decision.Policy
-		if decision.Forward.Credential == registry.CredentialPAT {
+		registry.WriteError(resp, &registry.Error{Status: http.StatusForbidden, Code: "DENIED", Message: resolution.Message})
+	case authz.ResultNotFound:
+		entry.Decision = decisionNotFound
+
+		registry.WriteError(resp, &registry.Error{Status: http.StatusNotFound, Code: "NOT_FOUND", Message: "not found"})
+	case authz.ResultCredential, authz.ResultMirror, authz.ResultAnonymous:
+		forward := registry.Forward{
+			Request:         resolution.Request,
+			Upstream:        resolution.Upstream,
+			Credential:      resolution.Credential,
+			Mirror:          resolution.Mirror,
+			MirrorRule:      resolution.Result == authz.ResultMirror,
+			MirrorFailed:    resolution.MirrorFailed,
+			AnonymousCaller: identity.ServiceAccount == "",
+		}
+
+		entry.Decision = decisionAnonymous
+		if resolution.Result == authz.ResultCredential {
 			entry.Decision = decisionAllowed
 		}
 
-		if mount := decision.Forward.Request.Mount; mount != nil {
+		entry.Policy = policyNames(resolution.Rules)
+
+		if mount := forward.Request.Mount; mount != nil {
 			entry.From = mount.From
 		}
 
-		entry.Upstream = h.Forwarder.ServeForward(resp, req, decision.Forward)
+		entry.Upstream = h.Forwarder.ServeForward(resp, req, forward)
 
 		if isManifestWrite(request) {
 			entry.Digest = recorder.digest
@@ -180,6 +208,39 @@ func (h *Handler) serve(resp http.ResponseWriter, req *http.Request, entry *audi
 
 		registry.WriteError(resp, notReady())
 	}
+}
+
+// policyNames lists the policies of the rules (namespace/policy/rule) that decided a request.
+func policyNames(rules []string) string {
+	names := make([]string, 0, len(rules))
+
+	for _, rule := range rules {
+		parts := strings.SplitN(rule, "/", 3)
+		if len(parts) == 3 && !slices.Contains(names, parts[1]) {
+			names = append(names, parts[1])
+		}
+	}
+
+	return strings.Join(names, ",")
+}
+
+// serverName is the TLS server name the client asked for, which decides the upstream. A request without TLS
+// names no host.
+func serverName(req *http.Request) string {
+	if req.TLS == nil {
+		return ""
+	}
+
+	return req.TLS.ServerName
+}
+
+// hostNamesUpstream reports whether the Host header names one of the upstream's hosts, with or without the
+// default HTTPS port. A request whose Host disagrees with the server name is refused, so an intermediary that
+// routes by Host can't be steered to another upstream than the one decided on.
+func hostNamesUpstream(host string, hosts []string) bool {
+	host = strings.TrimSuffix(strings.ToLower(host), ":443")
+
+	return slices.Contains(hosts, host)
 }
 
 func isManifestWrite(request registry.Request) bool {

@@ -8,9 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -22,19 +20,12 @@ import (
 	"github.com/stretchr/testify/require"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"sigs.k8s.io/controller-runtime/pkg/cache/informertest"
 
-	"github.com/solidDoWant/registrygate/api/v1alpha1"
-	"github.com/solidDoWant/registrygate/internal/audit"
 	"github.com/solidDoWant/registrygate/internal/authn"
-	"github.com/solidDoWant/registrygate/internal/authz"
-	"github.com/solidDoWant/registrygate/internal/config"
 	"github.com/solidDoWant/registrygate/internal/metrics"
-	"github.com/solidDoWant/registrygate/internal/registry"
+	"github.com/solidDoWant/registrygate/internal/secrets"
 	"github.com/solidDoWant/registrygate/internal/server"
-	"github.com/solidDoWant/registrygate/internal/upstream"
-	"github.com/solidDoWant/registrygate/test/fakeghcr"
+	"github.com/solidDoWant/registrygate/test/fakeregistry"
 )
 
 const (
@@ -59,117 +50,6 @@ func (stubReviewer) Review(_ context.Context, token string) (authn.Identity, err
 	return authn.Identity{}, authn.ErrRejected
 }
 
-type harnessOptions struct {
-	// unsynced leaves the policy index without an informer, as before the first sync.
-	unsynced bool
-	// noPAT leaves the PAT file missing.
-	noPAT bool
-	// audit receives the audit lines.
-	audit io.Writer
-	// reviewer replaces the stub token reviewer.
-	reviewer server.Reviewer
-	// metrics counts what the pipeline does.
-	metrics *metrics.Metrics
-}
-
-type harness struct {
-	fake      *fakeghcr.Fake
-	server    *httptest.Server
-	readiness *server.Readiness
-}
-
-func newHarness(t *testing.T, options harnessOptions) *harness {
-	t.Helper()
-
-	fake := fakeghcr.New(t, fakeghcr.Options{})
-
-	patPath := filepath.Join(t.TempDir(), "token")
-	if !options.noPAT {
-		require.NoError(t, os.WriteFile(patPath, []byte(fake.PAT()+"\n"), 0o600))
-	}
-
-	pat := upstream.NewPATFile(patPath, nil)
-	pat.Metrics = options.metrics
-	upstreamURL := &url.URL{Scheme: "https", Host: fake.RegistryHost()}
-
-	tokens, err := upstream.NewTokens(upstream.TokensConfig{
-		URL: upstreamURL, Transport: fake.Transport(), TokenTimeout: 10 * time.Second, PAT: pat,
-		Metrics: options.metrics,
-	})
-	require.NoError(t, err)
-
-	apiURL, err := url.Parse(fake.APIURL())
-	require.NoError(t, err)
-
-	forwarder := registry.NewForwarder(registry.ForwarderConfig{
-		Upstream: upstreamURL, Transport: fake.Transport(), Tokens: tokens, Timeout: time.Minute,
-		Metrics: options.metrics,
-		API:     registry.APIConfig{URL: apiURL, Transport: fake.Transport(), Timeout: time.Minute, PAT: pat},
-	})
-
-	index := authz.NewIndex(chartGrants(t))
-
-	if !options.unsynced {
-		scheme := runtime.NewScheme()
-		require.NoError(t, v1alpha1.AddToScheme(scheme))
-
-		informers := &informertest.FakeInformers{Scheme: scheme}
-		informer, err := informers.FakeInformerFor(t.Context(), &v1alpha1.GHCRAccessPolicy{})
-		require.NoError(t, err)
-		require.NoError(t, index.Watch(t.Context(), informers))
-
-		informer.Add(&v1alpha1.GHCRAccessPolicy{
-			ObjectMeta: metav1.ObjectMeta{Namespace: "ci-foo", Name: "build"},
-			Spec: v1alpha1.GHCRAccessPolicySpec{
-				ServiceAccounts: []string{"builder"},
-				Rules: []v1alpha1.GHCRAccessRule{
-					{Repositories: []string{"soliddowant/foo/app"}, Actions: []v1alpha1.Action{v1alpha1.ActionPush}},
-					{Repositories: []string{"soliddowant/foo/source"}, Actions: []v1alpha1.Action{v1alpha1.ActionPull}},
-					{Repositories: []string{"soliddowant/foo/disposable"}, Actions: []v1alpha1.Action{v1alpha1.ActionDelete}},
-				},
-			},
-		})
-	}
-
-	var reviewer server.Reviewer = stubReviewer{}
-	if options.reviewer != nil {
-		reviewer = options.reviewer
-	}
-
-	readiness := server.NewReadiness(index.Synced, pat.Loaded)
-	handler := &server.Handler{
-		Reviewer: reviewer, Decider: &authz.Authorizer{Index: index}, Forwarder: forwarder, Ready: readiness.Ready,
-		Metrics: options.metrics,
-	}
-
-	if options.audit != nil {
-		handler.Audit = audit.New(options.audit)
-	}
-
-	httpsServer := httptest.NewTLSServer(handler)
-	t.Cleanup(httpsServer.Close)
-
-	return &harness{fake: fake, server: httpsServer, readiness: readiness}
-}
-
-func chartGrants(t *testing.T) config.Grants {
-	t.Helper()
-
-	pat := filepath.Join(t.TempDir(), "token")
-	require.NoError(t, os.WriteFile(pat, []byte("x"), 0o600))
-
-	cfg, err := config.Parse([]byte(`upstream:
-  patFile: ` + pat + `
-grants:
-  - namespaces: "ci-(?P<repo>[a-z0-9-]+)"
-    repositories: ["soliddowant/${repo}", "soliddowant/${repo}/**"]
-    actions: [pull, push, delete]
-`))
-	require.NoError(t, err)
-
-	return cfg.Grants
-}
-
 // basic is an Authorization value carrying token as the Basic password, as the credential helper's answer does.
 func basic(token string) string {
 	return "Basic " + base64.StdEncoding.EncodeToString([]byte("registrygate:"+token))
@@ -186,17 +66,14 @@ type answer struct {
 func (h *harness) do(t *testing.T, method, target string, authorization ...string) answer {
 	t.Helper()
 
-	req, err := http.NewRequestWithContext(t.Context(), method, h.server.URL+target, nil)
+	req, err := http.NewRequestWithContext(t.Context(), method, h.url()+target, nil)
 	require.NoError(t, err)
 
 	for _, value := range authorization {
 		req.Header.Add("Authorization", value)
 	}
 
-	client := h.server.Client()
-	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-
-	resp, err := client.Do(req)
+	resp, err := h.client().Do(req)
 	require.NoError(t, err)
 
 	defer func() { _ = resp.Body.Close() }()
@@ -432,8 +309,10 @@ func TestNotReadyReplicaAnswers503ToAuthenticatedRequests(t *testing.T) {
 		name    string
 		options harnessOptions
 	}{
-		{name: "policies not synced", options: harnessOptions{unsynced: true}},
-		{name: "PAT not loaded", options: harnessOptions{noPAT: true}},
+		{name: "a referenced Secret still pending", options: harnessOptions{configure: func(objects *objects) {
+			objects.secrets[secrets.Key{Namespace: adminNamespace, Name: "shared-credential"}] = secrets.Secret{State: secrets.Pending}
+		}}},
+		{name: "upload signing key not loaded", options: harnessOptions{noSigningKey: true}},
 	}
 
 	for _, test := range tests {
@@ -456,8 +335,8 @@ func TestNotReadyReplicaAnswers503ToAuthenticatedRequests(t *testing.T) {
 			}
 
 			for _, entry := range proxy.fake.Log() {
-				assert.NotEqual(t, fakeghcr.CredPATToken, entry.Credential, "%s %s", entry.Method, entry.Path)
-				assert.NotEqual(t, fakeghcr.CredPATBasic, entry.Credential, "%s %s", entry.Method, entry.Path)
+				assert.NotEqual(t, fakeregistry.CredPATToken, entry.Credential, "%s %s", entry.Method, entry.Path)
+				assert.NotEqual(t, fakeregistry.CredPATBasic, entry.Credential, "%s %s", entry.Method, entry.Path)
 			}
 
 			assert.Equal(t, http.StatusUnauthorized, proxy.do(t, http.MethodGet, "/v2/").status,
@@ -498,7 +377,7 @@ func TestMountFromRepositoryTheCallerCannotPullIsStripped(t *testing.T) {
 			got := proxy.do(t, http.MethodPost, target, basic(builderToken))
 			assert.Less(t, got.status, 300, got.body)
 
-			var uploads []fakeghcr.Entry
+			var uploads []fakeregistry.Entry
 
 			for _, entry := range proxy.fake.Log() {
 				if entry.Method == http.MethodPost {
