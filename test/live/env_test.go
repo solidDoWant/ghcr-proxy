@@ -51,7 +51,6 @@ import (
 	"github.com/solidDoWant/registrygate/api/v1alpha1"
 	"github.com/solidDoWant/registrygate/internal/authn"
 	"github.com/solidDoWant/registrygate/internal/authz"
-	"github.com/solidDoWant/registrygate/internal/metrics"
 	"github.com/solidDoWant/registrygate/internal/mirror"
 	"github.com/solidDoWant/registrygate/internal/model"
 	"github.com/solidDoWant/registrygate/internal/registry"
@@ -295,8 +294,8 @@ func (e *liveEnv) startProxy(ctx context.Context, restConfig *rest.Config, k8s c
 
 	forwarder := registry.NewForwarder(registry.ForwarderConfig{
 		Upstreams:      upstream.NewClients(upstream.ClientOptions{}),
-		RuleMirrors:    mirror.NewCache(mirror.ClientOptions{Target: metrics.TargetPolicyMirror}),
-		DefaultMirrors: mirror.NewCache(mirror.ClientOptions{Target: metrics.TargetAnonymousMirror}),
+		RuleMirrors:    mirror.NewCache(mirror.ClientOptions{}),
+		DefaultMirrors: mirror.NewCache(mirror.ClientOptions{}),
 		UploadTokens:   func() *uploadtoken.Codec { return codec },
 	})
 
