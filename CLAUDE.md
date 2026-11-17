@@ -35,20 +35,20 @@ Call out any change touching these in the PR description.
 - **Registry:** `github.com/google/go-containerregistry` (`pkg/v1/remote/transport` for upstream authentication and the token dance, `pkg/registry` for the fake GHCR); `net/http/httputil.ReverseProxy` for forwarding. Parsing with `github.com/distribution/reference` and `github.com/opencontainers/go-digest`. Glob matching with `github.com/bmatcuk/doublestar/v4`.
 - **Credential helper:** `github.com/docker/docker-credential-helpers` for the helper protocol (its `credentials.Serve` and types).
 - **Other libraries:** `golang.org/x/sync/singleflight` (collapsing concurrent token reviews), `github.com/fsnotify/fsnotify` (PAT and TLS file reloads), `log/slog` (audit log).
-- **Tests:** Go `testing` with `testify`; `sigs.k8s.io/controller-runtime/pkg/envtest` for integration tests (binaries from the dev shell's `KUBEBUILDER_ASSETS`); the fake GHCR in `test/fakeghcr`; kind (with the `ImageVolume` feature gate) for e2e.
+- **Tests:** Go `testing` with `testify`; `sigs.k8s.io/controller-runtime/pkg/envtest` for integration tests (binaries from the dev shell's `KUBEBUILDER_ASSETS`); the fake registry in `test/fakeregistry`; kind (with the `ImageVolume` feature gate) for e2e.
 - **Helm** chart in `deploy/charts/registrygate` (CRDs included from `config/crd/bases`).
 - **Nix flake** dev shell; **golangci-lint**.
 
 ## Project Structure
 
-See the layout section of `SPEC.md`: `cmd/registrygate` (proxy main), `cmd/docker-credential-registrygate` (credential helper main), `api/v1alpha1` (custom resource Go types), `internal/config` (config file), `internal/server` (TLS listener, health and metrics), `internal/authn` (`TokenReview` with cache), `internal/authz` (policy index, grants, glob matching and containment), `internal/registry` (request classification, forwarding, rewrites, upstream transports), `internal/controller` (status controller), `internal/audit`, `internal/credhelper`, `config/crd/bases` and `config/rbac` (generated), `deploy/charts/registrygate`, `test/` (`fakeghcr`, e2e harness and fixtures), `docs/` (`user/`, `admin/`, `dev/`, `design/`, `acceptance/`, `agents/`; see `docs/README.md`), `scripts/`.
+See the layout section of `SPEC.md`: `cmd/registrygate` (proxy main), `cmd/docker-credential-registrygate` (credential helper main), `api/v1alpha1` (custom resource Go types), `internal/config` (config file), `internal/server` (TLS listener, health and metrics), `internal/authn` (`TokenReview` with cache), `internal/authz` (policy index, grants, glob matching and containment), `internal/registry` (request classification, forwarding, rewrites, upstream transports), `internal/controller` (status controller), `internal/audit`, `internal/credhelper`, `config/crd/bases` and `config/rbac` (generated), `deploy/charts/registrygate`, `test/` (`fakeregistry`, e2e harness and fixtures), `docs/` (`user/`, `admin/`, `dev/`, `design/`, `acceptance/`, `agents/`; see `docs/README.md`), `scripts/`.
 
 ## Commands
 
 Run `make help` for the full list, and keep it and this section current as targets are added:
 
 - `make build`: build `bin/registrygate` and `bin/docker-credential-registrygate`.
-- `make build-fakeghcr-image`: build the e2e-only GHCR double image `ghcr.io/soliddowant/registrygate-fakeghcr:dev` (host arch, never pushed).
+- `make build-fakeregistry-image`: build the e2e-only registry double image `ghcr.io/soliddowant/registrygate-fakeregistry:dev` (host arch, never pushed).
 - `make build-images`: build the images `ghcr.io/soliddowant/registrygate` and `ghcr.io/soliddowant/registrygate-credential-helper` for amd64 and arm64; `PUSH_ALL=true` also pushes (releases only).
 - `make fmt` / `make lint` (`lint-fix`): format; run every linter and check, reporting all failures before exiting non-zero.
 - `make test`: unit tests with `-race`, plus the tests of the agent and CI scripts.

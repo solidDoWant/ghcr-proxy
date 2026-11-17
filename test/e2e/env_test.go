@@ -1,42 +1,30 @@
 //go:build e2e
 
-// Package e2e runs real Docker clients in a CI-like pod on a kind cluster
-// against the proxy (installed from the chart) and the fake GHCR.
+// Package e2e runs real Docker clients in CI-like pods on a kind cluster
+// against the proxy (installed from the chart), two fake upstream registries
+// and Harbor.
 package e2e
 
 import (
 	"bytes"
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/hex"
 	"encoding/json"
-	"encoding/pem"
 	"fmt"
-	"math/big"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
-
-	corev1 "k8s.io/api/core/v1"
-	"sigs.k8s.io/yaml"
 )
 
 const (
-	proxyNamespace = "registrygate-system"
-	fakeNamespace  = "fake-ghcr"
-	ciNamespace    = "ci-foo"
-	proxyClusterIP = "10.96.0.50" // the address in docs/admin/ci-pods.md
-	storageHost    = "pkg-containers.githubusercontent.com"
-	fakeRegistry   = "fakeghcr." + fakeNamespace + ".svc"
-	fakeStorageSvc = "fakeghcr-storage"
+	proxyNamespace  = "registrygate-system"
+	harborNamespace = "harbor"
+	proxyClusterIP  = "10.96.0.50" // the address in docs/admin/ci-pods.md
+	clientLabel     = "registrygate-e2e-client"
 
 	dockerCLIImage  = "mirror.gcr.io/library/docker:29.10.0-cli@sha256:34507eb5069d8be82c95dd3b6987d4250fd5fee49b82e2509b7d7a7030740d6d"
 	dockerDindImage = "mirror.gcr.io/library/docker:29.10.0-dind@sha256:4bbc7223f81db790097c6dea42fb93e05b8fead4f0431fbe6ccaba6e8473201c"
@@ -49,9 +37,13 @@ type env struct {
 	helperImage string
 	fakeImage   string
 	repoRoot    string
-	pat         string
-	fakeCA      []byte
-	proxyCA     []byte
+	// runID makes the names that outlive a run (Harbor robots) unique on a kept cluster.
+	runID     string
+	upstreams []*upstream
+	// tenants are the CI namespaces.
+	tenants   []*tenant
+	harborCA  []byte
+	harborURL string
 }
 
 var cluster *env
@@ -69,12 +61,20 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
+	suffix := make([]byte, 4)
+	if _, err := rand.Read(suffix); err != nil {
+		fmt.Fprintln(os.Stderr, "e2e:", err)
+		os.Exit(1)
+	}
+
 	cluster = &env{
 		kubeContext: kubeContext,
 		proxyImage:  os.Getenv("E2E_PROXY_IMAGE"),
 		helperImage: os.Getenv("E2E_HELPER_IMAGE"),
 		fakeImage:   os.Getenv("E2E_FAKE_IMAGE"),
 		repoRoot:    strings.TrimSpace(string(root)),
+		runID:       hex.EncodeToString(suffix),
+		harborURL:   "https://harbor." + harborNamespace + ".svc",
 	}
 
 	if err := cluster.setup(context.Background()); err != nil {
@@ -107,49 +107,6 @@ func (e *env) apply(ctx context.Context, manifest string) error {
 	return err
 }
 
-func (e *env) setup(ctx context.Context) error {
-	pat := make([]byte, 16)
-	if _, err := rand.Read(pat); err != nil {
-		return err
-	}
-
-	e.pat = "ghp_e2e" + hex.EncodeToString(pat)
-
-	if err := e.apply(ctx, namespaces()); err != nil {
-		return err
-	}
-
-	// A cluster kept from an earlier run holds an old PAT and CA: start clean.
-	if out, err := exec.CommandContext(ctx, "helm", "uninstall", "registrygate", "--kube-context", e.kubeContext, "--namespace", proxyNamespace, "--ignore-not-found", "--wait").CombinedOutput(); err != nil {
-		return fmt.Errorf("helm uninstall: %w\n%s", err, out)
-	}
-
-	for namespace, pod := range map[string]string{fakeNamespace: "fakeghcr", ciNamespace: "build"} {
-		if _, err := e.kubectl(ctx, "", "-n", namespace, "delete", "pod", pod, "--ignore-not-found", "--wait"); err != nil {
-			return err
-		}
-	}
-
-	if err := e.startFake(ctx); err != nil {
-		return err
-	}
-
-	if err := e.installProxy(ctx); err != nil {
-		return err
-	}
-
-	return e.setupCI(ctx)
-}
-
-func namespaces() string {
-	var out strings.Builder
-	for _, name := range []string{proxyNamespace, fakeNamespace, ciNamespace} {
-		fmt.Fprintf(&out, "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: %s\n---\n", name)
-	}
-
-	return out.String()
-}
-
 func (e *env) secret(ctx context.Context, namespace, name, secretType string, data map[string][]byte) error {
 	secret := map[string]any{
 		"apiVersion": "v1", "kind": "Secret", "type": secretType,
@@ -165,125 +122,86 @@ func (e *env) secret(ctx context.Context, namespace, name, secretType string, da
 	return e.apply(ctx, string(raw))
 }
 
-var pemBlock = regexp.MustCompile(`(?s)-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----\n`)
+func (e *env) setup(ctx context.Context) error {
+	e.upstreams = newUpstreams()
+	e.tenants = newTenants()
 
-func (e *env) startFake(ctx context.Context) error {
-	if err := e.secret(ctx, fakeNamespace, "pat", "Opaque", map[string][]byte{"token": []byte(e.pat)}); err != nil {
+	var manifest strings.Builder
+
+	for _, name := range e.namespaceNames() {
+		labels := ""
+		if e.isTenant(name) {
+			labels = "\n  labels: {" + clientLabel + ": \"true\"}"
+		}
+
+		fmt.Fprintf(&manifest, "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: %s%s\n---\n", name, labels)
+	}
+
+	if err := e.apply(ctx, manifest.String()); err != nil {
 		return err
 	}
 
-	dnsNames := strings.Join([]string{fakeRegistry, fakeStorageSvc + "." + fakeNamespace + ".svc", storageHost}, ",")
-	manifest := fmt.Sprintf(`
-apiVersion: v1
-kind: Pod
-metadata:
-  name: fakeghcr
-  namespace: %[1]s
-  labels: {app: fakeghcr}
-spec:
-  containers:
-    - name: fakeghcr
-      image: %[2]s
-      imagePullPolicy: Never
-      args:
-        - -registry-addr=:8443
-        - -storage-addr=:8444
-        - -admin-addr=:8445
-        - -registry-host=%[3]s
-        - -storage-host=%[4]s
-        - -dns-names=%[5]s
-        - -blob-dir=/blobs
-        - -public=soliddowant/public
-        - -pat-file=/pat/token
-        - -ca-file=-
-      volumeMounts:
-        - {name: blobs, mountPath: /blobs}
-        - {name: pat, mountPath: /pat, readOnly: true}
-  volumes:
-    - {name: blobs, emptyDir: {}}
-    - {name: pat, secret: {secretName: pat}}
----
-apiVersion: v1
-kind: Service
-metadata: {name: fakeghcr, namespace: %[1]s}
-spec:
-  selector: {app: fakeghcr}
-  ports: [{port: 443, targetPort: 8443}]
----
-apiVersion: v1
-kind: Service
-metadata: {name: %[6]s, namespace: %[1]s}
-spec:
-  selector: {app: fakeghcr}
-  ports: [{port: 443, targetPort: 8444}]
----
-apiVersion: v1
-kind: Service
-metadata: {name: fakeghcr-admin, namespace: %[1]s}
-spec:
-  selector: {app: fakeghcr}
-  ports: [{port: 8445, targetPort: 8445}]
-`, fakeNamespace, e.fakeImage, fakeRegistry, storageHost, dnsNames, fakeStorageSvc)
-
-	if err := e.apply(ctx, manifest); err != nil {
-		return err
+	// A cluster kept from an earlier run holds old certificates: start clean.
+	if out, err := exec.CommandContext(ctx, "helm", "uninstall", "registrygate", "--kube-context", e.kubeContext, "--namespace", proxyNamespace, "--ignore-not-found", "--wait").CombinedOutput(); err != nil {
+		return fmt.Errorf("helm uninstall: %w\n%s", err, out)
 	}
 
-	if _, err := e.kubectl(ctx, "", "-n", fakeNamespace, "wait", "--for=condition=Ready", "pod/fakeghcr", "--timeout=180s"); err != nil {
-		return err
-	}
-
-	var logs string
-
-	deadline := time.Now().Add(60 * time.Second)
-	for time.Now().Before(deadline) {
-		var err error
-		if logs, err = e.kubectl(ctx, "", "-n", fakeNamespace, "logs", "fakeghcr"); err != nil {
+	for _, tenant := range e.tenants {
+		if _, err := e.kubectl(ctx, "", "-n", tenant.namespace, "delete", "pod", "build", "--ignore-not-found", "--wait"); err != nil {
 			return err
 		}
-
-		if e.fakeCA = []byte(pemBlock.FindString(logs)); len(e.fakeCA) > 0 {
-			return nil
-		}
-
-		time.Sleep(time.Second)
 	}
 
-	return fmt.Errorf("the fake GHCR did not print its CA: %s", logs)
+	for _, fake := range e.upstreams {
+		if err := fake.start(ctx, e); err != nil {
+			return err
+		}
+	}
+
+	if err := e.installProxy(ctx); err != nil {
+		return err
+	}
+
+	if err := e.installHarbor(ctx); err != nil {
+		return err
+	}
+
+	if err := e.createHarborObjects(ctx); err != nil {
+		return err
+	}
+
+	if err := e.applyProxyObjects(ctx); err != nil {
+		return err
+	}
+
+	return e.setupTenants(ctx)
 }
 
-// newProxyCA makes a CA limited to the name ghcr.io, as the admin guide asks.
-// The CI pod trusts it for ghcr.io.
-func newProxyCA() ([]byte, error) {
-	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return nil, err
+func (e *env) namespaceNames() []string {
+	names := []string{proxyNamespace, harborNamespace}
+	for _, fake := range e.upstreams {
+		names = append(names, fake.namespace)
 	}
 
-	caTemplate := &x509.Certificate{
-		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "registrygate e2e CA"},
-		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(24 * time.Hour),
-		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign,
-		PermittedDNSDomains: []string{"ghcr.io"}, PermittedDNSDomainsCritical: true,
+	for _, tenant := range e.tenants {
+		names = append(names, tenant.namespace)
 	}
 
-	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
-	if err != nil {
-		return nil, err
+	return names
+}
+
+func (e *env) isTenant(namespace string) bool {
+	for _, tenant := range e.tenants {
+		if tenant.namespace == namespace {
+			return true
+		}
 	}
 
-	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER}), nil
+	return false
 }
 
 // installProxy installs the chart with no custom resources, and waits until every replica is ready.
 func (e *env) installProxy(ctx context.Context) error {
-	caPEM, err := newProxyCA()
-	if err != nil {
-		return err
-	}
-
-	e.proxyCA = caPEM
-
 	// The NetworkPolicy sees the API server's own endpoint, after Service translation.
 	apiServer, err := e.kubectl(ctx, "", "get", "endpoints", "kubernetes", "-o", "jsonpath={.subsets[0].addresses[0].ip}")
 	if err != nil {
@@ -296,13 +214,14 @@ func (e *env) installProxy(ctx context.Context) error {
 		"--set", "image.tag=" + tag, "--set", "image.pullPolicy=Never",
 		"--set", "service.clusterIP=" + proxyClusterIP,
 		"--set", "networkPolicy.enabled=true",
-		"--set", "networkPolicy.clientNamespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name=" + ciNamespace,
+		"--set-string", "networkPolicy.clientNamespaceSelector.matchLabels." + clientLabel + "=true",
 		"--set", "networkPolicy.apiServerCIDRs[0]=" + strings.TrimSpace(apiServer) + "/32",
+		// NetworkPolicy sees the pod ports behind the Services of the fakes and Harbor, not port 443.
+		"--set-json", `networkPolicy.extraEgress=[{"ports":[{"protocol":"TCP","port":8443},{"protocol":"TCP","port":8444}]}]`,
 		"--set", "podDisruptionBudget.enabled=true",
 		"--wait", "--timeout", "5m"}
-	cmd := exec.CommandContext(ctx, "helm", args...)
 
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(ctx, "helm", args...).CombinedOutput(); err != nil {
 		return fmt.Errorf("helm install: %w\n%s", err, out)
 	}
 
@@ -326,119 +245,4 @@ func (e *env) installProxy(ctx context.Context) error {
 
 		time.Sleep(time.Second)
 	}
-}
-
-// podImages are the images the admin guide leaves to the reader.
-func (e *env) podImages() map[string]string {
-	return map[string]string{
-		"DOCKER_CLI_IMAGE":  dockerCLIImage,
-		"DOCKER_DIND_IMAGE": dockerDindImage,
-		"HELPER_IMAGE":      e.helperImage,
-	}
-}
-
-// ciPod reads the pod from docs/admin/ci-pods.md and adds only what the fake
-// GHCR needs: its storage host.
-func (e *env) ciPod(storageIP string) (corev1.Pod, error) {
-	var pod corev1.Pod
-
-	doc, err := os.ReadFile(filepath.Join(e.repoRoot, "docs/admin/ci-pods.md"))
-	if err != nil {
-		return pod, err
-	}
-
-	match := regexp.MustCompile("(?s)## Pod example.*?<<EOF\n(.*?)\nEOF\n```").FindSubmatch(doc)
-	if match == nil {
-		return pod, fmt.Errorf("docs/admin/ci-pods.md has no pod example")
-	}
-
-	// The guide leaves the images to the reader, as variables the shell expands.
-	manifest := os.Expand(string(match[1]), func(name string) string { return e.podImages()[name] })
-	if err := yaml.UnmarshalStrict([]byte(manifest), &pod); err != nil {
-		return pod, err
-	}
-
-	// The tests run the Docker commands themselves.
-	pod.Namespace = ciNamespace
-	pod.Spec.RestartPolicy = corev1.RestartPolicyAlways
-
-	for index := range pod.Spec.Containers {
-		container := &pod.Spec.Containers[index]
-
-		if container.Name == "docker" {
-			var setup []string
-
-			for _, line := range strings.Split(container.Args[0], "\n") {
-				if !strings.Contains(line, "docker build") && !strings.Contains(line, "docker push") {
-					setup = append(setup, line)
-				}
-			}
-
-			container.Args = []string{strings.Join(setup, "\n") + "\nexec sleep infinity"}
-		}
-	}
-
-	pod.Spec.HostAliases = append(pod.Spec.HostAliases, corev1.HostAlias{IP: storageIP, Hostnames: []string{storageHost}})
-
-	return pod, nil
-}
-
-func (e *env) setupCI(ctx context.Context) error {
-	// Docker follows the blob redirect with the TLS settings of ghcr.io, so the
-	// CA of the fake's storage host goes into the same file.
-	if err := e.secret(ctx, ciNamespace, "registrygate-ca", "Opaque", map[string][]byte{"ca.crt": append(append([]byte{}, e.proxyCA...), e.fakeCA...)}); err != nil {
-		return err
-	}
-
-	storageIP, err := e.kubectl(ctx, "", "-n", fakeNamespace, "get", "service", fakeStorageSvc, "-o", "jsonpath={.spec.clusterIP}")
-	if err != nil {
-		return err
-	}
-
-	pod, err := e.ciPod(strings.TrimSpace(storageIP))
-	if err != nil {
-		return err
-	}
-
-	raw, err := yaml.Marshal(pod)
-	if err != nil {
-		return err
-	}
-
-	serviceAccount := fmt.Sprintf(`
-apiVersion: v1
-kind: ServiceAccount
-metadata: {name: builder, namespace: %[1]s}
-`, ciNamespace)
-	if err := e.apply(ctx, serviceAccount); err != nil {
-		return err
-	}
-
-	if err := e.apply(ctx, string(raw)); err != nil {
-		return err
-	}
-
-	if _, err := e.kubectl(ctx, "", "-n", ciNamespace, "wait", "--for=condition=Ready", "pod/build", "--timeout=300s"); err != nil {
-		return err
-	}
-
-	deadline := time.Now().Add(2 * time.Minute)
-
-	for {
-		_, err := e.docker(ctx, "docker info")
-		if err == nil {
-			return nil
-		}
-
-		if time.Now().After(deadline) {
-			return fmt.Errorf("the Docker daemon in the CI pod did not start: %w", err)
-		}
-
-		time.Sleep(2 * time.Second)
-	}
-}
-
-// docker runs a shell script in the Docker CLI container of the CI pod.
-func (e *env) docker(ctx context.Context, script string) (string, error) {
-	return e.kubectl(ctx, "", "-n", ciNamespace, "exec", "build", "-c", "docker", "--", "sh", "-ec", script)
 }

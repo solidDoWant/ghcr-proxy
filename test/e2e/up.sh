@@ -14,7 +14,7 @@ node_image="mirror.gcr.io/kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8c
 tag="e2e"
 proxy_image="ghcr.io/soliddowant/registrygate:${tag}"
 helper_image="ghcr.io/soliddowant/registrygate-credential-helper:${tag}"
-fake_image="ghcr.io/soliddowant/registrygate-fakeghcr:dev"
+fake_image="ghcr.io/soliddowant/registrygate-fakeregistry:dev"
 arch="$(go env GOARCH)"
 env_file="build/e2e/${cluster}.env"
 mkdir -p build/e2e
@@ -33,7 +33,7 @@ CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -ldflags="-s -w -X main.version
 docker buildx build --platform "linux/${arch}" --file Dockerfile --tag "$proxy_image" --load . >&2
 docker buildx build --platform "linux/${arch}" --file Dockerfile.credential-helper --tag "$helper_image" --load . >&2
 
-make build-fakeghcr-image >&2
+make build-fakeregistry-image >&2
 
 log "loading the images into kind"
 kind load docker-image "$proxy_image" "$helper_image" "$fake_image" --name "$cluster" >&2

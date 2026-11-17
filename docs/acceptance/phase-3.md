@@ -12,7 +12,7 @@ In the e2e scenarios, "a CI pod" is a pod with a dind sidecar set up exactly as 
 ## Upstreams and interception
 
 - **AC-3-02 Two upstreams.** With `UpstreamRegistry` objects for upstreams A and B, a CI pod pulls a public image from each through the proxy.
-  Tests:
+  Tests: `test/e2e: TestPullsPublicImagesFromBothUpstreams`
 - **AC-3-03 Certificate by server name.** Each host is served with its own `UpstreamRegistry`'s certificate. A TLS handshake for a server name no ready `UpstreamRegistry` claims fails. A certificate whose SANs don't cover a host makes the object `Ready=False, reason=CertificateMismatch`.
   Tests: `internal/server: TestSNICertificatesPickByServerName`, `internal/model: TestBuildServesReadyUpstreamHostsWithTheirCertificate`
 - **AC-3-04 Host conflict.** Two `UpstreamRegistry` objects claiming the same host are both `Ready=False, reason=HostConflict` for it, and the host isn't served.
@@ -32,7 +32,7 @@ In the e2e scenarios, "a CI pod" is a pod with a dind sidecar set up exactly as 
 ## Credentials and policies
 
 - **AC-3-09 Push with a credential.** A CI pod whose policy has a credential rule pushes to upstream A with `docker push`; the upstream sees the credential's identity.
-  Tests:
+  Tests: `test/e2e: TestPushWithCredentialReachesTheUpstream`
 - **AC-3-10 Push denied.** A push no rule allows gets `403 DENIED` naming the namespace, ServiceAccount, repository and action, for a ServiceAccount, or `401` with the Basic challenge when anonymous. Nothing is sent upstream.
   Tests:
 - **AC-3-11 Ceilings.** A credential rule outside its credential's ceiling has `Accepted=False, reason=OutsideCeiling` in `status.rules`, keyed by the rule's name, and is ignored; the policy's other rules still apply.
@@ -66,7 +66,7 @@ In the e2e scenarios, "a CI pod" is a pod with a dind sidecar set up exactly as 
 ## Mirrors
 
 - **AC-3-23 A Harbor project per namespace.** Two CI namespaces, each with its own `RegistryMirror` pointing at its own Harbor proxy-cache project for upstream A, pull the same public image; Harbor lists it in both projects, and each namespace's pulls reach only its own project.
-  Tests:
+  Tests: `test/e2e: TestEachNamespacePullsThroughItsOwnHarborProject`
 - **AC-3-24 Default mirror.** Anonymous pulls and pulls no rule matches go to the upstream's `defaultMirrorRef` when set, and to the upstream anonymously when not.
   Tests:
 - **AC-3-25 Fallback.** With a mirror down or answering `5xx`, pulls fall back to the upstream; with `fallbackToUpstream: false` they fail with `502`; a mirror `401`/`403` gives `502` and never falls back.
@@ -76,7 +76,7 @@ In the e2e scenarios, "a CI pod" is a pod with a dind sidecar set up exactly as 
 - **AC-3-27 Credentials stay with their endpoint.** No request to a mirror carries an upstream credential or a token made from one, and no request to an upstream carries a mirror credential.
   Tests:
 - **AC-3-28 Builds through mirrors.** A CI pod runs `docker build` with `FROM` images from upstreams A and B, and both base images come through its mirrors, with no change to the Dockerfile and no BuildKit configuration.
-  Tests:
+  Tests: `test/e2e: TestBuildWithBaseImagesFromBothUpstreamsUsesTheMirrors`
 
 ## Client side
 
