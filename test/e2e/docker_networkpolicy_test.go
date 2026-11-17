@@ -19,9 +19,6 @@ func connect(t *testing.T, namespace string) error {
 	return err
 }
 
-// This file name sorts before docs_test.go on purpose: the docs walk-through
-// replaces the proxy release with one that has no NetworkPolicy, and Go runs
-// tests in file-name order.
 func TestNetworkPolicyBlocksNamespacesOutsideTheClientSelector(t *testing.T) {
 	require.NoError(t, connect(t, ciNamespace), "a client namespace must reach the proxy")
 	assert.Error(t, connect(t, fakeNamespace), "a namespace outside the selector must not reach the proxy")
