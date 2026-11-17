@@ -93,7 +93,14 @@ In the e2e scenarios, "a CI pod" is a pod with a dind sidecar set up exactly as 
   Tests: `internal/webhook: TestValidateCreate`, `internal/webhook: TestValidateUpdate`, `internal/webhook: TestAdmissionRejectsPoliciesOutsideTheGrant`
 - **AC-3-33 Metrics and audit.** `/metrics` has the series in the spec with `upstream` as the only object-name label. Each request writes one audit line with the upstream, rule, and credential or mirror used, and never a credential, token or header value.
   Tests: `internal/metrics: TestRecordedEventsAppearWithTheUpstreamLabel`, `internal/metrics: TestOnlyTheUpstreamLabelNamesAnObject`, `internal/server: TestAuditWritesOneLineForEachKindOfDecision`, `internal/server: TestAuditNamesTheMirrorForAMirrorDecision`, `internal/server: TestAuditListsEveryRuleOfAnAmbiguousRequest`, `internal/server: TestAuditNeverCarriesCredentialsOrHeaders`, `internal/server: TestObjectCountsGroupTheSnapshotByKindAndReadiness`
-- **AC-3-34 Docs walk-through.** Following `docs/admin/` from an empty kind cluster (cert-manager, one name-constrained CA per upstream, the chart, two upstreams, a tenant mirror, a CI pod) gets to a working `docker push` and a mirrored `docker pull`, scripted as an e2e test that uses only commands from the docs.
+- **AC-3-34 Docs walk-through.** Following `docs/admin/` from an empty kind cluster (cert-manager, one name-constrained CA for the upstreams, the chart, two upstreams, a tenant mirror, a CI pod) gets to a working `docker push` and a mirrored `docker pull`, scripted as an e2e test that uses only commands from the docs.
   Tests:
 - **AC-3-35 Live GHCR (by hand).** With the live PAT behind an `UpstreamCredential`, the operator's `make test-live` run pushes and pulls through the proxy to the real `ghcr.io`, and delete returns GHCR's `405`.
   Tests: `test/live: TestClientFlowsThroughTheProxy`, `test/live: TestDeleteByDigestThroughTheProxyReturnsGHCRsUnsupported`
+
+## Added by the owner on 2026-11-17
+
+- **AC-3-36 Harbor through its Service.** With Harbor's `UpstreamRegistry` and mirrors pointing at its in-cluster Service over plain HTTP (`aliasHosts` naming Harbor's `externalURL` host), a CI pod's mirrored pull is served by its Harbor proxy-cache project, and `docker push <Harbor>/<project>/<image>` succeeds with a robot whose Secret exists only in the admin namespace; nothing in the pod's namespace holds a Harbor credential.
+  Tests:
+- **AC-3-37 Docker Hub names.** With an `UpstreamRegistry` for `registry-1.docker.io`, `docker.io` and `index.docker.io`, a CI pod's `docker pull alpine` and a build with `FROM docker.io/library/alpine` come through its mirror, authenticated with its ServiceAccount token.
+  Tests:

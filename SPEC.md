@@ -81,9 +81,9 @@ A namespace is admitted when it is the object's own namespace, is in `names`, or
 
 | Kind | Who writes it, where | Spec |
 |---|---|---|
-| `UpstreamRegistry` | admin, **admin namespaces only** | `hosts` (DNS names the proxy answers for), `url` (where requests go), `caSecretRef` (optional, to trust the upstream), `tls.secretRef` (serving certificate: `tls.crt`, `tls.key`; its SANs must cover every host), `tokenRealmHosts` (optional; hosts allowed as the token endpoint besides the `url` host), `anonymousPulls` (`Challenge`, the default, or `Forward`; see "Resolution"), `defaultMirrorRef` (optional), `allowedMirrorURLs` (URL prefixes a mirror of this upstream may use), `timeouts`, `allowedNamespaces` (who may point credentials, mirrors and policies at it) |
+| `UpstreamRegistry` | admin, **admin namespaces only** | `hosts` (DNS names the proxy answers for), `url` (where requests go; `http` is allowed, for an in-cluster Service), `aliasHosts` (optional; other names the upstream uses for itself, see "Aliases"), `caSecretRef` (optional, to trust the upstream), `tls.secretRef` (serving certificate: `tls.crt`, `tls.key`; its SANs must cover every host), `tokenRealmHosts` (optional; hosts allowed as the token endpoint besides the `url` host), `anonymousPulls` (`Challenge`, the default, or `Forward`; see "Resolution"), `defaultMirrorRef` (optional), `allowedMirrorURLs` (URL prefixes a mirror of this upstream may use), `timeouts`, `allowedNamespaces` (who may point credentials, mirrors and policies at it) |
 | `UpstreamCredential` | admin or tenant, any namespace | `upstreamRef`, `secretRef` (`name`; keys `username` and `password` by default, or `usernameKey` / `passwordKey`), `ceiling` (list of `{repositories, actions}`: the most any policy may do with it), `allowedNamespaces` |
-| `RegistryMirror` | admin or tenant, any namespace | `upstreamRef`, `url`, `pathPrefix`, `secretRef` (optional, same key rules), `caSecretRef` (optional), `fallbackToUpstream` (default `true`), `timeouts`, `allowedNamespaces` |
+| `RegistryMirror` | admin or tenant, any namespace | `upstreamRef`, `url`, `pathPrefix`, `secretRef` (optional, same key rules), `caSecretRef` (optional), `tokenRealmHosts` and `aliasHosts` (optional, as for `UpstreamRegistry`), `fallbackToUpstream` (default `true`), `timeouts`, `allowedNamespaces` |
 | `RegistryAccessPolicy` | tenant, its own namespace | `serviceAccounts` (in this namespace only), `rules` (below) |
 
 **Admin namespaces** are set by the proxy flag `--admin-namespaces` (default: the proxy's own namespace). The proxy reads `UpstreamRegistry` objects only from these, because an `UpstreamRegistry` decides which hosts the proxy impersonates for everyone. The admission webhook rejects one created elsewhere.
@@ -163,9 +163,13 @@ A credential or mirror that becomes not ready while serving (Secret removed, adm
 ### Mirrors
 
 - A mirror pull goes to `<mirror url>/v2/<pathPrefix>/<R>/…` with the mirror's own credential (the same challenge handling as upstreams).
-- A `RegistryMirror` whose `url` doesn't start with one of its upstream's `allowedMirrorURLs` is `Ready=False, reason=URLNotAllowed` and is never contacted. An empty list allows no mirrors.
+- A `RegistryMirror` whose `url` doesn't start with one of its upstream's `allowedMirrorURLs` is `Ready=False, reason=URLNotAllowed` and is never contacted. An empty list allows no mirrors. An `http` mirror URL is allowed only when the entry it matches is itself an `http://` prefix, so plain HTTP is always the admin's explicit choice.
 - When a mirror fails (connection error, no response headers within its timeout, `5xx`, or `404`; a blob only before response headers) and `fallbackToUpstream` is true, the pull goes to `U` anonymously; otherwise a `404` is returned as is and any other failure gives `502 "mirror unavailable"`. A `401` or `403` from the mirror is a mirror credential problem: `502 "mirror unavailable"`, never a fallback.
 - A blob `HEAD` always goes to `U` anonymously.
+
+### Aliases
+
+A registry reached through an in-cluster Service often names itself by another host: Harbor puts its `externalURL` in token realms and may put it in `Location` headers. `aliasHosts` on an `UpstreamRegistry` or `RegistryMirror` lists those names. A token realm or `Location` on an alias host is treated as being on the object's own `url`: the proxy sends the request to the same path and query on `url`, never to the alias host, so traffic stays on the Service. Credentials sent to an alias host's paths therefore still go only to `url` (principle 1).
 
 ### Rewrites
 
@@ -203,9 +207,10 @@ It is a static Go binary (`CGO_ENABLED=0`) shipped alone in the image `ghcr.io/s
 
 - **RBAC:** create `TokenReview`; get, list and watch the four kinds and Namespaces (for `allowedNamespaces.selector`) cluster-wide; update their status; Secrets as in "Secrets"; leases for leader election. Nothing else: no pods, no cluster-wide Secrets.
 - **Mirrors are public-content only.** A Harbor proxy-cache project fetches from its upstream with its registry endpoint's credential. If that credential can read private images, anyone holding the project's robot can read them through Harbor directly, bypassing the proxy's policy. So a mirror's Harbor registry endpoint must have **no upstream credential**. The proxy can't check this; the admin docs say so prominently. Private content is pulled with an `UpstreamCredential`, which never uses a mirror.
+- **Plain HTTP** to an upstream or mirror (for example Harbor's `harbor-core` Service) sends its credential in cleartext over the cluster network. It is allowed only by admin-written fields (`UpstreamRegistry.url`, an `http://` entry in `allowedMirrorURLs`), and the admin docs say so.
 - **Tenant-written objects** can only affect their own namespace's requests: a tenant's credential or mirror is used only by policies in namespaces it admits, and its Secret goes only to its own endpoint. A tenant mirror's URL is limited by the upstream's `allowedMirrorURLs`. The proxy's NetworkPolicy should also limit its egress to the upstreams and mirrors.
 - **ServiceAccount tokens** for the proxy use their own audience (`registrygate`) and a short lifetime (the docs recommend 1–6 hours).
-- **Serving CAs** are the admin's. The docs require one CA per `UpstreamRegistry`, name-constrained to exactly its hosts, trusted only through Docker's per-registry `certs.d` directory, never the system trust store.
+- **Serving CAs** are the admin's. The docs require a CA name-constrained to exactly the intercepted hosts (one CA for all of them is fine; adding a host means reissuing it), trusted only through Docker's per-registry `certs.d` directory, never the system trust store.
 - **Shared credentials** (for example one GHCR PAT behind many `UpstreamCredential` objects, each with its own ceiling) share one upstream identity and its rate limits. The audit log is how the owner tells who did what.
 
 ## 6. Won't do
