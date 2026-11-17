@@ -5,7 +5,6 @@ package live
 import (
 	"io"
 	"net/http"
-	"strings"
 	"sync"
 	"testing"
 
@@ -42,7 +41,7 @@ func (m *mountRecorder) RoundTrip(req *http.Request) (*http.Response, error) {
 func (e *liveEnv) proxyRef(t *testing.T, ref string) name.Reference {
 	t.Helper()
 
-	parsed, err := name.ParseReference(strings.TrimPrefix(e.proxy.URL, "https://") + "/" + ref)
+	parsed, err := name.ParseReference(registryHost + "/" + ref)
 	require.NoError(t, err)
 
 	return parsed
