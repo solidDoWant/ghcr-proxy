@@ -41,9 +41,14 @@ type env struct {
 	runID     string
 	upstreams []*upstream
 	// tenants are the CI namespaces.
-	tenants   []*tenant
-	harborCA  []byte
+	tenants []*tenant
+	// harborURL is Harbor's core Service over plain HTTP, which the proxy talks to.
 	harborURL string
+	// harborExternalURL is the externalURL Harbor knows itself by: its token endpoint and Location headers name its host.
+	harborExternalURL string
+	// harborHostName is the name CI pods use for Harbor. The proxy stands in for it.
+	harborHostName string
+	harborCA       *ca
 }
 
 var cluster *env
@@ -74,7 +79,10 @@ func TestMain(m *testing.M) {
 		fakeImage:   os.Getenv("E2E_FAKE_IMAGE"),
 		repoRoot:    strings.TrimSpace(string(root)),
 		runID:       hex.EncodeToString(suffix),
-		harborURL:   "https://harbor." + harborNamespace + ".svc",
+		harborURL:   "http://harbor-core." + harborNamespace + ".svc",
+
+		harborExternalURL: "https://harbor.e2e.test",
+		harborHostName:    "registry.e2e.test",
 	}
 
 	if err := cluster.setup(context.Background()); err != nil {
@@ -125,6 +133,12 @@ func (e *env) secret(ctx context.Context, namespace, name, secretType string, da
 func (e *env) setup(ctx context.Context) error {
 	e.upstreams = newUpstreams()
 	e.tenants = newTenants()
+
+	var err error
+
+	if e.harborCA, err = newCA(e.harborHostName); err != nil {
+		return err
+	}
 
 	var manifest strings.Builder
 
@@ -216,8 +230,8 @@ func (e *env) installProxy(ctx context.Context) error {
 		"--set", "networkPolicy.enabled=true",
 		"--set-string", "networkPolicy.clientNamespaceSelector.matchLabels." + clientLabel + "=true",
 		"--set", "networkPolicy.apiServerCIDRs[0]=" + strings.TrimSpace(apiServer) + "/32",
-		// NetworkPolicy sees the pod ports behind the Services of the fakes and Harbor, not port 443.
-		"--set-json", `networkPolicy.extraEgress=[{"ports":[{"protocol":"TCP","port":8443},{"protocol":"TCP","port":8444}]}]`,
+		// NetworkPolicy sees the pod ports behind the Services of the fakes and Harbor's core, not the Service ports.
+		"--set-json", `networkPolicy.extraEgress=[{"ports":[{"protocol":"TCP","port":8443},{"protocol":"TCP","port":8444},{"protocol":"TCP","port":8080}]}]`,
 		"--set", "podDisruptionBudget.enabled=true",
 		"--wait", "--timeout", "5m"}
 
@@ -245,4 +259,15 @@ func (e *env) installProxy(ctx context.Context) error {
 
 		time.Sleep(time.Second)
 	}
+}
+
+// allHosts lists every name the proxy stands in for: those of the upstreams and Harbor's.
+func (e *env) allHosts() []string {
+	var hosts []string
+
+	for _, fake := range e.upstreams {
+		hosts = append(hosts, fake.hosts...)
+	}
+
+	return append(hosts, e.harborHostName)
 }

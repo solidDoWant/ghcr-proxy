@@ -12,8 +12,13 @@ import (
 // HelperName is the value written to credHelpers; Docker runs docker-credential-registrygate for it.
 const HelperName = "registrygate"
 
+const (
+	dockerHubIndexHost = "index.docker.io"
+	dockerHubIndexURL  = "https://index.docker.io/v1/"
+)
+
 // ConfigureFile sets credHelpers[host] = "registrygate" for every host in the Docker config file at path, keeping
-// every other key. It creates the file (0600) and its directory (0700) when missing. A file that is not a JSON
+// every other key. For Docker Hub's index.docker.io it also sets the URL key Docker uses for it. It creates the file (0600) and its directory (0700) when missing. A file that is not a JSON
 // object, or a credHelpers value that is not an object, is left untouched and reported as an error.
 func ConfigureFile(path string, hosts []string) error {
 	if len(hosts) == 0 {
@@ -44,6 +49,11 @@ func ConfigureFile(path string, hosts []string) error {
 	name, _ := json.Marshal(HelperName)
 	for _, host := range hosts {
 		helpers[host] = name
+
+		// Docker looks up its Docker Hub credentials under this URL, and a credHelpers key matches it exactly.
+		if host == dockerHubIndexHost {
+			helpers[dockerHubIndexURL] = name
+		}
 	}
 
 	encoded, err := json.Marshal(helpers)

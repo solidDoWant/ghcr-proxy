@@ -34,9 +34,13 @@ import (
 // proxy needs to stand in for one host.
 type upstream struct {
 	// key is the suffix of the object and project names ("a" or "b").
-	key       string
+	key string
+	// host is the main name the proxy stands in for; hosts is every name, host first.
 	host      string
+	hosts     []string
 	namespace string
+	// mirrorRepo is the repository glob the tenants' mirror rules cover.
+	mirrorRepo string
 	// auth, uploadPath and deleteMode are the fake's flags.
 	auth, uploadPath, deleteMode string
 	storageHost                  string
@@ -52,11 +56,21 @@ const (
 )
 
 func newUpstreams() []*upstream {
-	return []*upstream{
+	upstreams := []*upstream{
 		// Upstream A behaves like ghcr.io.
-		{key: "a", host: "ghcr.io", namespace: "fake-a", auth: "bearer", uploadPath: "upload", deleteMode: "unsupported", storageHost: "pkg-containers.githubusercontent.com"},
-		{key: "b", host: "quay.io", namespace: "fake-b", auth: "basic", uploadPath: "uploads", deleteMode: "supported", storageHost: "cdn01.quay.io"},
+		{key: "a", host: "ghcr.io", namespace: "fake-a", auth: "bearer", uploadPath: "upload", deleteMode: "unsupported", storageHost: "pkg-containers.githubusercontent.com", mirrorRepo: "mirrored/**"},
+		{key: "b", host: "quay.io", namespace: "fake-b", auth: "basic", uploadPath: "uploads", deleteMode: "supported", storageHost: "cdn01.quay.io", mirrorRepo: "mirrored/**"},
+		// Upstream C stands in for Docker Hub, which clients know by three names. It is not Docker Hub: it proves the naming only.
+		{key: "c", host: "registry-1.docker.io", hosts: []string{"registry-1.docker.io", "docker.io", "index.docker.io"}, namespace: "fake-c", auth: "bearer", uploadPath: "uploads", deleteMode: "supported", storageHost: "production.cloudflare.docker.com", mirrorRepo: "library/**"},
 	}
+
+	for _, fake := range upstreams {
+		if fake.hosts == nil {
+			fake.hosts = []string{fake.host}
+		}
+	}
+
+	return upstreams
 }
 
 // registryHost is the in-cluster name of the fake.
@@ -110,7 +124,7 @@ spec:
         - -storage-host=%[5]s
         - -dns-names=%[6]s
         - -blob-dir=/blobs
-        - -public=soliddowant/public,%[11]s,%[12]s
+        - -public=soliddowant/public,library/alpine,%[11]s,%[12]s
         - -pat-file=/pat/token
         - -ca-file=-
         - -auth=%[8]s
@@ -175,7 +189,7 @@ spec:
 
 	var err error
 
-	u.servingCA, err = newCA(u.host)
+	u.servingCA, err = newCA(u.hosts...)
 
 	return err
 }

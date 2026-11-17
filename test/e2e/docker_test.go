@@ -37,8 +37,8 @@ func TestCIPodsAreSetUpAsTheAdminGuideSays(t *testing.T) {
 			}
 		}
 
-		for _, fake := range cluster.upstreams {
-			assert.Contains(t, intercepted, fake.host, tenant.namespace)
+		for _, host := range cluster.allHosts() {
+			assert.Contains(t, intercepted, host, tenant.namespace)
 		}
 
 		var projected, helper bool
@@ -63,8 +63,8 @@ func TestCIPodsAreSetUpAsTheAdminGuideSays(t *testing.T) {
 
 		require.NoError(t, json.Unmarshal([]byte(config), &parsed))
 
-		for _, fake := range cluster.upstreams {
-			assert.Equal(t, "registrygate", parsed.CredHelpers[fake.host], "docker-credential-registrygate configure adds each host")
+		for _, host := range cluster.allHosts() {
+			assert.Equal(t, "registrygate", parsed.CredHelpers[host], "docker-credential-registrygate configure adds each host")
 		}
 	}
 }
@@ -90,7 +90,7 @@ func TestChartInstallRunsNonRootWithReadOnlyRootFilesystem(t *testing.T) {
 }
 
 func TestPullsPublicImagesFromBothUpstreams(t *testing.T) {
-	for _, fake := range cluster.upstreams {
+	for _, fake := range cluster.upstreams[:2] {
 		fake.seedImage(t, "soliddowant/public:1")
 
 		before := len(fake.log(t))
@@ -132,7 +132,7 @@ func TestEachNamespacePullsThroughItsOwnHarborProject(t *testing.T) {
 }
 
 func TestBuildWithBaseImagesFromBothUpstreamsUsesTheMirrors(t *testing.T) {
-	for _, fake := range cluster.upstreams {
+	for _, fake := range cluster.upstreams[:2] {
 		fake.seedImage(t, mirroredRepo("build")+":1")
 	}
 
@@ -145,7 +145,7 @@ docker build --no-cache -t local/both:1 .`, mirroredRepo("build"))
 	_, err := cluster.docker(t.Context(), tenant.namespace, script)
 	require.NoError(t, err)
 
-	for _, fake := range cluster.upstreams {
+	for _, fake := range cluster.upstreams[:2] {
 		project := harborProject(tenant.namespace, fake)
 
 		require.Eventually(t, func() bool {

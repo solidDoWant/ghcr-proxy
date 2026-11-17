@@ -230,7 +230,7 @@ CI pods still connect to the proxy over TLS with the certificate of the `Upstrea
 
 ## Harbor through its Service
 
-Harbor knows itself by its `externalURL`, for example `https://harbor.example.com`. It puts that host in its token endpoint and in its `Location` headers. If the proxy connects to Harbor through its Service (`http://harbor-core.harbor.svc`), list the `externalURL` host in `aliasHosts`. In this example, CI pods use the name `registry.example.com` for Harbor:
+Harbor knows itself by its `externalURL`, for example `https://harbor.example.com`. It puts that host in its token endpoint and in its `Location` headers. If the proxy connects to Harbor through its Service (`http://harbor-core.harbor.svc`), list the `externalURL` host in `aliasHosts`. Harbor answers a request that arrives on its Service with a token endpoint on the host of that request, with the scheme `https`. So also list the Service host (`harbor-core.harbor.svc`) in `aliasHosts`. In this example, CI pods use the name `registry.example.com` for Harbor:
 
 ```yaml
 apiVersion: registrygate.soliddowant.dev/v1alpha1
@@ -241,7 +241,7 @@ metadata:
 spec:
   hosts: [registry.example.com]
   url: http://harbor-core.harbor.svc
-  aliasHosts: [harbor.example.com]
+  aliasHosts: [harbor.example.com, harbor-core.harbor.svc]
   tls:
     secretRef:
       name: registry-example-com-tls
@@ -284,7 +284,7 @@ spec:
 ```
 
 - The Docker daemon sends `docker.io/<image>` and short names like `alpine` to `registry-1.docker.io`. It reads the CA from `/etc/docker/certs.d/registry-1.docker.io/ca.crt`.
-- The Docker CLI and BuildKit look up the Docker Hub credential under `https://index.docker.io/v1/`. The credential helper maps that to `index.docker.io`.
+- The Docker CLI and BuildKit look up the Docker Hub credential under `https://index.docker.io/v1/`. The credential helper maps that to `index.docker.io`. `docker-credential-registrygate configure` adds a `credHelpers` entry for that URL, because Docker matches the key exactly.
 - The `hostAliases` of the CI pod and `REGISTRYGATE_HOSTS` must name all three hosts. See [CI pod setup](ci-pods.md).
 - The serving certificate must be valid for all three hosts.
 - The proxy does not change repository names. The daemon sends `library/<name>` for official images, so policy rules name `library/alpine`, not `alpine`.

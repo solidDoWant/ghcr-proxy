@@ -170,6 +170,17 @@ func TestConfigureMergesIntoExistingConfig(t *testing.T) {
 		`"credHelpers":{"other.io":"foo","ghcr.io":"registrygate","quay.io":"registrygate"}}`, string(raw))
 }
 
+func TestConfigureWritesTheDockerHubIndexURLKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+
+	require.NoError(t, credhelper.ConfigureFile(path, []string{"registry-1.docker.io", "docker.io", "index.docker.io"}))
+
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"credHelpers":{"registry-1.docker.io":"registrygate","docker.io":"registrygate","index.docker.io":"registrygate",`+
+		`"https://index.docker.io/v1/":"registrygate"}}`, string(raw))
+}
+
 func TestConfigureCreatesFileAndDirectoryPrivately(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "new", ".docker")
 	path := filepath.Join(dir, "config.json")
