@@ -98,7 +98,7 @@ spec:
 // an UpstreamCredential for its push robot. The robot's Secret is in the admin
 // namespace only.
 func (e *env) applyHarborUpstream(ctx context.Context, tenantNames []string) error {
-	certPEM, keyPEM, err := e.harborCA.issue(e.harborHostName)
+	certPEM, keyPEM, err := e.harborProxyCA.issue(e.harborHostName)
 	if err != nil {
 		return err
 	}
@@ -325,7 +325,7 @@ func (e *env) setupCIPod(ctx context.Context, tenant *tenant) error {
 		}
 	}
 
-	caData[e.harborHostName+".crt"] = e.harborCA.pem
+	caData[e.harborHostName+".crt"] = e.harborProxyCA.pem
 
 	if err := e.secret(ctx, tenant.namespace, "registrygate-ca", "Opaque", caData); err != nil {
 		return err

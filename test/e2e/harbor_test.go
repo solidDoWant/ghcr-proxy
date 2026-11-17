@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -78,6 +79,19 @@ func (e *env) installHarbor(ctx context.Context) error {
 	if _, err := e.kubectl(ctx, "", "-n", "kube-system", "rollout", "status", "deployment/coredns", "--timeout=120s"); err != nil {
 		return err
 	}
+
+	// Harbor's generated certificate is signed by the CA in this Secret.
+	ca, err := e.kubectl(ctx, "", "-n", harborNamespace, "get", "secret", "harbor-nginx", "-o", `go-template={{index .data "ca.crt"}}`)
+	if err != nil {
+		return err
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(ca))
+	if err != nil {
+		return err
+	}
+
+	e.harborCA = decoded
 
 	return nil
 }

@@ -87,7 +87,7 @@ func (w *walkthrough) transform(script string) string {
 		script = pattern.ReplaceAllString(script, "${1}url: https://"+fake.registryHost()+"\n${1}caSecretRef:\n${1}  name: "+fake.objectName()+"-ca")
 	}
 
-	script = strings.ReplaceAll(script, "harbor.example.com", strings.TrimPrefix(cluster.harborURL, "https://"))
+	script = strings.ReplaceAll(script, "harbor.example.com", strings.TrimPrefix(cluster.harborTLSURL, "https://"))
 	script = strings.ReplaceAll(script, "create secret generic harbor-ci-foo", "create secret generic harbor-ci-foo --from-file=ca.crt=./harbor-ca.crt")
 	script = strings.ReplaceAll(script, "  secretRef:\n    name: harbor-ci-foo\n", "  secretRef:\n    name: harbor-ci-foo\n  caSecretRef:\n    name: harbor-ci-foo\n")
 

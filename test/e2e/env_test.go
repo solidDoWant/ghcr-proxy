@@ -48,7 +48,11 @@ type env struct {
 	harborExternalURL string
 	// harborHostName is the name CI pods use for Harbor. The proxy stands in for it.
 	harborHostName string
-	harborCA       *ca
+	// harborProxyCA signs the proxy's serving certificate for harborHostName.
+	harborProxyCA *ca
+	// harborCA signs Harbor's own certificate, for clients that reach Harbor over HTTPS at harborTLSURL.
+	harborCA     []byte
+	harborTLSURL string
 }
 
 var cluster *env
@@ -81,6 +85,7 @@ func TestMain(m *testing.M) {
 		runID:       hex.EncodeToString(suffix),
 		harborURL:   "http://harbor-core." + harborNamespace + ".svc",
 
+		harborTLSURL:      "https://harbor." + harborNamespace + ".svc",
 		harborExternalURL: "https://harbor.e2e.test",
 		harborHostName:    "registry.e2e.test",
 	}
@@ -136,7 +141,7 @@ func (e *env) setup(ctx context.Context) error {
 
 	var err error
 
-	if e.harborCA, err = newCA(e.harborHostName); err != nil {
+	if e.harborProxyCA, err = newCA(e.harborHostName); err != nil {
 		return err
 	}
 
