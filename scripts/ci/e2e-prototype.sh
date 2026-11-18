@@ -37,6 +37,19 @@ cat "$ci/docker/config.json" 2>/dev/null || true
 docker volume create gomod >/dev/null
 docker volume create gobuild >/dev/null
 
+# kind's node runs systemd, which needs cgroup v2 nesting in dockerd's cgroup
+# namespace: the processes out of the root cgroup, and every controller
+# delegated. The upstream dind entrypoint does this; dind.sh execs dockerd
+# without it.
+echo "== cgroup nesting:"
+docker run --rm --privileged --cgroupns=host --entrypoint /bin/sh "$image" -c '
+	cd /sys/fs/cgroup
+	echo "before: $(cat cgroup.subtree_control)"
+	mkdir -p init
+	for pid in $(cat cgroup.procs); do echo "$pid" >init/cgroup.procs 2>/dev/null || true; done
+	for controller in $(cat cgroup.controllers); do echo "+$controller" >cgroup.subtree_control || echo "cannot delegate $controller"; done
+	echo "after: $(cat cgroup.subtree_control)"
+' || echo "cgroup nesting failed"
 echo "== e2e start: $(elapsed)s"
 status=0
 docker run --rm --network host \
@@ -46,7 +59,7 @@ docker run --rm --network host \
 	-e DOCKER_HOST=tcp://127.0.0.1:2375 -e DOCKER_CONFIG="$ci/docker" \
 	-e REGISTRYGATE_HOSTS="${REGISTRYGATE_HOSTS:-}" -e REGISTRYGATE_TOKEN_FILE="$ci/token" \
 	-e CI_BIN="$ci/bin" -e CI_CA="$ci/ca-bundle.crt" \
-	-e E2E_CLUSTER=registrygate-ci \
+	-e E2E_CLUSTER=registrygate-ci -e KIND_EXPERIMENTAL_PROVIDER=docker \
 	"$image" bash -c '
 		source /etc/devshell.sh
 		export PATH="$CI_BIN:$PATH" SSL_CERT_FILE="$CI_CA"
