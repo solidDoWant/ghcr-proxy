@@ -52,7 +52,7 @@ The tag's release workflow (`.github/workflows/release.yml`) builds and pushes t
 
    Open the PR (`chore(release): <version>`), arm auto-merge on its head after a self-check like any other PR, and hand back with `HANDOFF: wait-pr #<PR>`: the scheduler resumes you once it has merged (or closed: then find out why before going on). Then continue on the merge commit.
 4. **Gates on the exact merge commit** (detached checkout of it in your worktree; background each long run and poll with `scripts/agents/wait-for.sh`):
-   - CI's `checks` is green for that commit on `master` (`gh run list --branch master --commit <sha>`).
+   - CI is green for that commit on `master`: the push PipelineRun's check run (named `Tekton CI / registrygate-push-`) has the conclusion `success` (`gh api repos/solidDoWant/registrygate/commits/<sha>/check-runs --jq '.check_runs[] | select(.name | startswith("Tekton CI")) | .conclusion'`). If it failed, the `stage: <name>` check runs of the commit name the failed stages.
    - `make acceptance` shows every automated scenario of the phase passing (the scoreboard reads the checklist's `Tests:` lines; it fails if a line names a missing test). Manual scenarios do not gate the release; don't list them as open items or known issues.
    - `govulncheck ./...` is clean, or every finding is listed under Known issues with a reason it is not reachable.
    - `make release VERSION=<version>` (dry run) succeeds; keep its log.

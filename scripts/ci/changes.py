@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Decides which CI stages run on Tekton, with the path rules ci.yml uses.
+"""Decides which CI stages run on Tekton, by the path rules below.
 
 Reads the changed files, one per line, on stdin and prints the selected
 stages, space-separated, in a fixed order. A push to master runs every stage

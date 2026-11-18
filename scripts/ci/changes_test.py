@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Tests scripts/ci/changes.py's stage selection against the path rules of
-ci.yml."""
+the Tekton pipeline runs."""
 
 import importlib.util
 import pathlib
@@ -37,7 +37,7 @@ class SelectTest(unittest.TestCase):
         self.check(["docs/admin/install.md"], ["docs"])
 
     def test_markdown_outside_the_root_and_docs_counts_as_code(self):
-        # `*.md` matches only at the root, as in ci.yml.
+        # `*.md` matches only at the root.
         self.check(["deploy/charts/registrygate/README.md"], GO_STAGES + ["e2e", "docs"])
 
     def test_a_playbook_change_runs_nothing(self):

@@ -109,7 +109,8 @@ DEFAULT_CONFIG = {
     # failures to a worker. Renovate's own minimumReleaseAge gates their creation.
     "renovate_prs": True,
     "renovate_authors": ["infra-mk3-renovate-operator"],
-    "required_check": "checks",
+    # The PaC check run of the pull request PipelineRun (docs/design/phase-4.md).
+    "required_check": "Tekton CI / registrygate-pull-request-",
     # null = the lowest-numbered open "Phase N" milestone with open issues.
     "current_phase": None,
     # false: start no new issue outside the current phase milestone (work
@@ -140,10 +141,10 @@ DEFAULT_CONFIG = {
         "reserved_slot": True,
     },
     "ci_auto_rerun": True,
-    # Jobs whose failures are almost always real: they go straight to the worker
-    # instead of costing a full CI re-run first. Other jobs (e2e) are re-run once unless
-    # their log shows a test assertion failure (is_assertion_failure).
-    "no_rerun_jobs": ["lint", "unit", "generate", "integration", "docs", "test-guard"],
+    # Stages whose failures are almost always real: they go straight to the worker
+    # instead of costing a full CI re-run first. Other stages (e2e) are re-run once unless
+    # their failure report shows a test assertion failure (is_assertion_failure).
+    "no_rerun_jobs": ["stage: lint", "stage: unit", "stage: generate", "stage: integration", "stage: docs"],
     "failure_backoff_s": 120,
     "failure_backoff_max_s": 1800,
     "max_consecutive_failures": 3,
@@ -258,7 +259,8 @@ class PR:
     files: list
     reviews: list  # [Review], oldest first
     check: str  # missing | pending | success | failure
-    # [{name, url, run_id, conclusion}]; the scheduler adds "assertion" from the job log (classify_failures).
+    # [{name, url, run, check_id, conclusion}]: the failed check runs (one per failed stage) and the name of the
+    # PipelineRun they belong to; the scheduler adds "assertion" from the stage report (classify_failures).
     failed_runs: list = field(default_factory=list)
 
     def verdicts(self) -> list:
@@ -333,7 +335,7 @@ query($owner: String!, $name: String!, $cursor: String) {
         reviews(last: 30) { nodes { author { login } submittedAt url body commit { oid } } }
         commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
           __typename
-          ... on CheckRun { name status conclusion detailsUrl checkSuite { workflowRun { databaseId } } }
+          ... on CheckRun { name status conclusion detailsUrl databaseId }
         } } } } } }
       }
     }
@@ -378,9 +380,10 @@ INFRA_FAILURE_MARKERS = (
 )
 
 
-def job_id_from_url(url: str | None) -> int | None:
-    match = re.search(r"/job/(\d+)", url or "")
-    return int(match.group(1)) if match else None
+def pipelinerun_from_url(url: str | None) -> str | None:
+    """The PipelineRun name in a Tekton Dashboard URL (.../pipelineruns/NAME)."""
+    match = re.search(r"/pipelineruns/([^/?#]+)", url or "")
+    return match.group(1) if match else None
 
 
 def is_assertion_failure(log: str) -> bool:
@@ -414,11 +417,13 @@ def parse_pr(node: dict, cfg: dict) -> PR:
         check = "success"
     else:
         check = "failure"
+    run = next((n for n in (pipelinerun_from_url(c.get("detailsUrl")) for c in required) if n), None)
     failed = [
         {
             "name": c["name"],
             "url": c.get("detailsUrl"),
-            "run_id": ((c.get("checkSuite") or {}).get("workflowRun") or {}).get("databaseId"),
+            "run": run,
+            "check_id": c.get("databaseId"),
             "conclusion": c["conclusion"],
         }
         for c in contexts
@@ -536,11 +541,15 @@ class GitHub:
             return
         self._gh(*args)
 
-    def failed_job_log(self, job_id: int) -> str:
-        return self._gh("run", "view", "--job", str(job_id), "--log-failed", "-R", self.cfg["repo"], timeout=180)
+    def stage_report(self, check_id: int) -> str:
+        """The failure report of a stage: the output text of its check run."""
+        out = self._gh("api", f"repos/{self.cfg['repo']}/check-runs/{check_id}", timeout=60)
+        return (json.loads(out).get("output") or {}).get("text") or ""
 
-    def rerun_failed(self, run_id: int) -> None:
-        self._write(f"gh run rerun {run_id} --failed", "run", "rerun", str(run_id), "--failed", "-R", self.cfg["repo"])
+    def retest(self, pr: int, run: str) -> None:
+        """Starts a new PipelineRun: PaC takes /retest comments from the repository owner's account.
+        The new run repeats every stage."""
+        self._write(f"/retest {run} on PR #{pr}", "pr", "comment", str(pr), "-R", self.cfg["repo"], "--body", f"/retest {run}")
 
     def arm_auto_merge(self, pr: int, sha: str) -> None:
         self._write(f"arm auto-merge on PR #{pr} at {sha[:10]}", "pr", "merge", str(pr), "-R", self.cfg["repo"],
@@ -658,7 +667,7 @@ def light_review(pr: PR, cfg: dict) -> bool:
 @dataclass
 class Plan:
     jobs: list  # launchable candidates, best first (claims/locks not yet applied)
-    reruns: list  # [(pr, run_ids, failed names)] CI re-runs to issue now
+    reruns: list  # [(pr, PipelineRun names, failed stage names)] CI re-runs to issue now
     skipped: list  # [(target, why)] for sched-status
     gave_up: list  # [(key, issue, pr, why, head)] newly over the review-round limit
     notes: list
@@ -798,7 +807,7 @@ def build_plan(snap: Snapshot, state: dict, cfg: dict, holds: dict, now: dt.date
                 failed = ", ".join(f"{f['name']} ({f['url']})" for f in pr.failed_runs) or "see the checks tab"
                 deterministic = any(f["name"] in cfg["no_rerun_jobs"] or f.get("assertion") for f in pr.failed_runs)
                 if cfg["ci_auto_rerun"] and reruns.get("sha") != pr.head_sha and pr.failed_runs and not deterministic:
-                    plan.reruns.append((pr.number, sorted({f["run_id"] for f in pr.failed_runs if f["run_id"]}),
+                    plan.reruns.append((pr.number, sorted({f["run"] for f in pr.failed_runs if f["run"]}),
                                         [f["name"] for f in pr.failed_runs]))
                 else:
                     why = (" and a re-run" if reruns.get("sha") == pr.head_sha
@@ -1786,10 +1795,10 @@ class Scheduler:
                 self.state["ci_reruns"].pop(pr_s)
 
     def classify_failures(self, snap: Snapshot) -> None:
-        """Mark failed jobs of armed PRs whose log shows test assertion failures,
-        so build_plan skips the automatic re-run for them. Only jobs that would
-        otherwise be re-run are read, once per job (cached in state). If the log
-        can't be read, the job is re-run as before."""
+        """Mark failed stages of armed PRs whose failure report shows test assertion failures,
+        so build_plan skips the automatic re-run for them. Only stages that would
+        otherwise be re-run are read, once per check run (cached in state). If the report
+        can't be read, the run is re-run as before."""
         cache = self.state.setdefault("ci_logs", {})
         seen = set()
         for pr in snap.prs.values():
@@ -1798,17 +1807,17 @@ class Scheduler:
             if self.state["ci_reruns"].get(str(pr.number), {}).get("sha") == pr.head_sha:
                 continue
             for f in pr.failed_runs:
-                job = job_id_from_url(f.get("url"))
+                job = f.get("check_id")
                 if job is None or f["name"] in self.cfg["no_rerun_jobs"] or f.get("conclusion", "FAILURE") != "FAILURE":
                     continue
                 seen.add(str(job))
                 if str(job) not in cache:
                     try:
-                        cache[str(job)] = is_assertion_failure(self.github.failed_job_log(job))
+                        cache[str(job)] = is_assertion_failure(self.github.stage_report(job))
                     except Exception as err:  # noqa: BLE001 - unreadable log: fall back to a re-run
-                        self.event("github_error", op="job_log", pr=pr.number, job=job, error=str(err)[:300])
+                        self.event("github_error", op="stage_report", pr=pr.number, check=job, error=str(err)[:300])
                         continue
-                    self.event("ci_log_classified", pr=pr.number, job=job, name=f["name"], assertion=cache[str(job)])
+                    self.event("ci_log_classified", pr=pr.number, check=job, name=f["name"], assertion=cache[str(job)])
                 f["assertion"] = cache[str(job)]
         for job in set(cache) - seen:
             cache.pop(job)
@@ -1967,8 +1976,8 @@ class Scheduler:
             for pr_n, run_ids, names in plan.reruns:
                 sha = snap.prs[pr_n].head_sha
                 try:
-                    for run_id in run_ids:
-                        self.github.rerun_failed(run_id)
+                    for run in run_ids:
+                        self.github.retest(pr_n, run)
                     self.state["ci_reruns"][str(pr_n)] = {"sha": sha, "jobs": names, "at": iso(now)}
                     self.event("ci_rerun", pr=pr_n, sha=sha, jobs=names, runs=run_ids)
                 except Exception as err:  # noqa: BLE001
@@ -2027,7 +2036,7 @@ class Scheduler:
                  f"current phase {current_phase(snap, self.cfg)}, locks held {locks or '{}'}"
                  + (f", launching blocked by {blocked_by}" if blocked_by else ""))
         for pr_n, run_ids, names in plan.reruns:
-            self.say(f"  would re-run CI on PR #{pr_n}: runs {run_ids} ({', '.join(names)})")
+            self.say(f"  would re-run CI on PR #{pr_n}: PipelineRuns {run_ids} ({', '.join(names)})")
         for pr_n, sha in plan.arms:
             self.say(f"  would arm auto-merge on PR #{pr_n} at {sha[:10]}")
         self.say("queue (priority order):")

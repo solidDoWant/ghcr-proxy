@@ -83,7 +83,7 @@ command_of() {
 	integration) echo 'make test-integration' ;;
 	e2e) echo 'make test-e2e' ;;
 	docs)
-		# The style report is advisory, as in ci.yml.
+		# The style report is advisory.
 		if [ "$event" = pull_request ]; then
 			echo 'make docs-check && ./scripts/check-tracking-ids.py && { ./scripts/docs/style_report.sh origin/master || true; }'
 		else
