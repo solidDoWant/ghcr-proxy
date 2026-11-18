@@ -16,6 +16,7 @@ got=$(printf '%s\n' \
 	registry.local:5000/goharbor/harbor-core:v2.15.0 \
 	registry.local:5000/goharbor/harbor-core:v2.14.0 \
 	quay.io/jetstack/cert-manager-controller:v1.19.0 \
+	quay.io/jetstack/cert-manager-controller:'<none>' \
 	registrygate-ci:abc \
 	ghcr.io/soliddowant/registrygate:e2e |
 	/bin/sh ./stale-images.sh "$keep")

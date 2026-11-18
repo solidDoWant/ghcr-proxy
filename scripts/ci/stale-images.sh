@@ -17,6 +17,9 @@ awk '
 		next
 	}
 	{
+		# An image stored without a tag lists as `repository:<none>`, which
+		# `docker image rm` rejects; dangling ones are left to `image prune`.
+		if ($0 ~ /:<none>$/) next
 		repo = $0
 		sub(/:[^:\/]*$/, "", repo)
 		if ((repo in repos) && !($0 in kept)) print $0
