@@ -5,6 +5,7 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -343,7 +344,27 @@ func (e *env) setupCIPod(ctx context.Context, tenant *tenant) error {
 	}
 
 	if _, err := e.kubectl(ctx, "", "-n", tenant.namespace, "wait", "--for=condition=Ready", "pod/build", "--timeout=300s"); err != nil {
-		return fmt.Errorf("%w\n%s", err, e.podDiagnostics(ctx, tenant.namespace, "pod/build"))
+		diagnostics := e.podDiagnostics(ctx, tenant.namespace, "pod/build")
+		// Two kind clusters in one dind sometimes fail an image volume mount
+		// with an overlay I/O error on the first try; a new pod mounts the same
+		// image cleanly. Retry once for that error only, and print what failed.
+		if !strings.Contains(diagnostics, "ImageVolumeMountFailed") {
+			return fmt.Errorf("%w\n%s", err, diagnostics)
+		}
+
+		fmt.Fprintf(os.Stderr, "e2e: retrying the CI pod of %s after an image volume mount failure:\n%s\n", tenant.namespace, diagnostics)
+
+		if _, err := e.kubectl(ctx, "", "-n", tenant.namespace, "delete", "pod/build", "--wait", "--timeout=120s"); err != nil {
+			return err
+		}
+
+		if err := e.apply(ctx, manifest); err != nil {
+			return err
+		}
+
+		if _, err := e.kubectl(ctx, "", "-n", tenant.namespace, "wait", "--for=condition=Ready", "pod/build", "--timeout=300s"); err != nil {
+			return fmt.Errorf("%w\n%s", err, e.podDiagnostics(ctx, tenant.namespace, "pod/build"))
+		}
 	}
 
 	deadline := time.Now().Add(2 * time.Minute)
