@@ -88,7 +88,7 @@ Then the step runs `scripts/ci/stages.sh`. This script:
 4. Writes each stage's output to its own file. When a stage finishes, the script prints that stage's whole log as one block with a header. It prints failed stages last.
 5. Prints a table: each stage's result, time, peak memory and CPU time (section 6).
 6. On a push run, cleans the Docker storage and checks its size (section 5).
-7. Writes the Task result `stages`: for each stage, its name, result, time and a short failure report (section 3.4). Then it exits 0, also when a stage failed. The `report` task fails the run (section 3.3).
+7. Writes the Task result `stages`: for each stage, its name, result, time and a short failure report (section 3.4). Then it exits non-zero if a stage failed, so the run fails even if the result is lost (section 3.3).
 
 The stages and their commands are the ones `ci.yml` runs today:
 
@@ -140,7 +140,7 @@ This task runs on every pull request, docs-only included. It finishes long befor
 
 The PipelineRun is the aggregate. PaC reports it as one check. The check fails if any task fails, and a task skipped by a `when` expression counts as passed.
 
-The `ci` step exits 0 when its stages ran, also when a stage failed. The `report` task reads the `ci` task's `stages` result. It fails if a stage failed, or if the result is missing because `ci` did not finish. A `finally` task that fails makes the PipelineRun fail. So the check fails when any stage fails, and it passes for a docs-only PR that runs only the docs stage and the test guard. The check links to the run in the Tekton Dashboard, where the failing stage's log block is.
+The `ci` step writes the `stages` result, and then exits non-zero if a stage failed. So the `ci` task itself fails the run, and a lost result cannot hide a failure. (Tekton skips a `finally` task whose parameter cannot be resolved, and the run then passes.) The `report` task still reads the failed `ci` task's result, because Tekton keeps results that a failed task wrote. It gives each stage its check run, and it fails if a stage failed, or if the result is missing because `ci` did not finish. A `finally` task that fails makes the PipelineRun fail. So the check fails when any stage fails, and it passes for a docs-only PR that runs only the docs stage and the test guard. The check links to the run in the Tekton Dashboard, where the failing stage's log block is.
 
 The `ci` task does not fail on a failed stage, because a Tekton `finally` task cannot rely on the results of a failed task. The `stages` result must reach `report` in every case.
 
