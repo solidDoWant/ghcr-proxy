@@ -43,11 +43,12 @@ lint-fix: ## Run golangci-lint and apply its fixes.
 	golangci-lint run --fix ./...
 
 .PHONY: test
-test: ## Run unit tests: Go (race detector; GO_TEST_JSON=file also writes the go test -json events there), the agent scheduler and wait-ci tests, the test guard, the acceptance scoreboard and the check scripts' tests.
+test: ## Run unit tests: Go (race detector; GO_TEST_JSON=file also writes the go test -json events there), the agent scheduler and wait-ci tests, the test guard, the CI measurement script, the acceptance scoreboard and the check scripts' tests.
 	./scripts/ci/go-test-json.sh -race -count=1 ./...
 	./scripts/agents/scheduler_test.py
 	./scripts/agents/wait-ci_test.sh
 	./scripts/ci/test-guard_test.py
+	./scripts/ci/measure-ci_test.py
 	./scripts/acceptance-scoreboard_test.py
 	./scripts/check-images_test.py
 	./scripts/check-tracking-ids_test.py
