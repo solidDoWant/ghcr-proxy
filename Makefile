@@ -51,6 +51,7 @@ test: ## Run unit tests: Go (race detector; GO_TEST_JSON=file also writes the go
 	./scripts/ci/measure-ci_test.py
 	./scripts/ci/changes_test.py
 	./scripts/ci/stages-report_test.py
+	./scripts/ci/df-percent_test.sh
 	./scripts/acceptance-scoreboard_test.py
 	./scripts/check-images_test.py
 	./scripts/check-tracking-ids_test.py
