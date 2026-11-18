@@ -633,12 +633,12 @@ class ParsePRTest(unittest.TestCase):
 
 
 class RetestTest(unittest.TestCase):
-    def test_retest_comments_the_pipelinerun_name_on_the_pull_request(self):
+    def test_retest_comments_the_tekton_pipelinerun_name_not_the_generated_one_on_the_pull_request(self):
         calls = []
         github = s.GitHub({"repo": "o/r"})
         github._gh = lambda *args, **kwargs: calls.append(args) or ""
         github.retest(10, "registrygate-pull-request-abc12")
-        self.assertEqual(calls, [("pr", "comment", "10", "-R", "o/r", "--body", "/retest registrygate-pull-request-abc12")])
+        self.assertEqual(calls, [("pr", "comment", "10", "-R", "o/r", "--body", "/retest registrygate-pull-request-")])
 
     def test_stage_report_is_the_check_run_output_text(self):
         github = s.GitHub({"repo": "o/r"})
