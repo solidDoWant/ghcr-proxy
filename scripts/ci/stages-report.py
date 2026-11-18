@@ -7,11 +7,12 @@ Reads each stage's files in the output directory (`<stage>.exit`, `.start`,
 use, and writes the summary as JSON for the report task: a list with each
 stage's name, result, start and end time, and for a failed stage a short
 failure report. Tekton hands the result over inside the step's termination
-message, as a JSON string in Tekton's own JSON, and Kubernetes keeps at most
-4096 bytes of that message: a longer one loses the result, and the report
-task is then skipped. So the result is measured as it is encoded there and
-fits in RESULT_LIMIT, which leaves room for Tekton's other entries; the
-failure reports are cut to share what is left.
+message, as a JSON string in Tekton's own JSON. Kubernetes cuts that message
+to a share of the pod's 12 KiB budget for termination messages, which the
+step shares with the sidecar and Tekton's init containers. A cut message
+loses the result, and the report task is then skipped. So the result is
+measured as it is encoded there and fits in RESULT_LIMIT, well inside the
+smallest share; the failure reports are cut to share what is left.
 
     stages-report.py OUT_DIR SUMMARY_JSON STAGE...
 """
@@ -20,7 +21,7 @@ import json
 import pathlib
 import sys
 
-RESULT_LIMIT = 3840
+RESULT_LIMIT = 2048
 # Lines that locate a Go test failure.
 FAILURE_MARKERS = ("--- FAIL:", "Error Trace:", "FAIL\t", "panic:")
 TAIL_LINES = 20

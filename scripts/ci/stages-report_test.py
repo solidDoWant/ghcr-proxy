@@ -14,6 +14,11 @@ stages_report = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(stages_report)
 
 
+# The termination message the step's share of the pod's budget keeps: the
+# pod has the step, the dind sidecar and Tekton's init containers.
+TERMINATION_BUDGET = 2304
+
+
 class StagesReportTest(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
@@ -34,7 +39,7 @@ class StagesReportTest(unittest.TestCase):
     @staticmethod
     def termination_message(raw):
         """The step's termination message as Tekton writes it, with the
-        result and the step's start time; Kubernetes keeps 4096 bytes."""
+        result and the step's start time."""
         return json.dumps(
             [{"key": "output", "value": raw, "type": 1},
              {"key": "StartedAt", "value": "2026-11-18T07:57:20.123Z", "type": 3}],
@@ -78,7 +83,7 @@ class StagesReportTest(unittest.TestCase):
             self.stage(name, 1, log="\n".join(f"--- FAIL: Test{n} {long_line}" for n in range(30)))
         self.stage("docs", 0)
         raw, summaries = self.run_report("lint", "unit", "e2e", "docs")
-        self.assertLessEqual(len(self.termination_message(raw)), 4096)
+        self.assertLessEqual(len(self.termination_message(raw)), TERMINATION_BUDGET)
         for summary in summaries[:3]:
             self.assertTrue(summary["report"].startswith("--- FAIL: Test0"))
             self.assertIn("[...]", summary["report"])
@@ -90,13 +95,13 @@ class StagesReportTest(unittest.TestCase):
             self.stage(name, 2, log=log)
         self.stage("lint", 0)
         raw, summaries = self.run_report("lint", "unit", "generate")
-        self.assertLessEqual(len(self.termination_message(raw)), 4096)
+        self.assertLessEqual(len(self.termination_message(raw)), TERMINATION_BUDGET)
         self.assertIn("--- FAIL: TestA", summaries[1]["report"])
 
     def test_the_failure_reports_use_the_space_left(self):
         self.stage("unit", 1, log="--- FAIL: TestA\n" + "y" * 10000)
         raw, _ = self.run_report("unit")
-        self.assertGreater(len(self.termination_message(raw)), 4096 - 512)
+        self.assertGreater(len(self.termination_message(raw)), TERMINATION_BUDGET - 512)
 
 
 if __name__ == "__main__":
