@@ -23,7 +23,7 @@ docker builder prune -f --keep-storage "$build_cache_budget" >/dev/null
 
 # dockerd's storage is its own filesystem, mounted only in the dind sidecar.
 used=$(docker run --rm -v /var/lib/docker:/storage:ro --entrypoint /bin/sh "$current" \
-	-c "df -P /storage | awk 'NR == 2 { sub(/%/, \"\", \$5); print \$5 }'")
+	-c 'df -P /storage' | /bin/sh "$(dirname "$0")/df-percent.sh")
 docker system df
 echo "docker storage: ${used}% used after cleanup"
 if [ "$used" -gt "$max_percent" ]; then
