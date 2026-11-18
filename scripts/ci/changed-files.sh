@@ -4,4 +4,5 @@
 # merge created a commit; either way the merge base with origin/master is the
 # commit the changes start from.
 set -eu
-git diff --name-only "$(git merge-base HEAD origin/master)" HEAD
+# lists both the old and the new path of a moved file.
+git diff --no-renames --name-only "$(git merge-base HEAD origin/master)" HEAD

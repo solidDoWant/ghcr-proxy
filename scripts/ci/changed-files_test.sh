@@ -34,4 +34,15 @@ git checkout -q pr
 git merge -q --no-ff --no-edit origin/master
 got=$("$script")
 [ "$got" = one.txt ] || { echo "merge commit: got '$got', want one.txt" >&2; exit 1; }
+# A rename lists the old path too, whatever diff.renames says.
+git config diff.renames true
+mkdir -p scripts docs
+echo content >scripts/moved.txt
+git add scripts/moved.txt
+git commit -q -m add-moved
+git update-ref refs/remotes/origin/master HEAD
+git mv scripts/moved.txt docs/moved.txt
+git commit -q -m move
+got=$("$script" | sort | tr '\n' ' ')
+[ "$got" = "docs/moved.txt scripts/moved.txt " ] || { echo "rename: got '$got'" >&2; exit 1; }
 echo "changed-files_test.sh: ok"
