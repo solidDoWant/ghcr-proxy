@@ -1,0 +1,78 @@
+---
+# Prototype: runs `make test-e2e` unchanged in one docker Task, to time e2e on
+# the cluster before the full pipeline is built. Runs only for the pipeline's
+# own branch.
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: registrygate-e2e-prototype-
+  annotations:
+    pipelinesascode.tekton.dev/on-cel-expression: >-
+      event == "pull_request" && target_branch == "master" &&
+      source_branch == "ci/tekton-178"
+    pipelinesascode.tekton.dev/cancel-in-progress: "true"
+    pipelinesascode.tekton.dev/max-keep-runs: "5"
+spec:
+  params:
+    - name: repo_url
+      value: "{{ repo_url }}"
+    - name: revision
+      value: "{{ revision }}"
+  timeouts:
+    pipeline: 1h
+  workspaces:
+    - name: source
+      emptyDir: {}
+  taskRunSpecs:
+    - pipelineTaskName: ci
+      sidecarSpecs:
+        - name: dind
+          computeResources:
+            requests:
+              cpu: "8"
+              memory: 14Gi
+            limits:
+              memory: 14Gi
+      stepSpecs:
+        - name: run
+          computeResources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 256Mi
+  pipelineSpec:
+    params:
+      - name: repo_url
+        type: string
+      - name: revision
+        type: string
+    workspaces:
+      - name: source
+    tasks:
+      - name: ci
+        taskRef:
+          resolver: cluster
+          params:
+            - name: kind
+              value: task
+            - name: name
+              value: docker
+            - name: namespace
+              value: ci-tekton
+        params:
+          - name: script
+            value: |
+              set -eu
+              start=$(date +%s)
+              mkdir -p src
+              cd src
+              git init -q .
+              git remote add origin "$(params.repo_url)"
+              git fetch -q origin '+refs/heads/master:refs/remotes/origin/master' "$(params.revision)"
+              git checkout -q --detach "$(params.revision)"
+              echo "clone: $(( $(date +%s) - start ))s"
+              exec ./scripts/ci/e2e-prototype.sh
+        workspaces:
+          - name: source
+            workspace: source
