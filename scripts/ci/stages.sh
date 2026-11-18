@@ -81,7 +81,9 @@ command_of() {
 	unit) echo 'make test && make build' ;;
 	generate) echo 'make check-generate' ;;
 	integration) echo 'make test-integration' ;;
-	e2e) echo 'make test-e2e' ;;
+	# The two e2e tracks run at the same time, each on its own kind cluster.
+	e2e) echo 'make test-e2e-main' ;;
+	e2e-walkthrough) echo 'make test-e2e-walkthrough' ;;
 	docs)
 		# The style report is advisory.
 		if [ "$event" = pull_request ]; then
@@ -114,7 +116,7 @@ start_stage() {
 			-e DOCKER_HOST=tcp://127.0.0.1:2375 -e DOCKER_CONFIG="$ci/docker" \
 			-e REGISTRYGATE_HOSTS="${REGISTRYGATE_HOSTS:-}" -e REGISTRYGATE_TOKEN_FILE="$ci/token" \
 			-e CI_BIN="$ci/bin" -e CI_CA="$ci/ca-bundle.crt" -e CI_STATS="$out/$stage.stats" \
-			-e E2E_CLUSTER=registrygate-ci \
+			-e E2E_CLUSTER="registrygate-ci${stage#e2e}" \
 			-e STAGE_COMMAND="$(command_of "$stage")" \
 			"$image" bash -c '
 				source /etc/devshell.sh

@@ -28,7 +28,7 @@ E2E_HARNESS = ("test/e2e/**",)
 ACCEPTANCE = ("docs/acceptance/**",)
 DOCS = ("**/*.md", "scripts/docs/**")
 
-STAGES = ("lint", "unit", "generate", "integration", "e2e", "docs", "scoreboard")
+STAGES = ("lint", "unit", "generate", "integration", "e2e", "e2e-walkthrough", "docs", "scoreboard")
 
 
 def matches(path, patterns):
@@ -56,6 +56,7 @@ def select(event, files):
         "generate": code,
         "integration": code,
         "e2e": e2e,
+        "e2e-walkthrough": e2e,
         "docs": docs,
         "scoreboard": acceptance,
     }

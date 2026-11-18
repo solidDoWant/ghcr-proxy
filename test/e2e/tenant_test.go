@@ -5,6 +5,7 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"strings"
 	"time"
 )
@@ -383,6 +384,21 @@ func (e *env) podDiagnostics(ctx context.Context, namespace, pod string) string 
 		}
 
 		fmt.Fprintf(&out, "--- kubectl %s\n%s\n", strings.Join(args, " "), result)
+	}
+
+	// The image volume mount fails in the node's containerd: the node's disk and
+	// kernel log, and the Docker host's disk, tell why.
+	node := strings.TrimPrefix(e.kubeContext, "kind-") + "-control-plane"
+	for _, args := range [][]string{
+		{"exec", node, "sh", "-c", "df -h / /var/lib/containerd /run 2>&1; dmesg 2>&1 | tail -n 40"},
+		{"system", "df"},
+	} {
+		result, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
+		if err != nil {
+			result = append(result, err.Error()...)
+		}
+
+		fmt.Fprintf(&out, "--- docker %s\n%s\n", strings.Join(args[:2], " "), result)
 	}
 
 	return out.String()
