@@ -11,7 +11,9 @@
 # promoter keeps. The script writes $WS/ci/stages.json, each stage's name,
 # result, time and failure report (scripts/ci/stages-report.py), also to the
 # file DOCKER_TASK_OUTPUT names (the docker Task's result, read by report), and
-# exits 0 also when a stage failed: the report task fails the run.
+# exits non-zero after writing it when a stage failed, so the run fails even if
+# the result is lost on its way to the report task (which still reads the
+# result of the failed task and gives each stage its check run).
 set -eu
 
 event="${1:?usage: stages.sh pull_request|push}"
@@ -188,9 +190,14 @@ if [ "$event" = push ]; then
 	echo "==================== cleanup (exit $status) ===================="
 	cat "$out/cleanup.log"
 	stages="$stages cleanup"
+	if [ "$status" != 0 ]; then failed="$failed cleanup"; fi
 fi
 
 # shellcheck disable=SC2086 # a list of stage names
 in_image ./scripts/ci/stages-report.py "$out" "$ci/stages.json" $stages
 if [ -n "${DOCKER_TASK_OUTPUT:-}" ]; then cp "$ci/stages.json" "$DOCKER_TASK_OUTPUT"; fi
 echo "all stages done after $(elapsed)s"
+if [ -n "$failed" ]; then
+	echo "failed stages:$failed" >&2
+	exit 1
+fi
