@@ -156,4 +156,3 @@ spec:
                 if failed:
                     print("failed stages: " + ", ".join(failed), file=sys.stderr)
                     sys.exit(1)
-# stale
