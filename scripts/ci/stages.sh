@@ -39,8 +39,7 @@ in_image() {
 if [ "$event" = push ]; then
 	stages=$(in_image ./scripts/ci/changes.py push </dev/null)
 else
-	# HEAD is the PR head merged with master; HEAD^1 is the PR head.
-	git diff --name-only "$(git merge-base HEAD^1 origin/master)" HEAD^1 >"$ci/changed-files"
+	./scripts/ci/changed-files.sh >"$ci/changed-files"
 	stages=$(in_image ./scripts/ci/changes.py pull_request <"$ci/changed-files")
 fi
 if [ -z "$stages" ]; then
