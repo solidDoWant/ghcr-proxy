@@ -373,6 +373,8 @@ The `checks` job of `ci.yml` stays the required check until Tekton is proven. Th
 3. One PR deletes `ci.yml` and changes the docs and scripts that name `checks`: `CLAUDE.md`, the agent playbooks, `scripts/agents/wait-ci.sh` and the scheduler's `required_check`. It also moves the scheduler's failed-job list, log reading and re-runs, and the release-manager's release gate, to the interfaces in section 3.4. Before it merges, the owner removes `checks` from branch protection. A PR that deletes `ci.yml` gets no `checks` run, so it cannot merge while `checks` is required.
 4. `master` is protected at every step: by `checks` before step 2, by both in steps 2 and 3, and by the Tekton check after.
 
+The cutover PR carries step 3: `ci.yml` is gone, `required_check` in the scheduler is `Tekton CI / registrygate-pull-request-`, the scheduler lists failed `stage: <name>` check runs, reads their output text and re-runs with a `/retest <PipelineRun name>` comment, and the release-manager gates on the push PipelineRun's check run.
+
 If Tekton is down, no PR can merge. The owner can add `checks` back by restoring `ci.yml` in one PR.
 
 ## 12. Issues
