@@ -185,7 +185,11 @@ fi
 if [ "$event" = push ]; then
 	date +%s >"$out/cleanup.start"
 	status=0
-	./scripts/ci/cleanup.sh "$image" >"$out/cleanup.log" 2>&1 || status=$?
+	# e2e-images.sh needs bash and helm, which only the CI image has.
+	in_image ./scripts/ci/e2e-images.sh --node </dev/null >"$out/keep-images" 2>"$out/cleanup.log" || status=$?
+	if [ "$status" = 0 ]; then
+		./scripts/ci/cleanup.sh "$image" "$out/keep-images" >>"$out/cleanup.log" 2>&1 || status=$?
+	fi
 	date +%s >"$out/cleanup.end"
 	echo "$status" >"$out/cleanup.exit"
 	echo "==================== cleanup (exit $status) ===================="

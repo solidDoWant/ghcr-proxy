@@ -5,9 +5,13 @@
 # and old versions of the preloaded e2e images would otherwise fill the volume until master runs
 # fail and no new snapshot is promoted.
 #
-#   scripts/ci/cleanup.sh <current CI image tag>
+# It runs in a container without bash, so the caller lists the images to keep
+# (scripts/ci/e2e-images.sh --node, which needs bash) and passes the file.
+#
+#   scripts/ci/cleanup.sh <current CI image tag> <file listing the e2e images to keep>
 set -eu
-current="${1:?usage: cleanup.sh <current CI image tag>}"
+current="${1:?usage: cleanup.sh <current CI image tag> <keep file>}"
+keep="${2:?usage: cleanup.sh <current CI image tag> <keep file>}"
 # The build cache budget: the CI image's layers (~3.5 GB) and the e2e image
 # builds, with room for one flake change.
 build_cache_budget="${CI_BUILD_CACHE_BUDGET:-8GB}"
@@ -20,9 +24,6 @@ for old in $(docker image ls --format '{{.Repository}}:{{.Tag}}' registrygate-ci
 	fi
 done
 # Preloaded e2e images the tree no longer names (older versions after a bump).
-keep="$(mktemp)"
-trap 'rm -f "$keep"' EXIT
-./scripts/ci/e2e-images.sh --node >"$keep"
 [ -s "$keep" ] || { echo "cleanup: no e2e images listed, not removing any" >&2; exit 1; }
 for stale in $(docker image ls --format '{{.Repository}}:{{.Tag}}' | /bin/sh "$(dirname "$0")/stale-images.sh" "$keep"); do
 	docker image rm "$stale" >/dev/null
