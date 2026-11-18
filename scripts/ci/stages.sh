@@ -10,7 +10,7 @@
 # push runs them all and then cleans the Docker storage that the cache
 # promoter keeps. The script writes $WS/ci/stages.json, each stage's name,
 # result, time and failure report (scripts/ci/stages-report.py), also to the
-# file STAGES_RESULT_FILE names (the Task result the report task reads), and
+# file DOCKER_TASK_OUTPUT names (the docker Task's result, read by report), and
 # exits 0 also when a stage failed: the report task fails the run.
 set -eu
 
@@ -44,7 +44,7 @@ fi
 if [ -z "$stages" ]; then
 	echo "no stage needs to run for these changes"
 	echo '[]' >"$ci/stages.json"
-	if [ -n "${STAGES_RESULT_FILE:-}" ]; then cp "$ci/stages.json" "$STAGES_RESULT_FILE"; fi
+	if [ -n "${DOCKER_TASK_OUTPUT:-}" ]; then cp "$ci/stages.json" "$DOCKER_TASK_OUTPUT"; fi
 	exit 0
 fi
 echo "stages: $stages"
@@ -192,5 +192,5 @@ fi
 
 # shellcheck disable=SC2086 # a list of stage names
 in_image ./scripts/ci/stages-report.py "$out" "$ci/stages.json" $stages
-if [ -n "${STAGES_RESULT_FILE:-}" ]; then cp "$ci/stages.json" "$STAGES_RESULT_FILE"; fi
+if [ -n "${DOCKER_TASK_OUTPUT:-}" ]; then cp "$ci/stages.json" "$DOCKER_TASK_OUTPUT"; fi
 echo "all stages done after $(elapsed)s"

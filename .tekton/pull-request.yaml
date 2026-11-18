@@ -145,3 +145,80 @@ spec:
                 git fetch -q origin '+refs/heads/master:refs/remotes/origin/master' "$(params.revision)"
                 git checkout -q --detach "$(params.revision)"
                 TEST_GUARD_PR_LABELS=$(cat /workspace/guard/labels) make test-guard
+    finally:
+      # Fails the run when a stage failed or ci left no result: ci itself
+      # exits 0 after its stages ran, because a finally task cannot rely on
+      # the results of a failed task. Gives every stage its own check run, so
+      # the failing stage and its failure report show on the commit. Runs
+      # only this script with the token, never code from the repository.
+      - name: report
+        params:
+          - name: stages
+            value: $(tasks.ci.results.output)
+        taskSpec:
+          params:
+            - name: stages
+              type: string
+          steps:
+            - name: report
+              image: mirror.gcr.io/library/python:3.14.9@sha256:30a34d141e34b8fbedabecb8f86b3d49a62e348d8112ad3c1289f0b2b216ad3e
+              computeResources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  memory: 256Mi
+              env:
+                - name: GITHUB_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: "{{ git_auth_secret }}"
+                      key: git-provider-token
+                # Through the environment, not the script text, so the
+                # result's content is never parsed as code.
+                - name: STAGES
+                  value: $(params.stages)
+                - name: DETAILS_URL
+                  value: https://tekton.echozulu.games/#/namespaces/$(context.pipelineRun.namespace)/pipelineruns/$(context.pipelineRun.name)
+              script: |
+                #!/usr/bin/env python3
+                import datetime, json, os, sys, urllib.request
+                try:
+                    stages = json.loads(os.environ.get("STAGES", ""))
+                except ValueError:
+                    print("ci left no stages result: it did not finish", file=sys.stderr)
+                    sys.exit(1)
+                def iso(seconds):
+                    return datetime.datetime.fromtimestamp(seconds, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                failed = []
+                for stage in stages:
+                    passed = stage["result"] == "passed"
+                    if not passed:
+                        failed.append(stage["name"])
+                    title = f"{stage['name']} {stage['result']} in {stage['seconds']}s"
+                    print(title)
+                    body = {
+                        "name": "stage: " + stage["name"],
+                        "head_sha": "{{ revision }}",
+                        "status": "completed",
+                        "conclusion": "success" if passed else "failure",
+                        "started_at": iso(stage["started"]),
+                        "completed_at": iso(stage["ended"]),
+                        "details_url": os.environ["DETAILS_URL"],
+                        "output": {"title": title, "summary": title, "text": stage.get("report", "")},
+                    }
+                    request = urllib.request.Request(
+                        "https://api.github.com/repos/{{ repo_owner }}/{{ repo_name }}/check-runs",
+                        data=json.dumps(body).encode(),
+                        method="POST",
+                        headers={"Authorization": "Bearer " + os.environ["GITHUB_TOKEN"], "Accept": "application/vnd.github+json"},
+                    )
+                    # A check run GitHub does not accept is reported, not
+                    # fatal: only a failed stage fails the run.
+                    try:
+                        urllib.request.urlopen(request, timeout=30).close()
+                    except Exception as error:
+                        print(f"check run for {stage['name']} not created: {error}", file=sys.stderr)
+                if failed:
+                    print("failed stages: " + ", ".join(failed), file=sys.stderr)
+                    sys.exit(1)
