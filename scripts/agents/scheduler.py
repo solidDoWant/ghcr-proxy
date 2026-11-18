@@ -548,8 +548,10 @@ class GitHub:
 
     def retest(self, pr: int, run: str) -> None:
         """Starts a new PipelineRun: PaC takes /retest comments from the repository owner's account.
-        The new run repeats every stage."""
-        self._write(f"/retest {run} on PR #{pr}", "pr", "comment", str(pr), "-R", self.cfg["repo"], "--body", f"/retest {run}")
+        The new run repeats every stage. PaC matches the name against the PipelineRun's name in
+        `.tekton/` (its generateName), so the random suffix of the generated name is dropped."""
+        name = re.sub(r"[a-z0-9]{5}$", "", run) if re.search(r"-[a-z0-9]{5}$", run) else run
+        self._write(f"/retest {name} on PR #{pr}", "pr", "comment", str(pr), "-R", self.cfg["repo"], "--body", f"/retest {name}")
 
     def arm_auto_merge(self, pr: int, sha: str) -> None:
         self._write(f"arm auto-merge on PR #{pr} at {sha[:10]}", "pr", "merge", str(pr), "-R", self.cfg["repo"],
