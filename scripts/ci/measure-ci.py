@@ -26,17 +26,24 @@ import json
 import re
 import subprocess
 import sys
+import time
 
 
-def gh_api(path):
-    """Returns the decoded JSON of one GitHub API GET."""
-    result = subprocess.run(
-        ["gh", "api", "-H", "Accept: application/vnd.github+json", path],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return json.loads(result.stdout)
+def gh_api(path, attempts=4):
+    """Returns the decoded JSON of one GitHub API GET, retrying transient errors."""
+    for attempt in range(attempts):
+        result = subprocess.run(
+            ["gh", "api", "-H", "Accept: application/vnd.github+json", path],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            return json.loads(result.stdout)
+        if attempt == attempts - 1:
+            raise subprocess.CalledProcessError(
+                result.returncode, result.args, result.stdout, result.stderr
+            )
+        time.sleep(2 * (attempt + 1))
 
 
 def gh_pages(path, key=None, limit=None):

@@ -4,7 +4,9 @@ on check suite and check run objects shaped like the GitHub API's."""
 
 import importlib.util
 import pathlib
+import subprocess
 import unittest
+from unittest import mock
 
 SCRIPT = pathlib.Path(__file__).resolve().parent / "measure-ci.py"
 spec = importlib.util.spec_from_file_location("measure_ci", SCRIPT)
@@ -94,6 +96,24 @@ class PercentileTest(unittest.TestCase):
         self.assertEqual(summary["wall"]["max"], 9.0)
         self.assertEqual(summary["stages"]["e2e"]["n"], 1)
         self.assertEqual(summary["stages"]["unit"]["n"], 2)
+
+
+class GhApiTest(unittest.TestCase):
+    def completed(self, code, out=""):
+        return subprocess.CompletedProcess(["gh"], code, stdout=out, stderr="")
+
+    def test_a_transient_failure_is_retried(self):
+        results = [self.completed(1), self.completed(0, '{"ok": true}')]
+        with mock.patch.object(measure_ci.subprocess, "run", side_effect=results), \
+                mock.patch.object(measure_ci.time, "sleep"):
+            self.assertEqual(measure_ci.gh_api("x"), {"ok": True})
+
+    def test_a_persistent_failure_is_raised(self):
+        with mock.patch.object(
+            measure_ci.subprocess, "run", return_value=self.completed(1)
+        ), mock.patch.object(measure_ci.time, "sleep"):
+            with self.assertRaises(subprocess.CalledProcessError):
+                measure_ci.gh_api("x")
 
 
 if __name__ == "__main__":
