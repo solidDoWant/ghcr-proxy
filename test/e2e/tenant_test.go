@@ -391,6 +391,9 @@ func (e *env) clearImageVolumeMountErrors(ctx context.Context, namespace string)
 
 		defer ticker.Stop()
 
+		// Events stay for an hour: act only when the kubelet reports a new failure.
+		var seen string
+
 		for {
 			select {
 			case <-ctx.Done():
@@ -399,10 +402,13 @@ func (e *env) clearImageVolumeMountErrors(ctx context.Context, namespace string)
 			}
 
 			messages, err := e.kubectl(ctx, "", "-n", namespace, "get", "events",
-				"--field-selector", "involvedObject.name=build,reason=Failed", "-o", "jsonpath={.items[*].message}")
-			if err != nil || !strings.Contains(messages, "ImageVolumeMountFailed") {
+				"--field-selector", "involvedObject.name=build,reason=Failed",
+				"-o", `jsonpath={range .items[*]}{.metadata.resourceVersion} {.message}{"\n"}{end}`)
+			if err != nil || messages == seen || !strings.Contains(messages, "ImageVolumeMountFailed") {
 				continue
 			}
+
+			seen = messages
 
 			// sync exits non-zero when it reports the error; reporting it is
 			// what clears it.
