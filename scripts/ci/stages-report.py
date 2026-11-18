@@ -6,8 +6,12 @@ Reads each stage's files in the output directory (`<stage>.exit`, `.start`,
 `usage_usec` CPU time), prints a table of results, times, peak memory and CPU
 use, and writes the summary as JSON for the report task: a list with each
 stage's name, result, start and end time, and for a failed stage a short
-failure report. The JSON fits in RESULT_LIMIT bytes, Tekton's default limit
-for a Task result, so the failure reports are cut to share what is left.
+failure report. Tekton hands the result over inside the step's termination
+message, as a JSON string in Tekton's own JSON, and Kubernetes keeps at most
+4096 bytes of that message: a longer one loses the result, and the report
+task is then skipped. So the result is measured as it is encoded there and
+fits in RESULT_LIMIT, which leaves room for Tekton's other entries; the
+failure reports are cut to share what is left.
 
     stages-report.py OUT_DIR SUMMARY_JSON STAGE...
 """
@@ -16,7 +20,7 @@ import json
 import pathlib
 import sys
 
-RESULT_LIMIT = 4096
+RESULT_LIMIT = 3840
 # Lines that locate a Go test failure.
 FAILURE_MARKERS = ("--- FAIL:", "Error Trace:", "FAIL\t", "panic:")
 TAIL_LINES = 20
@@ -81,11 +85,11 @@ def fit(summaries, limit=RESULT_LIMIT):
     reports = {s["name"]: s["report"] for s in failed}
     for s in failed:
         s["report"] = ""
-    left = limit - len(encode(summaries))
+    left = limit - wrapped_length(encode(summaries))
     share = left // len(failed)
     for s in failed:
-        # JSON escapes make a report longer than its text: find the longest
-        # cut whose encoding fits the share.
+        # Two layers of JSON escapes make a report longer than its text:
+        # find the longest cut whose encoding fits the share.
         report = reports[s["name"]]
         low, high = 0, len(report)
         while low < high:
@@ -99,6 +103,13 @@ def fit(summaries, limit=RESULT_LIMIT):
 
 
 def escaped_length(text):
+    """The length of text inside the result once the result is a string in
+    the termination message. Escaping works on each character alone, so the
+    lengths of the parts add up."""
+    return wrapped_length(json.dumps(text)[1:-1])
+
+
+def wrapped_length(text):
     return len(json.dumps(text)) - 2
 
 

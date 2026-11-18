@@ -31,6 +31,16 @@ class StagesReportTest(unittest.TestCase):
         if stats:
             (self.out / f"{name}.stats").write_text(stats)
 
+    @staticmethod
+    def termination_message(raw):
+        """The step's termination message as Tekton writes it, with the
+        result and the step's start time; Kubernetes keeps 4096 bytes."""
+        return json.dumps(
+            [{"key": "output", "value": raw, "type": 1},
+             {"key": "StartedAt", "value": "2026-11-18T07:57:20.123Z", "type": 3}],
+            separators=(",", ":"),
+        ).encode()
+
     def run_report(self, *names):
         summary = self.out / "stages.json"
         self.assertEqual(stages_report.main(["stages-report.py", str(self.out), str(summary), *names]), 0)
@@ -68,15 +78,25 @@ class StagesReportTest(unittest.TestCase):
             self.stage(name, 1, log="\n".join(f"--- FAIL: Test{n} {long_line}" for n in range(30)))
         self.stage("docs", 0)
         raw, summaries = self.run_report("lint", "unit", "e2e", "docs")
-        self.assertLessEqual(len(raw.encode()), stages_report.RESULT_LIMIT)
+        self.assertLessEqual(len(self.termination_message(raw)), 4096)
         for summary in summaries[:3]:
             self.assertTrue(summary["report"].startswith("--- FAIL: Test0"))
             self.assertIn("[...]", summary["report"])
 
+    def test_a_go_test_failure_report_fits_the_termination_message(self):
+        log = "".join(f"ok  \tgithub.com/x/pkg{n}\t1.0s\n" for n in range(60))
+        log += "--- FAIL: TestA (0.00s)\n    a_test.go:6: \"quoted\" failure\nFAIL\tgithub.com/x/pkg\t1.0s\n" * 20
+        for name in ("unit", "generate"):
+            self.stage(name, 2, log=log)
+        self.stage("lint", 0)
+        raw, summaries = self.run_report("lint", "unit", "generate")
+        self.assertLessEqual(len(self.termination_message(raw)), 4096)
+        self.assertIn("--- FAIL: TestA", summaries[1]["report"])
+
     def test_the_failure_reports_use_the_space_left(self):
         self.stage("unit", 1, log="--- FAIL: TestA\n" + "y" * 10000)
         raw, _ = self.run_report("unit")
-        self.assertGreater(len(raw.encode()), stages_report.RESULT_LIMIT - 64)
+        self.assertGreater(len(self.termination_message(raw)), 4096 - 512)
 
 
 if __name__ == "__main__":
