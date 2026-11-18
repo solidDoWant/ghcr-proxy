@@ -2,7 +2,7 @@
 # Cleans dockerd's storage at the end of a master push run on Tekton, before
 # the cache promoter may snapshot it, and fails when it is still nearly full.
 # The builder's garbage collection limits only the build cache: old CI images
-# and untagged e2e images would otherwise fill the volume until master runs
+# and old versions of the preloaded e2e images would otherwise fill the volume until master runs
 # fail and no new snapshot is promoted.
 #
 #   scripts/ci/cleanup.sh <current CI image tag>
@@ -18,6 +18,14 @@ for old in $(docker image ls --format '{{.Repository}}:{{.Tag}}' registrygate-ci
 	if [ "$old" != "$current" ]; then
 		docker image rm "$old" >/dev/null
 	fi
+done
+# Preloaded e2e images the tree no longer names (older versions after a bump).
+keep="$(mktemp)"
+trap 'rm -f "$keep"' EXIT
+./scripts/ci/e2e-images.sh --node >"$keep"
+[ -s "$keep" ] || { echo "cleanup: no e2e images listed, not removing any" >&2; exit 1; }
+for stale in $(docker image ls --format '{{.Repository}}:{{.Tag}}' | /bin/sh "$(dirname "$0")/stale-images.sh" "$keep"); do
+	docker image rm "$stale" >/dev/null
 done
 docker builder prune -f --keep-storage "$build_cache_budget" >/dev/null
 

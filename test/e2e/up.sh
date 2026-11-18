@@ -55,15 +55,7 @@ trap 'rm -rf "$work"' EXIT
 # too, so the node's containerd never pulls from a registry itself. The list is
 # derived from the files that name the images, so Renovate keeps it current.
 log "listing the images the cluster's pods pull"
-cert_manager_version="$(grep -o -m1 -- '--version v[0-9][0-9.]*' docs/admin/upstreams.md | head -n1 | cut -d' ' -f2)"
-{
-	grep -E '^\s*repository:' test/e2e/harbor-values.yaml | awk '{print $2}' >"$work/repos"
-	grep -E '^\s*tag:' test/e2e/harbor-values.yaml | awk '{print $2}' >"$work/tags"
-	paste -d: "$work/repos" "$work/tags"
-	grep -oE '"mirror\.gcr\.io/[^"]+"' test/e2e/env_test.go | tr -d '"'
-	helm template cert-manager oci://quay.io/jetstack/charts/cert-manager --version "$cert_manager_version" --set crds.enabled=true |
-		awk '$1 == "image:" || $1 == "-" && $2 == "image:" {print}' | sed -E 's/.*image: *//; s/"//g'
-} | sort -u >"$work/images"
+./scripts/ci/e2e-images.sh >"$work/images"
 log "pulling $(wc -l <"$work/images") images through the Docker daemon"
 pull_image() { docker pull --quiet "$1" >/dev/null; }
 export -f pull_image
