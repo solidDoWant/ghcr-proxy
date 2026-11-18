@@ -54,6 +54,9 @@ type env struct {
 	// harborCA signs Harbor's own certificate, for clients that reach Harbor over HTTPS at harborTLSURL.
 	harborCA     []byte
 	harborTLSURL string
+	// walkthroughOnly is the track that runs only the admin-guide walkthrough, on a cluster of its own. Its
+	// setup installs Harbor and the fakes and nothing of registrygate: no proxy, no tenants.
+	walkthroughOnly bool
 }
 
 var cluster *env
@@ -92,6 +95,7 @@ func TestMain(m *testing.M) {
 		harborTLSURL:      "https://harbor." + harborNamespace + ".svc",
 		harborExternalURL: "https://" + harborHostName,
 		harborHostName:    harborHostName,
+		walkthroughOnly:   os.Getenv("E2E_TRACK") == "walkthrough",
 	}
 
 	if err := cluster.setup(context.Background()); err != nil {
@@ -141,7 +145,10 @@ func (e *env) secret(ctx context.Context, namespace, name, secretType string, da
 
 func (e *env) setup(ctx context.Context) error {
 	e.upstreams = newUpstreams()
-	e.tenants = newTenants()
+
+	if !e.walkthroughOnly {
+		e.tenants = newTenants()
+	}
 
 	var err error
 
@@ -181,8 +188,11 @@ func (e *env) setup(ctx context.Context) error {
 		}
 	}
 
-	if err := e.installProxy(ctx); err != nil {
-		return err
+	// The walkthrough installs the proxy itself, by following the admin guide.
+	if !e.walkthroughOnly {
+		if err := e.installProxy(ctx); err != nil {
+			return err
+		}
 	}
 
 	if err := e.installHarbor(ctx); err != nil {
@@ -193,6 +203,10 @@ func (e *env) setup(ctx context.Context) error {
 		return err
 	}
 
+	if e.walkthroughOnly {
+		return nil
+	}
+
 	if err := e.applyProxyObjects(ctx); err != nil {
 		return err
 	}
@@ -201,7 +215,11 @@ func (e *env) setup(ctx context.Context) error {
 }
 
 func (e *env) namespaceNames() []string {
-	names := []string{proxyNamespace, harborNamespace}
+	names := []string{harborNamespace}
+	if !e.walkthroughOnly {
+		names = append(names, proxyNamespace)
+	}
+
 	for _, fake := range e.upstreams {
 		names = append(names, fake.namespace)
 	}

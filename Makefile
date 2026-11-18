@@ -67,8 +67,16 @@ test-integration: ## Run the integration-tagged tests (envtest from the dev shel
 	./scripts/test-tagged.sh integration
 
 .PHONY: test-e2e
-test-e2e: ## Run the e2e-tagged tests against the kind cluster E2E_CLUSTER (default registrygate-e2e, ImageVolume on) with the fake GHCR and the proxy's chart. Passes with "no tests yet" until there are any.
+test-e2e: ## Run the e2e-tagged tests with the fake GHCR and the proxy's chart, as two tracks at the same time: the walkthrough on its own kind cluster E2E_CLUSTER-walkthrough, the rest on E2E_CLUSTER (default registrygate-e2e, ImageVolume on). Passes with "no tests yet" until there are any.
 	E2E_CLUSTER="$(E2E_CLUSTER)" ./scripts/test-tagged.sh e2e
+
+.PHONY: test-e2e-main
+test-e2e-main: ## Run the e2e tests except the admin-guide walkthrough, on the kind cluster E2E_CLUSTER.
+	E2E_TRACK=main E2E_CLUSTER="$(E2E_CLUSTER)" ./scripts/test-tagged.sh e2e
+
+.PHONY: test-e2e-walkthrough
+test-e2e-walkthrough: ## Run only the admin-guide walkthrough, on the kind cluster E2E_CLUSTER (use a name of its own to run next to test-e2e-main).
+	E2E_TRACK=walkthrough E2E_CLUSTER="$(E2E_CLUSTER)" ./scripts/test-tagged.sh e2e
 
 .PHONY: test-live
 test-live: ## Run the live-tagged tests against the real ghcr.io with the PAT in the file GHCR_LIVE_PAT_FILE and the owner in GHCR_LIVE_OWNER; they skip without them. Operator only, never in CI. Passes with "no tests yet" until there are any.

@@ -29,6 +29,11 @@ if ! kind get clusters 2>/dev/null | grep -qx "$cluster"; then
 	kind create cluster --name "$cluster" --image "$node_image" --config test/e2e/kind-config.yaml --wait 120s >&2
 fi
 
+# Two tracks may run at the same time and share the build tree and the image
+# tags: build one at a time. The second finds everything cached.
+mkdir -p build/e2e
+exec 9>build/e2e/images.lock
+flock 9
 log "building the images for linux/${arch}"
 mkdir -p "build/images/${arch}"
 CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -ldflags="-s -w -X main.version=${tag}" -o "build/images/${arch}/registrygate" ./cmd/registrygate
@@ -37,6 +42,8 @@ docker buildx build --platform "linux/${arch}" --file Dockerfile --tag "$proxy_i
 docker buildx build --platform "linux/${arch}" --file Dockerfile.credential-helper --tag "$helper_image" --load . >&2
 
 make build-fakeregistry-image >&2
+
+flock -u 9
 
 # Every other image a pod in the cluster pulls comes through the Docker daemon
 # too, so the node's containerd never pulls from a registry itself. The list is

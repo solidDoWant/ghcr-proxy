@@ -19,18 +19,18 @@ class SelectTest(unittest.TestCase):
         self.assertEqual(changes.select(event, files), expected)
 
     def test_a_push_runs_every_stage_but_the_scoreboard_whatever_changed(self):
-        self.check([], GO_STAGES + ["e2e", "docs"], event="push")
-        self.check(["README.md"], GO_STAGES + ["e2e", "docs"], event="push")
+        self.check([], GO_STAGES + ["e2e", "e2e-walkthrough", "docs"], event="push")
+        self.check(["README.md"], GO_STAGES + ["e2e", "e2e-walkthrough", "docs"], event="push")
 
     def test_a_go_source_change_runs_the_go_stages_and_e2e(self):
-        self.check(["internal/registry/forward.go"], GO_STAGES + ["e2e"])
+        self.check(["internal/registry/forward.go"], GO_STAGES + ["e2e", "e2e-walkthrough"])
 
     def test_a_go_test_change_skips_e2e(self):
         self.check(["internal/registry/forward_test.go"], GO_STAGES)
         self.check(["root_test.go"], GO_STAGES)
 
     def test_an_e2e_harness_change_runs_e2e_even_when_it_is_a_test_file(self):
-        self.check(["test/e2e/docker_test.go"], GO_STAGES + ["e2e"])
+        self.check(["test/e2e/docker_test.go"], GO_STAGES + ["e2e", "e2e-walkthrough"])
 
     def test_a_markdown_change_runs_only_docs(self):
         self.check(["README.md"], ["docs"])
@@ -38,7 +38,7 @@ class SelectTest(unittest.TestCase):
 
     def test_markdown_outside_the_root_and_docs_counts_as_code(self):
         # `*.md` matches only at the root.
-        self.check(["deploy/charts/registrygate/README.md"], GO_STAGES + ["e2e", "docs"])
+        self.check(["deploy/charts/registrygate/README.md"], GO_STAGES + ["e2e", "e2e-walkthrough", "docs"])
 
     def test_a_playbook_change_runs_nothing(self):
         self.check([".claude/agents/issue-worker.md"], ["docs"])
@@ -49,19 +49,19 @@ class SelectTest(unittest.TestCase):
         self.check(["docs/images/diagram.svg"], [])
 
     def test_a_docs_script_change_runs_docs_and_the_go_stages(self):
-        self.check(["scripts/docs/style_report.sh"], GO_STAGES + ["e2e", "docs"])
+        self.check(["scripts/docs/style_report.sh"], GO_STAGES + ["e2e", "e2e-walkthrough", "docs"])
 
     def test_a_checklist_change_alone_runs_the_scoreboard_and_docs(self):
         self.check(["docs/acceptance/phase-3.md"], ["docs", "scoreboard"])
 
     def test_a_checklist_change_with_code_skips_the_scoreboard(self):
-        self.check(["docs/acceptance/phase-3.md", "go.mod"], GO_STAGES + ["e2e", "docs"])
+        self.check(["docs/acceptance/phase-3.md", "go.mod"], GO_STAGES + ["e2e", "e2e-walkthrough", "docs"])
 
     def test_one_code_file_among_docs_runs_the_go_stages(self):
-        self.check(["docs/user/policy.md", "Makefile"], GO_STAGES + ["e2e", "docs"])
+        self.check(["docs/user/policy.md", "Makefile"], GO_STAGES + ["e2e", "e2e-walkthrough", "docs"])
 
     def test_dot_files_count_as_code(self):
-        self.check([".golangci.yml"], GO_STAGES + ["e2e"])
+        self.check([".golangci.yml"], GO_STAGES + ["e2e", "e2e-walkthrough"])
 
     def test_no_changed_file_runs_nothing(self):
         self.check([], [])

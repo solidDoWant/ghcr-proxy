@@ -42,6 +42,44 @@ e2e) minutes=50 ;;
 esac
 echo "test-$tag: ${packages[*]}"
 
+walkthrough_test='^TestAdminDocsGetToAPushAndAMirroredPull$'
+go_filter=()
+track="${E2E_TRACK:-all}"
+if [[ "$tag" == e2e ]]; then
+	case "$track" in
+	main) go_filter=(-skip "$walkthrough_test") ;;
+	walkthrough) go_filter=(-run "$walkthrough_test") ;;
+	all) ;;
+	*)
+		echo "test-e2e: E2E_TRACK must be main, walkthrough or all, not $track" >&2
+		exit 2
+		;;
+	esac
+fi
+
+# Both tracks at the same time, each a run of this script on its own cluster.
+if [[ "$tag" == e2e && "$track" == all ]] && docker info >/dev/null 2>&1; then
+	base="${E2E_CLUSTER:-registrygate-e2e}"
+	mkdir -p build/e2e
+	main_json="${GO_TEST_JSON:-}"
+	walkthrough_json=""
+	if [[ -n "$main_json" ]]; then walkthrough_json="${main_json%.json}-walkthrough.json"; fi
+	E2E_TRACK=main E2E_CLUSTER="$base" GO_TEST_JSON="$main_json" "$0" e2e >build/e2e/track-main.log 2>&1 &
+	main_pid=$!
+	E2E_TRACK=walkthrough E2E_CLUSTER="$base-walkthrough" GO_TEST_JSON="$walkthrough_json" "$0" e2e >build/e2e/track-walkthrough.log 2>&1 &
+	walkthrough_pid=$!
+	status=0
+	wait "$main_pid" || status=$?
+	echo "==================== e2e track main (exit $status) ===================="
+	cat build/e2e/track-main.log
+	walkthrough_status=0
+	wait "$walkthrough_pid" || walkthrough_status=$?
+	echo "==================== e2e track walkthrough (exit $walkthrough_status) ===================="
+	cat build/e2e/track-walkthrough.log
+	if ((status == 0)); then status=$walkthrough_status; fi
+	exit "$status"
+fi
+
 if [[ "$tag" == e2e ]]; then
 	if ! docker info >/dev/null 2>&1; then
 		echo "test-e2e: Docker is not available; the e2e tests skip" >&2
@@ -69,5 +107,5 @@ if [[ "$tag" == live && -z "${GHCR_LIVE_PAT_FILE:-}" ]]; then
 fi
 
 status=0
-timeout "$((minutes + 5))m" ./scripts/ci/go-test-json.sh -race -count=1 -tags "$tag" -timeout "${minutes}m" "${packages[@]}" || status=$?
+timeout "$((minutes + 5))m" ./scripts/ci/go-test-json.sh -race -count=1 -tags "$tag" -timeout "${minutes}m" "${go_filter[@]}" "${packages[@]}" || status=$?
 exit "$status"
