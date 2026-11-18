@@ -997,6 +997,29 @@ class SchedulerTest(unittest.TestCase):
         return {"id": cid, "url": f"https://github.com/o/r/issues/51#issuecomment-{cid}",
                 "updated_at": updated_at, "line": f"/pm do thing {cid}"}
 
+    def flake_reasons(self):
+        return [r for r in self.sched.state["planner"].get("pending", []) if r.startswith("flake:")]
+
+    def test_fix_at_a_later_head_is_not_a_flake(self):
+        self.sched.state["ci_reruns"]["10"] = {"sha": "a" * 40, "jobs": ["stage: e2e"], "at": "x"}
+        self.gh.snap = snap([issue(2, status="status:in-review")], [])
+        self.sched.planner_triggers(self.gh.snap, None)
+        self.assertEqual(self.flake_reasons(), [])
+        self.assertNotIn("10", self.sched.state["ci_reruns"])
+
+    def test_pass_at_the_re_run_head_is_a_flake_once(self):
+        self.sched.state["ci_reruns"]["10"] = {"sha": "a" * 40, "jobs": ["stage: e2e"], "at": "x"}
+        self.gh.snap = snap([issue(2, status="status:in-review")], [pr(10, 2, head="a" * 40, check="success")])
+        self.sched.planner_triggers(self.gh.snap, None)
+        self.sched.planner_triggers(self.gh.snap, None)
+        self.assertEqual(len(self.flake_reasons()), 1)
+
+    def test_pass_at_a_later_head_is_not_a_flake(self):
+        self.sched.state["ci_reruns"]["10"] = {"sha": "a" * 40, "jobs": ["stage: e2e"], "at": "x"}
+        self.gh.snap = snap([issue(2, status="status:in-review")], [pr(10, 2, head="b" * 40, check="success")])
+        self.sched.planner_triggers(self.gh.snap, None)
+        self.assertEqual(self.flake_reasons(), [])
+
     def test_pm_comment_while_planner_idle_becomes_a_reason(self):
         self.disable_planner()
         self.gh.comments = [self.pm_comment(7, "2099-01-01T00:00:00Z")]

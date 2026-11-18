@@ -1684,9 +1684,13 @@ class Scheduler:
         # Flakes: a re-run that went green on the same head.
         for pr_s, rerun in list(self.state["ci_reruns"].items()):
             pr = snap.prs.get(int(pr_s))
+            if pr is None:
+                # Merged or closed without a pass at the re-run head: not a flake.
+                self.state["ci_reruns"].pop(pr_s)
+                continue
             if rerun.get("reported"):
                 continue
-            if pr is None or (pr.head_sha == rerun["sha"] and pr.check == "success"):
+            if pr.head_sha == rerun["sha"] and pr.check == "success":
                 self.planner_reason(f"flake: PR #{pr_s} {', '.join(rerun['jobs'])} failed at {rerun['sha'][:10]} "
                                     "then passed on re-run: file or extend a flake bug")
                 rerun["reported"] = True
@@ -1793,7 +1797,7 @@ class Scheduler:
                 if gone:
                     self.state[table].pop(key, None)
         for pr_s in list(self.state["ci_reruns"]):
-            if int(pr_s) not in snap.prs and self.state["ci_reruns"][pr_s].get("reported"):
+            if int(pr_s) not in snap.prs:
                 self.state["ci_reruns"].pop(pr_s)
 
     def classify_failures(self, snap: Snapshot) -> None:
