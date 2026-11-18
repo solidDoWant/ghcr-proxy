@@ -342,7 +342,7 @@ func (e *env) setupCIPod(ctx context.Context, tenant *tenant) error {
 	}
 
 	if _, err := e.kubectl(ctx, "", "-n", tenant.namespace, "wait", "--for=condition=Ready", "pod/build", "--timeout=300s"); err != nil {
-		return err
+		return fmt.Errorf("%w\n%s", err, e.podDiagnostics(ctx, tenant.namespace, "pod/build"))
 	}
 
 	deadline := time.Now().Add(2 * time.Minute)
@@ -359,6 +359,33 @@ func (e *env) setupCIPod(ctx context.Context, tenant *tenant) error {
 
 		time.Sleep(2 * time.Second)
 	}
+}
+
+// podDiagnostics collects what is needed to tell why a pod did not become
+// ready from the run log alone: the pod's description (status, conditions and
+// events), the namespace events, the node's description and the container logs.
+// It runs on a fresh context so it still works after the caller's deadline.
+func (e *env) podDiagnostics(ctx context.Context, namespace, pod string) string {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
+	defer cancel()
+
+	var out strings.Builder
+
+	for _, args := range [][]string{
+		{"-n", namespace, "describe", pod},
+		{"-n", namespace, "get", "events", "--sort-by=.lastTimestamp"},
+		{"describe", "nodes"},
+		{"-n", namespace, "logs", pod, "--all-containers", "--tail=50", "--prefix"},
+	} {
+		result, err := e.kubectl(ctx, "", args...)
+		if err != nil {
+			result = err.Error()
+		}
+
+		fmt.Fprintf(&out, "--- kubectl %s\n%s\n", strings.Join(args, " "), result)
+	}
+
+	return out.String()
 }
 
 // docker runs a shell script in the Docker CLI container of a namespace's CI pod.
