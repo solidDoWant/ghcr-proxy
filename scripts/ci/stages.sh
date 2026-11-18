@@ -9,8 +9,9 @@
 # A pull request runs the stages its changes need (scripts/ci/changes.py); a
 # push runs them all and then cleans the Docker storage that the cache
 # promoter keeps. The script writes $WS/ci/stages.json, each stage's name,
-# result, time and failure report (scripts/ci/stages-report.py), and exits 0
-# also when a stage failed: the report task fails the run.
+# result, time and failure report (scripts/ci/stages-report.py), also to the
+# file STAGES_RESULT_FILE names (the Task result the report task reads), and
+# exits 0 also when a stage failed: the report task fails the run.
 set -eu
 
 event="${1:?usage: stages.sh pull_request|push}"
@@ -43,6 +44,7 @@ fi
 if [ -z "$stages" ]; then
 	echo "no stage needs to run for these changes"
 	echo '[]' >"$ci/stages.json"
+	if [ -n "${STAGES_RESULT_FILE:-}" ]; then cp "$ci/stages.json" "$STAGES_RESULT_FILE"; fi
 	exit 0
 fi
 echo "stages: $stages"
@@ -66,21 +68,6 @@ fi
 # a successful master push run.
 docker volume create gomod >/dev/null
 docker volume create gobuild >/dev/null
-
-# kind's node runs systemd, which needs cgroup v2 nesting in dockerd's cgroup
-# namespace: no process left in the root cgroup, and every controller
-# delegated to the children. The upstream dind entrypoint does this, but the
-# docker Task's sidecar starts dockerd directly.
-case " $stages " in
-*" e2e "*)
-	docker run --rm --privileged --cgroupns=host --entrypoint /bin/sh "$image" -c '
-		cd /sys/fs/cgroup
-		mkdir -p init
-		for pid in $(cat cgroup.procs); do echo "$pid" >init/cgroup.procs 2>/dev/null || true; done
-		for controller in $(cat cgroup.controllers); do echo "+$controller" >cgroup.subtree_control || true; done
-	' || echo "could not delegate the cgroup controllers; kind may not start" >&2
-	;;
-esac
 
 # check-generate rewrites the generated files in place while the other stages
 # build them, so it gets its own copy of the tree, mounted at the same path so
@@ -205,4 +192,5 @@ fi
 
 # shellcheck disable=SC2086 # a list of stage names
 in_image ./scripts/ci/stages-report.py "$out" "$ci/stages.json" $stages
+if [ -n "${STAGES_RESULT_FILE:-}" ]; then cp "$ci/stages.json" "$STAGES_RESULT_FILE"; fi
 echo "all stages done after $(elapsed)s"
