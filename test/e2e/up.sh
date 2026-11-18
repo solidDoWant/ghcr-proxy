@@ -67,7 +67,8 @@ cert_manager_version="$(grep -o -m1 -- '--version v[0-9][0-9.]*' docs/admin/upst
 log "pulling $(wc -l <"$work/images") images through the Docker daemon"
 pull_image() { docker pull --quiet "$1" >/dev/null; }
 export -f pull_image
-xargs -P 8 -I{} bash -c 'pull_image {}' <"$work/images"
+# shellcheck disable=SC2016 # $1 must expand in the child shell, not here
+xargs -P 8 -I{} bash -c 'pull_image "$1"' _ {} <"$work/images"
 
 log "loading the images into kind"
 kind load docker-image "$proxy_image" "$helper_image" "$fake_image" --name "$cluster" >&2
@@ -83,7 +84,8 @@ import_image() {
 }
 export -f import_image
 export node
-xargs -P 4 -I{} bash -c 'import_image {}' <"$work/images" >&2
+# shellcheck disable=SC2016 # $1 must expand in the child shell, not here
+xargs -P 4 -I{} bash -c 'import_image "$1"' _ {} <"$work/images" >&2
 
 cat >"$env_file" <<ENV
 E2E_CLUSTER=${cluster}
