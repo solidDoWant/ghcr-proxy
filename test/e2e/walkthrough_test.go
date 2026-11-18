@@ -73,7 +73,12 @@ func (w *walkthrough) run(ctx context.Context, name, script string) {
 
 	cmd.Stdout, cmd.Stderr = &out, &out
 
-	if err := cmd.Run(); err != nil {
+	stop := cluster.clearImageVolumeMountErrors(ctx, walkthroughTenant)
+	err := cmd.Run()
+
+	stop()
+
+	if err != nil {
 		w.t.Fatalf("%s:\n%s\noutput:\n%s\nerror: %v\ndiagnostics:\n%s", name, script, out.String(), err, cluster.podDiagnostics(ctx, walkthroughTenant, "pod/build"))
 	}
 }

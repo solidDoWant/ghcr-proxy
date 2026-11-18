@@ -343,28 +343,13 @@ func (e *env) setupCIPod(ctx context.Context, tenant *tenant) error {
 		return err
 	}
 
-	if _, err := e.kubectl(ctx, "", "-n", tenant.namespace, "wait", "--for=condition=Ready", "pod/build", "--timeout=300s"); err != nil {
-		diagnostics := e.podDiagnostics(ctx, tenant.namespace, "pod/build")
-		// Two kind clusters in one dind sometimes fail an image volume mount
-		// with an overlay I/O error on the first try; a new pod mounts the same
-		// image cleanly. Retry once for that error only, and print what failed.
-		if !strings.Contains(diagnostics, "ImageVolumeMountFailed") {
-			return fmt.Errorf("%w\n%s", err, diagnostics)
-		}
+	stop := e.clearImageVolumeMountErrors(ctx, tenant.namespace)
+	_, err = e.kubectl(ctx, "", "-n", tenant.namespace, "wait", "--for=condition=Ready", "pod/build", "--timeout=300s")
 
-		fmt.Fprintf(os.Stderr, "e2e: retrying the CI pod of %s after an image volume mount failure:\n%s\n", tenant.namespace, diagnostics)
+	stop()
 
-		if _, err := e.kubectl(ctx, "", "-n", tenant.namespace, "delete", "pod/build", "--wait", "--timeout=120s"); err != nil {
-			return err
-		}
-
-		if err := e.apply(ctx, manifest); err != nil {
-			return err
-		}
-
-		if _, err := e.kubectl(ctx, "", "-n", tenant.namespace, "wait", "--for=condition=Ready", "pod/build", "--timeout=300s"); err != nil {
-			return fmt.Errorf("%w\n%s", err, e.podDiagnostics(ctx, tenant.namespace, "pod/build"))
-		}
+	if err != nil {
+		return fmt.Errorf("%w\n%s", err, e.podDiagnostics(ctx, tenant.namespace, "pod/build"))
 	}
 
 	deadline := time.Now().Add(2 * time.Minute)
@@ -380,6 +365,62 @@ func (e *env) setupCIPod(ctx context.Context, tenant *tenant) error {
 		}
 
 		time.Sleep(2 * time.Second)
+	}
+}
+
+// clearImageVolumeMountErrors works around a kernel rule that otherwise keeps
+// a CI pod from ever starting. The node's containerd mounts an image volume as
+// a volatile overlay, and the kernel refuses every volatile overlay mount with
+// EIO ("Cannot mount volatile when upperdir has an unseen error") once the
+// file system under it has recorded a write-back error that no one has seen
+// yet. Two kind nodes share that file system in CI, and a single error blocks
+// every later mount until a syncfs on it marks the error as seen. While the
+// pod in namespace waits to start, this watches its events and, when the
+// kubelet reports ImageVolumeMountFailed, runs syncfs on the node's
+// containerd directory and prints the kernel's log, so that the kubelet's
+// next retry mounts the volume. The returned function stops the watch.
+func (e *env) clearImageVolumeMountErrors(ctx context.Context, namespace string) func() {
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		node := strings.TrimPrefix(e.kubeContext, "kind-") + "-control-plane"
+		ticker := time.NewTicker(10 * time.Second)
+
+		defer ticker.Stop()
+
+		// Events stay for an hour: act only when the kubelet reports a new failure.
+		var seen string
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+
+			messages, err := e.kubectl(ctx, "", "-n", namespace, "get", "events",
+				"--field-selector", "involvedObject.name=build,reason=Failed",
+				"-o", `jsonpath={range .items[*]}{.metadata.resourceVersion} {.message}{"\n"}{end}`)
+			if err != nil || messages == seen || !strings.Contains(messages, "ImageVolumeMountFailed") {
+				continue
+			}
+
+			seen = messages
+
+			// sync exits non-zero when it reports the error; reporting it is
+			// what clears it.
+			output, _ := exec.CommandContext(ctx, "docker", "exec", node, "sh", "-c",
+				"sync -f /var/lib/containerd 2>&1; dmesg 2>&1 | grep -v 'Cannot mount volatile' | tail -n 40").CombinedOutput()
+			fmt.Fprintf(os.Stderr, "e2e: an image volume mount failed in %s; ran syncfs on the node's containerd directory. Kernel log:\n%s\n", namespace, output)
+		}
+	}()
+
+	return func() {
+		cancel()
+		<-done
 	}
 }
 
@@ -411,7 +452,7 @@ func (e *env) podDiagnostics(ctx context.Context, namespace, pod string) string 
 	// kernel log, and the Docker host's disk, tell why.
 	node := strings.TrimPrefix(e.kubeContext, "kind-") + "-control-plane"
 	for _, args := range [][]string{
-		{"exec", node, "sh", "-c", "df -h / /var/lib/containerd /run 2>&1; dmesg 2>&1 | tail -n 40"},
+		{"exec", node, "sh", "-c", "df -h / /var/lib/containerd /run 2>&1; dmesg 2>&1 | grep -v 'Cannot mount volatile' | tail -n 40"},
 		{"system", "df"},
 	} {
 		result, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
