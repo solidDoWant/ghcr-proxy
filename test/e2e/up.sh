@@ -19,6 +19,9 @@ arch="$(go env GOARCH)"
 env_file="build/e2e/${cluster}.env"
 mkdir -p build/e2e
 
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+
 log() { echo "e2e-up: $*" >&2; }
 
 if ! kind get clusters 2>/dev/null | grep -qx "$cluster"; then
@@ -35,8 +38,39 @@ docker buildx build --platform "linux/${arch}" --file Dockerfile.credential-help
 
 make build-fakeregistry-image >&2
 
+# Every other image a pod in the cluster pulls comes through the Docker daemon
+# too, so the node's containerd never pulls from a registry itself. The list is
+# derived from the files that name the images, so Renovate keeps it current.
+log "listing the images the cluster's pods pull"
+cert_manager_version="$(grep -o -m1 -- '--version v[0-9][0-9.]*' docs/admin/upstreams.md | head -n1 | cut -d' ' -f2)"
+{
+	grep -E '^\s*repository:' test/e2e/harbor-values.yaml | awk '{print $2}' >"$work/repos"
+	grep -E '^\s*tag:' test/e2e/harbor-values.yaml | awk '{print $2}' >"$work/tags"
+	paste -d: "$work/repos" "$work/tags"
+	grep -oE '"mirror\.gcr\.io/[^"]+"' test/e2e/env_test.go | tr -d '"'
+	helm template cert-manager oci://quay.io/jetstack/charts/cert-manager --version "$cert_manager_version" --set crds.enabled=true |
+		awk '$1 == "image:" || $1 == "-" && $2 == "image:" {print}' | sed -E 's/.*image: *//; s/"//g'
+} | sort -u >"$work/images"
+log "pulling $(wc -l <"$work/images") images through the Docker daemon"
+pull_image() { docker pull --quiet "$1" >/dev/null; }
+export -f pull_image
+xargs -P 8 -I{} bash -c 'pull_image {}' <"$work/images"
+
 log "loading the images into kind"
 kind load docker-image "$proxy_image" "$helper_image" "$fake_image" --name "$cluster" >&2
+# kind load fails on multi-platform images from the Docker daemon's containerd
+# store (it imports every platform, but the daemon holds only one). Import each
+# image with containerd's own import instead, named as a pod's pinned reference
+# names it: the repository, then the digest.
+node="${cluster}-control-plane"
+import_image() {
+	local ref="$1"
+	local repo="${ref%%[:@]*}"
+	docker save "$ref" | docker exec -i --privileged "$node" ctr --namespace=k8s.io images import --digests --base-name "$repo" --snapshotter=overlayfs - >/dev/null
+}
+export -f import_image
+export node
+xargs -P 4 -I{} bash -c 'import_image {}' <"$work/images" >&2
 
 cat >"$env_file" <<ENV
 E2E_CLUSTER=${cluster}
