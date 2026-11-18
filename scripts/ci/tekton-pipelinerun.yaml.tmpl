@@ -1,7 +1,11 @@
 # The template of the CI PipelineRuns in .tekton/. scripts/ci/tekton-generate.sh
-# (`make generate`) writes one file for each event from it: @NAME@, @EVENT@,
-# @CEL@ and @CANCEL@ are replaced, and the lines between "@pull_request {" and
+# (`make generate`) writes one file for each event from it: @NAME@, @EVENT@
+# and @CEL@ are replaced, and the lines between "@pull_request {" and
 # "@pull_request }" are kept only for pull requests.
+#
+# There is no cancel-in-progress annotation: Pipelines-as-Code rejects it on a
+# Repository with a concurrency limit, so a superseded pull request run runs
+# to the end.
 #
 # No step that runs code from the repository gets a token that can write to
 # GitHub: only test-guard's labels step and report read the Pipelines-as-Code
@@ -18,7 +22,6 @@ metadata:
   annotations:
     pipelinesascode.tekton.dev/on-cel-expression: >-
       @CEL@
-    pipelinesascode.tekton.dev/cancel-in-progress: "@CANCEL@"
     pipelinesascode.tekton.dev/max-keep-runs: "10"
 spec:
   params:
