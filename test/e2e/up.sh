@@ -15,7 +15,6 @@ tag="e2e"
 proxy_image="ghcr.io/soliddowant/registrygate:${tag}"
 helper_image="ghcr.io/soliddowant/registrygate-credential-helper:${tag}"
 fake_image="ghcr.io/soliddowant/registrygate-fakeregistry:dev"
-arch="$(go env GOARCH)"
 env_file="build/e2e/${cluster}.env"
 mkdir -p build/e2e
 
@@ -44,28 +43,15 @@ stop_cluster() {
 }
 trap 'stop_cluster; rm -rf "$work"' EXIT
 
-# Two tracks may run at the same time and share the build tree and the image
-# tags: build one at a time. The second finds everything cached.
-mkdir -p build/e2e
-# mkdir is atomic and flock is not in every image.
-lock=build/e2e/images.lockdir
-until mkdir "$lock" 2>/dev/null; do
-	if [[ -n "$(find "$lock" -maxdepth 0 -mmin +15 2>/dev/null)" ]]; then rmdir "$lock" 2>/dev/null || true; fi
-	sleep 2
-done
-trap 'stop_cluster; rm -rf "$work"; rmdir "$lock" 2>/dev/null || true' EXIT
-log "building the images for linux/${arch}"
-mkdir -p "build/images/${arch}"
-CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -ldflags="-s -w -X main.version=${tag}" -o "build/images/${arch}/registrygate" ./cmd/registrygate
-CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -ldflags="-s -w -X main.version=${tag}" -o "build/images/${arch}/docker-credential-registrygate" ./cmd/docker-credential-registrygate
-docker buildx build --platform "linux/${arch}" --file Dockerfile --tag "$proxy_image" --load . >&2
-docker buildx build --platform "linux/${arch}" --file Dockerfile.credential-helper --tag "$helper_image" --load . >&2
-
-make build-fakeregistry-image >&2
-
-rmdir "$lock" 2>/dev/null || true
-trap 'stop_cluster; rm -rf "$work"' EXIT
-log "images built"
+# CI builds the images once for both tracks and sets E2E_IMAGES_BUILT=1; a
+# developer machine builds them here, one build at a time across the tracks.
+if [[ "${E2E_IMAGES_BUILT:-}" == 1 ]]; then
+	log "using the images already built"
+else
+	log "building the images"
+	./test/e2e/build-images.sh
+	log "images built"
+fi
 
 # Every other image a pod in the cluster pulls comes through the Docker daemon
 # too, so the node's containerd never pulls from a registry itself. The list is
