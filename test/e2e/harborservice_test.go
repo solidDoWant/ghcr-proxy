@@ -26,7 +26,7 @@ func TestPushToHarborUsesARobotThePodNeverSees(t *testing.T) {
 
 	requireEventually(t, "Harbor lists the pushed image in "+project, func() bool {
 		return slices.Contains(harborRepositories(t, project), "app-"+cluster.runID)
-	}, 2*time.Minute, 2*time.Second, "Harbor must hold the pushed image in %s", project)
+	}, 2*time.Minute, 500*time.Millisecond, "Harbor must hold the pushed image in %s", project)
 
 	// The robot is in the admin namespace and nowhere in the namespace of the pod.
 	secrets, err := cluster.kubectl(t.Context(), "", "-n", tenant.namespace, "get", "secrets", "-o", "go-template={{range .items}}{{range $key, $value := .data}}{{$value}}{{\"\\n\"}}{{end}}{{end}}")
@@ -85,5 +85,5 @@ func TestDockerHubNamesPullAndBuildThroughTheMirror(t *testing.T) {
 
 	requireEventually(t, "Harbor lists library/alpine in "+project, func() bool {
 		return slices.Contains(harborRepositories(t, project), "library/alpine")
-	}, 2*time.Minute, 2*time.Second, "Harbor must list library/alpine in %s", project)
+	}, 2*time.Minute, 500*time.Millisecond, "Harbor must list library/alpine in %s", project)
 }

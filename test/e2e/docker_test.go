@@ -131,7 +131,7 @@ func TestEachNamespacePullsThroughItsOwnHarborProject(t *testing.T) {
 
 		requireEventually(t, "Harbor lists the base image in "+project, func() bool {
 			return slices.Contains(harborRepositories(t, project), mirroredRepo("base"))
-		}, 2*time.Minute, 2*time.Second, "Harbor must list the image in %s", project)
+		}, 2*time.Minute, 500*time.Millisecond, "Harbor must list the image in %s", project)
 	}
 
 	// The pulls were of upstream A: the projects for upstream B stay empty.
@@ -161,7 +161,7 @@ docker build --no-cache -t local/both:1 .`, mirroredRepo("build"))
 
 		requireEventually(t, "Harbor lists the build base image in "+project, func() bool {
 			return slices.Contains(harborRepositories(t, project), mirroredRepo("build"))
-		}, 2*time.Minute, 2*time.Second, "the base image from upstream %s must come through %s", fake.key, project)
+		}, 2*time.Minute, 500*time.Millisecond, "the base image from upstream %s must come through %s", fake.key, project)
 	}
 }
 

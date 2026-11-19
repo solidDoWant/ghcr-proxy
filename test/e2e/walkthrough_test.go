@@ -295,5 +295,5 @@ func TestAdminDocsGetToAPushAndAMirroredPull(t *testing.T) {
 	// Harbor lists a repository a little after the pull ends.
 	assertEventually(t, "Harbor lists the mirrored repository in the walkthrough project", func() bool {
 		return slices.Contains(harborRepositories(t, walkthroughProject), "soliddowant/public")
-	}, time.Minute, 2*time.Second, "Harbor caches the image the CI pod pulled")
+	}, time.Minute, 500*time.Millisecond, "Harbor caches the image the CI pod pulled")
 }

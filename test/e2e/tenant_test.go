@@ -364,7 +364,7 @@ func (e *env) setupCIPod(ctx context.Context, tenant *tenant) error {
 			return fmt.Errorf("the Docker daemon in the CI pod of %s did not start: %w", tenant.namespace, err)
 		}
 
-		time.Sleep(2 * time.Second)
+		time.Sleep(500 * time.Millisecond)
 	}
 }
 

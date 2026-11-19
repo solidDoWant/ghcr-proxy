@@ -180,7 +180,7 @@ spec:
 			break
 		}
 
-		time.Sleep(time.Second)
+		time.Sleep(500 * time.Millisecond)
 	}
 
 	if len(u.fakeCA) == 0 {
