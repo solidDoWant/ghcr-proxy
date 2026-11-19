@@ -123,7 +123,8 @@ start_stage() {
 			-e REGISTRYGATE_HOSTS="${REGISTRYGATE_HOSTS:-}" -e REGISTRYGATE_TOKEN_FILE="$ci/token" \
 			-e CI_BIN="$ci/bin" -e CI_CA="$ci/ca-bundle.crt" -e CI_STATS="$out/$stage.stats" \
 			-e E2E_CLUSTER="registrygate-ci${stage#e2e}" \
-			-e E2E_IMAGES_BUILT="${E2E_IMAGES_BUILT:-}" -e E2E_DISCARD_CLUSTER=1 \
+			-e E2E_IMAGES_EXIT_FILE="${E2E_IMAGES_EXIT_FILE:-}" -e E2E_IMAGES_LOG="${E2E_IMAGES_LOG:-}" \
+			-e E2E_DISCARD_CLUSTER=1 \
 			-e STAGE_COMMAND="$(command_of "$stage")" \
 			"$image" bash -c '
 				source /etc/devshell.sh
@@ -144,9 +145,11 @@ start_stage() {
 	) &
 }
 
-# The e2e stages need the three e2e images. Build them once, on the shared
-# dockerd, while the other stages run, and start the e2e stages when the build
-# ends. The build's own log and time stay out of the stage table.
+# The e2e stages need the three e2e images, but only once their kind clusters
+# exist (test/e2e/up.sh). Build the images once, on the shared dockerd, at the
+# same time as the e2e stages create their clusters; up.sh waits for the build's
+# exit file before it loads the images, and fails with the build's log when the
+# build failed. The build's own log and time stay out of the stage table.
 e2e_stages=""
 other_stages=""
 for stage in $stages; do
@@ -159,26 +162,12 @@ for stage in $other_stages; do
 	start_stage "$stage"
 done
 if [ -n "$e2e_stages" ]; then
-	(
-		start_stage e2e-images
-		while [ ! -f "$out/e2e-images.exit" ]; do sleep 1; done
-		if [ "$(cat "$out/e2e-images.exit")" = 0 ]; then
-			echo "e2e images built in $(($(cat "$out/e2e-images.end") - $(cat "$out/e2e-images.start")))s"
-			E2E_IMAGES_BUILT=1
-			export E2E_IMAGES_BUILT
-			for stage in $e2e_stages; do start_stage "$stage"; done
-		else
-			# Each e2e stage fails with the build's log.
-			for stage in $e2e_stages; do
-				date +%s >"$out/$stage.start"
-				{ echo "the e2e images did not build:"; cat "$out/e2e-images.log"; } >"$out/$stage.log"
-				: >"$out/$stage.stats"
-				date +%s >"$out/$stage.end"
-				echo 1 >"$out/$stage.exit"
-			done
-		fi
-		wait
-	) &
+	rm -f "$out/e2e-images.exit"
+	E2E_IMAGES_EXIT_FILE="$out/e2e-images.exit"
+	E2E_IMAGES_LOG="$out/e2e-images.log"
+	export E2E_IMAGES_EXIT_FILE E2E_IMAGES_LOG
+	start_stage e2e-images
+	for stage in $e2e_stages; do start_stage "$stage"; done
 fi
 echo "started after $(elapsed)s: $stages"
 

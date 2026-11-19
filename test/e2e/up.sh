@@ -50,15 +50,26 @@ stop_cluster() {
 }
 trap 'stop_cluster; rm -rf "$work"' EXIT
 
-# CI builds the images once for both tracks and sets E2E_IMAGES_BUILT=1; a
-# developer machine builds them here, one build at a time across the tracks.
-if [[ "${E2E_IMAGES_BUILT:-}" == 1 ]]; then
-	log "using the images already built"
-else
-	log "building the images"
-	./test/e2e/build-images.sh
+# CI builds the images once for both tracks, at the same time as this script
+# runs, and writes the build's exit status to E2E_IMAGES_EXIT_FILE when it ends
+# (its output is in E2E_IMAGES_LOG). A developer machine builds them here.
+wait_for_images() {
+	if [[ -z "${E2E_IMAGES_EXIT_FILE:-}" ]]; then
+		log "building the images"
+		./test/e2e/build-images.sh
+		log "images built"
+		return
+	fi
+	log "waiting for the images to build"
+	while [[ ! -s "$E2E_IMAGES_EXIT_FILE" ]]; do sleep 1; done
+	if [[ "$(<"$E2E_IMAGES_EXIT_FILE")" != 0 ]]; then
+		echo "the e2e images did not build:" >&2
+		cat "${E2E_IMAGES_LOG:-/dev/null}" >&2
+		log "image build failed"
+		exit 1
+	fi
 	log "images built"
-fi
+}
 
 # Without ci-kind-config, every other image a pod in the cluster pulls comes
 # through the Docker daemon, so the node's containerd never pulls from a
@@ -87,6 +98,7 @@ if [[ -n "$cluster_pid" ]]; then
 	cluster_pid=""
 	cat "$cluster_log" >&2
 fi
+wait_for_images
 log "loading the images into kind"
 kind load docker-image "$proxy_image" "$helper_image" "$fake_image" --name "$cluster" >&2
 if [[ "$preload" == 1 ]]; then
