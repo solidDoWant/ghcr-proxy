@@ -315,7 +315,7 @@ func (e *env) installProxy(ctx context.Context) error {
 			return fmt.Errorf("the replaced proxy pods did not terminate:\n%s", pods)
 		}
 
-		time.Sleep(time.Second)
+		time.Sleep(500 * time.Millisecond)
 	}
 }
 

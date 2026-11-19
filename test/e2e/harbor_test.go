@@ -209,7 +209,7 @@ func (e *env) createHarborObjects(ctx context.Context) error {
 			return fmt.Errorf("harbor did not answer its ping: %d %v", status, err)
 		}
 
-		time.Sleep(2 * time.Second)
+		time.Sleep(500 * time.Millisecond)
 	}
 
 	registryIDs := map[string]int{}
