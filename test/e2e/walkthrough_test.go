@@ -254,16 +254,20 @@ func TestAdminDocsGetToAPushAndAMirroredPull(t *testing.T) {
 		"HARBOR_PASSWORD=" + robot.password,
 	}}
 
-	t.Cleanup(func() {
-		cleanup, stop := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer stop()
+	// CI deletes the whole cluster when the stage ends, so waiting for the
+	// releases and namespaces to go away only costs time there.
+	if os.Getenv("E2E_DISCARD_CLUSTER") == "" {
+		t.Cleanup(func() {
+			cleanup, stop := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer stop()
 
-		for release, namespace := range map[string]string{"registrygate": walkthroughNamespace, "cert-manager": "cert-manager"} {
-			_, _ = cluster.helm(cleanup, "uninstall", release, "--kube-context", cluster.kubeContext, "--namespace", namespace, "--ignore-not-found", "--wait")
-		}
+			for release, namespace := range map[string]string{"registrygate": walkthroughNamespace, "cert-manager": "cert-manager"} {
+				_, _ = cluster.helm(cleanup, "uninstall", release, "--kube-context", cluster.kubeContext, "--namespace", namespace, "--ignore-not-found", "--wait")
+			}
 
-		_, _ = cluster.kubectl(cleanup, "", "delete", "namespace", "--ignore-not-found", walkthroughNamespace, walkthroughTenant, "cert-manager")
-	})
+			_, _ = cluster.kubectl(cleanup, "", "delete", "namespace", "--ignore-not-found", walkthroughNamespace, walkthroughTenant, "cert-manager")
+		})
+	}
 
 	for _, page := range walkthroughPages {
 		for index, block := range docCommands(t, page) {
