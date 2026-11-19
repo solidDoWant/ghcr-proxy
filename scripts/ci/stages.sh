@@ -84,6 +84,8 @@ command_of() {
 	# The two e2e tracks run at the same time, each on its own kind cluster.
 	e2e) echo 'make test-e2e-main' ;;
 	e2e-walkthrough) echo 'make test-e2e-walkthrough' ;;
+	# Not a reported stage: builds the e2e images once for both tracks.
+	e2e-images) echo './test/e2e/build-images.sh' ;;
 	docs)
 		# The style report is advisory.
 		if [ "$event" = pull_request ]; then
@@ -117,6 +119,7 @@ start_stage() {
 			-e REGISTRYGATE_HOSTS="${REGISTRYGATE_HOSTS:-}" -e REGISTRYGATE_TOKEN_FILE="$ci/token" \
 			-e CI_BIN="$ci/bin" -e CI_CA="$ci/ca-bundle.crt" -e CI_STATS="$out/$stage.stats" \
 			-e E2E_CLUSTER="registrygate-ci${stage#e2e}" \
+			-e E2E_IMAGES_BUILT="${E2E_IMAGES_BUILT:-}" \
 			-e STAGE_COMMAND="$(command_of "$stage")" \
 			"$image" bash -c '
 				source /etc/devshell.sh
@@ -137,9 +140,42 @@ start_stage() {
 	) &
 }
 
+# The e2e stages need the three e2e images. Build them once, on the shared
+# dockerd, while the other stages run, and start the e2e stages when the build
+# ends. The build's own log and time stay out of the stage table.
+e2e_stages=""
+other_stages=""
 for stage in $stages; do
+	case "$stage" in
+	e2e | e2e-walkthrough) e2e_stages="$e2e_stages $stage" ;;
+	*) other_stages="$other_stages $stage" ;;
+	esac
+done
+for stage in $other_stages; do
 	start_stage "$stage"
 done
+if [ -n "$e2e_stages" ]; then
+	(
+		start_stage e2e-images
+		while [ ! -f "$out/e2e-images.exit" ]; do sleep 1; done
+		if [ "$(cat "$out/e2e-images.exit")" = 0 ]; then
+			echo "e2e images built in $(($(cat "$out/e2e-images.end") - $(cat "$out/e2e-images.start")))s"
+			E2E_IMAGES_BUILT=1
+			export E2E_IMAGES_BUILT
+			for stage in $e2e_stages; do start_stage "$stage"; done
+		else
+			# Each e2e stage fails with the build's log.
+			for stage in $e2e_stages; do
+				date +%s >"$out/$stage.start"
+				{ echo "the e2e images did not build:"; cat "$out/e2e-images.log"; } >"$out/$stage.log"
+				: >"$out/$stage.stats"
+				date +%s >"$out/$stage.end"
+				echo 1 >"$out/$stage.exit"
+			done
+		fi
+		wait
+	) &
+fi
 echo "started after $(elapsed)s: $stages"
 
 # Prints each passed stage's log as one block as soon as it ends, and the
