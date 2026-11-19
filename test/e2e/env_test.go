@@ -207,7 +207,7 @@ func (e *env) setup(ctx context.Context) error {
 			return err
 		}
 
-		return timed("point cluster DNS at the fakes", func() error { return e.pointFakeStorageHostsAtFakes(groupCtx) })
+		return timed("wait for the fakes' storage host names to resolve", func() error { return e.waitStorageHostsResolve(groupCtx) })
 	})
 
 	// The walkthrough installs the proxy itself, by following the admin guide.
