@@ -277,10 +277,10 @@ The `ci` pod's sizes:
 
 | Container | Memory request = limit | CPU request |
 |---|---|---|
-| `dind` sidecar (all stages) | 14 GiB | 8 |
+| `dind` sidecar (all stages) | 8 GiB | 8 |
 | `run` step | 256 MiB | 100m |
 
-The `test-guard` and `report` pods' steps get 256 MiB each. A pull request run then requests about 15 GiB, so 3 runs fit in the quota of 48 GiB. Stages run at the same time, so the memory peaks add up at most when the peaks happen together. The size is the sum of the cold peaks plus about 0.5 GiB for `dockerd`. Peaks do not all happen at once, and part of each peak is page cache, so a cold run does not starve a stage. A warm run uses up to 9.3 GiB, so the size is less than twice the measured peak.
+The `test-guard` and `report` pods' steps get 256 MiB each. A pull request run then requests about 9 GiB. Stages run at the same time, but their peaks do not happen together, and the agents' numbers above include page cache. The operator measured a warm master run on the cluster from inside its VM (total minus available memory, read every 2 s, so page cache is excluded): the peak used was 4.0 GiB in a VM of 14.8 GiB. Early in the run, the unit and integration builds use 1.1 to 1.9 GiB each. Late in the run, the two kind nodes use about 1.6 GiB each and the stage containers 0.2 to 0.4 GiB. The size is `max(8 GiB, 1.5 × the peak)`, rounded up to a whole GiB. The warm peak gives 6 GiB, so the size is 8 GiB. The `ci` script prints the VM's peak used memory in its final output, so a cold run (a change to `flake.lock` or `go.sum`) shows whether 8 GiB still holds.
 
 The `ci` script records each stage's `memory.peak` and CPU time in its final table on every run. Issue work for the measurement replaces the numbers above with the cluster's own numbers, and it changes the sizes if they differ by more than 25%.
 

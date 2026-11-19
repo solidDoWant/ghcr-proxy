@@ -29,6 +29,25 @@ ci="$WS/ci"
 out="$ci/stages"
 mkdir -p "$ci/bin" "$ci/docker" "$out"
 
+# Samples the VM's used memory (total minus available, so page cache does not
+# count) every 2 seconds and keeps the peak in KiB, to size the dind sidecar.
+# One read of /proc/meminfo per sample keeps it light for the small step.
+peak_file="$ci/vm-peak-kib"
+echo 0 >"$peak_file"
+(
+	peak=0
+	while :; do
+		used=$(awk '/^MemTotal:/ { t = $2 } /^MemAvailable:/ { a = $2 } END { print t - a }' /proc/meminfo)
+		if [ "$used" -gt "$peak" ]; then
+			peak=$used
+			echo "$peak" >"$peak_file"
+		fi
+		sleep 2
+	done
+) &
+sampler=$!
+trap 'kill "$sampler" 2>/dev/null || true' EXIT
+
 image=$(./scripts/ci/ci-image.sh)
 echo "ci image $image ready after $(elapsed)s"
 
@@ -241,6 +260,7 @@ fi
 # shellcheck disable=SC2086 # a list of stage names
 in_image ./scripts/ci/stages-report.py "$out" "$ci/stages.json" $stages
 if [ -n "${DOCKER_TASK_OUTPUT:-}" ]; then cp "$ci/stages.json" "$DOCKER_TASK_OUTPUT"; fi
+echo "VM peak memory used: $(($(cat "$peak_file") / 1024)) MiB (page cache excluded)"
 echo "all stages done after $(elapsed)s"
 if [ -n "$failed" ]; then
 	echo "failed stages:$failed" >&2
