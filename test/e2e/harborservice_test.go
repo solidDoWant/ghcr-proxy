@@ -15,6 +15,8 @@ import (
 )
 
 func TestPushToHarborUsesARobotThePodNeverSees(t *testing.T) {
+	t.Parallel()
+
 	tenant := cluster.tenants[0]
 	project := harborPushProject(tenant.namespace)
 	ref := fmt.Sprintf("%s/%s/app-%s:1", cluster.harborHostName, project, cluster.runID)
@@ -47,6 +49,8 @@ func TestPushToHarborUsesARobotThePodNeverSees(t *testing.T) {
 }
 
 func TestPushToHarborOutsideTheCredentialCeilingIsRefused(t *testing.T) {
+	t.Parallel()
+
 	tenant := cluster.tenants[0]
 	other := harborPushProject(cluster.tenants[1].namespace)
 	ref := fmt.Sprintf("%s/%s/app-%s:2", cluster.harborHostName, other, cluster.runID)
@@ -60,6 +64,8 @@ func TestPushToHarborOutsideTheCredentialCeilingIsRefused(t *testing.T) {
 }
 
 func TestDockerHubNamesPullAndBuildThroughTheMirror(t *testing.T) {
+	t.Parallel()
+
 	hub := cluster.upstreams[2]
 	hub.seedImage(t, "library/alpine:latest")
 

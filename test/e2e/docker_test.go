@@ -22,6 +22,8 @@ func buildScript(tag string) string {
 }
 
 func TestCIPodsAreSetUpAsTheAdminGuideSays(t *testing.T) {
+	t.Parallel()
+
 	for _, tenant := range cluster.tenants {
 		live, err := cluster.kubectl(t.Context(), "", "-n", tenant.namespace, "get", "pod", "build", "-o", "yaml")
 		require.NoError(t, err)
@@ -69,6 +71,9 @@ func TestCIPodsAreSetUpAsTheAdminGuideSays(t *testing.T) {
 	}
 }
 
+// This test and the replica kill below stay sequential: Go runs sequential tests one at a time, in source
+// order, before it releases the parallel ones. The test counts the proxy pods, so it must run before the
+// replica kill and before any parallel test.
 func TestChartInstallRunsNonRootWithReadOnlyRootFilesystem(t *testing.T) {
 	raw, err := cluster.kubectl(t.Context(), "", "-n", proxyNamespace, "get", "pods", "-o", "json")
 	require.NoError(t, err)
@@ -90,6 +95,8 @@ func TestChartInstallRunsNonRootWithReadOnlyRootFilesystem(t *testing.T) {
 }
 
 func TestPullsPublicImagesFromBothUpstreams(t *testing.T) {
+	t.Parallel()
+
 	for _, fake := range cluster.upstreams[:2] {
 		fake.seedImage(t, "soliddowant/public:1")
 
@@ -108,6 +115,8 @@ func TestPullsPublicImagesFromBothUpstreams(t *testing.T) {
 }
 
 func TestEachNamespacePullsThroughItsOwnHarborProject(t *testing.T) {
+	t.Parallel()
+
 	first := cluster.upstreams[0]
 	first.seedImage(t, mirroredRepo("base")+":1")
 
@@ -132,6 +141,8 @@ func TestEachNamespacePullsThroughItsOwnHarborProject(t *testing.T) {
 }
 
 func TestBuildWithBaseImagesFromBothUpstreamsUsesTheMirrors(t *testing.T) {
+	t.Parallel()
+
 	for _, fake := range cluster.upstreams[:2] {
 		fake.seedImage(t, mirroredRepo("build")+":1")
 	}
@@ -155,6 +166,8 @@ docker build --no-cache -t local/both:1 .`, mirroredRepo("build"))
 }
 
 func TestPushWithCredentialReachesTheUpstream(t *testing.T) {
+	t.Parallel()
+
 	first := cluster.upstreams[0]
 	namespace := cluster.tenants[0].namespace
 
@@ -178,17 +191,23 @@ func TestPushWithCredentialReachesTheUpstream(t *testing.T) {
 func TestPushOutsidePolicyIsRefused(t *testing.T) {
 	first := cluster.upstreams[0]
 
-	// ci-b has no credential rule.
+	t.Parallel()
+
+	// ci-b has no credential rule. The repository name is the test's own: the assertion below reads the
+	// upstream log by repository, and the push that succeeds in another test must not show up in it.
 	namespace := cluster.tenants[1].namespace
-	_, err := cluster.docker(t.Context(), namespace, buildScript("ghcr.io/soliddowant/app:2"))
+	_, err := cluster.docker(t.Context(), namespace, buildScript("ghcr.io/soliddowant/denied:2"))
 	require.NoError(t, err)
 
 	before := len(first.log(t))
-	_, err = cluster.docker(t.Context(), namespace, "docker push ghcr.io/soliddowant/app:2")
+	_, err = cluster.docker(t.Context(), namespace, "docker push ghcr.io/soliddowant/denied:2")
 	require.Error(t, err)
-	assert.Empty(t, requestsFor(first.log(t)[before:], "soliddowant/app"), "a refused push must not reach the upstream")
+	assert.Empty(t, requestsFor(first.log(t)[before:], "soliddowant/denied"), "a refused push must not reach the upstream")
 }
 
+// Not parallel: it deletes a proxy replica, which would fail the requests of any test running at the same time.
+// It keeps "soliddowant/app", the one repository the credential rule allows, to itself: the parallel push test
+// uses its own tag and runs after this one.
 func TestPushesSucceedAfterAReplicaIsKilled(t *testing.T) {
 	ctx := t.Context()
 	namespace := cluster.tenants[0].namespace
