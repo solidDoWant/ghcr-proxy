@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os/exec"
 	"path/filepath"
@@ -43,44 +44,72 @@ func (e *env) installHarbor(ctx context.Context) error {
 	return nil
 }
 
-// pointFakeStorageHostsAtFakes makes Harbor reach the fake registries: the fakes' blob redirects point to their
-// storage host names, which the cluster DNS answers with the fakes' storage Services.
-func (e *env) pointFakeStorageHostsAtFakes(ctx context.Context) error {
-	var hosts strings.Builder
+// waitStorageHostsResolve waits until the fakes' blob redirects can be followed: they point to storage host
+// names, which the cluster DNS answers with the fakes' storage Services (up.sh wrote those entries into CoreDNS
+// before the fakes existed, so there is no restart to wait for). It asks the cluster DNS through a port-forward
+// to its Service until each name resolves to the address of the fake's storage Service.
+func (e *env) waitStorageHostsResolve(ctx context.Context) error {
+	cmd := exec.CommandContext(ctx, "kubectl", "--context", e.kubeContext, "-n", "kube-system", "port-forward", "service/kube-dns", ":53")
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+
+	reader := bufio.NewReader(stdout)
+
+	first, err := reader.ReadString('\n')
+	if err != nil {
+		return fmt.Errorf("reading port-forward output: %w", err)
+	}
+
+	match := regexp.MustCompile(`127\.0\.0\.1:(\d+)`).FindStringSubmatch(first)
+	if match == nil {
+		return fmt.Errorf("unexpected port-forward output: %s", first)
+	}
+
+	go func() { _, _ = io.Copy(io.Discard, reader) }()
+
+	resolver := &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		var dialer net.Dialer
+
+		return dialer.DialContext(ctx, "tcp", "127.0.0.1:"+match[1])
+	}}
 
 	for _, fake := range e.upstreams {
-		ip, err := fake.storageIP(ctx, e)
+		want, err := fake.storageIP(ctx, e)
 		if err != nil {
 			return err
 		}
 
-		fmt.Fprintf(&hosts, "        %s %s\n", ip, fake.storageHost)
-	}
+		deadline := time.Now().Add(2 * time.Minute)
 
-	corefile, err := e.kubectl(ctx, "", "-n", "kube-system", "get", "configmap", "coredns", "-o", "jsonpath={.data.Corefile}")
-	if err != nil {
-		return err
-	}
+		for {
+			lookupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			got, lookupErr := resolver.LookupHost(lookupCtx, fake.storageHost)
 
-	// A kept cluster has old addresses in the block: take it out first.
-	corefile = regexp.MustCompile(`(?s)\.:53 \{\n    hosts \{\n.*?\n    \}\n`).ReplaceAllString(corefile, ".:53 {\n")
-	corefile = strings.Replace(corefile, ".:53 {\n", ".:53 {\n    hosts {\n"+hosts.String()+"        fallthrough\n    }\n", 1)
+			cancel()
 
-	patch, err := json.Marshal(map[string]any{"data": map[string]string{"Corefile": corefile}})
-	if err != nil {
-		return err
-	}
+			if lookupErr == nil && len(got) == 1 && got[0] == want {
+				break
+			}
 
-	if _, err := e.kubectl(ctx, "", "-n", "kube-system", "patch", "configmap", "coredns", "--type", "merge", "-p", string(patch)); err != nil {
-		return err
-	}
+			if time.Now().After(deadline) || ctx.Err() != nil {
+				return fmt.Errorf("%s does not resolve to %s in the cluster DNS (got %v, error %v)", fake.storageHost, want, got, lookupErr)
+			}
 
-	if _, err := e.kubectl(ctx, "", "-n", "kube-system", "rollout", "restart", "deployment/coredns"); err != nil {
-		return err
-	}
-
-	if _, err := e.kubectl(ctx, "", "-n", "kube-system", "rollout", "status", "deployment/coredns", "--timeout=120s"); err != nil {
-		return err
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(500 * time.Millisecond):
+			}
+		}
 	}
 
 	return nil

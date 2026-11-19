@@ -98,6 +98,23 @@ if [[ -n "$cluster_pid" ]]; then
 	cluster_pid=""
 	cat "$cluster_log" >&2
 fi
+# Point the fakes' storage host names at their Services through CoreDNS rewrites.
+# The rewrites name Services, not addresses, so they can be written before the
+# Services exist, and CoreDNS re-reads its Corefile when it changes: no restart.
+# A ConfigMap change takes a while to reach the pod, so do it now, while the images
+# build and load, and let the tests only check that the names resolve. Re-running replaces the
+# entries of an earlier run.
+log "pointing the fakes' storage host names at their Services in CoreDNS"
+rewrites=""
+while read -r storage_host namespace; do
+	rewrites+="    rewrite name exact ${storage_host} fakeregistry-storage.${namespace}.svc.cluster.local"$'\n'
+done < <(grep -v '^#' test/e2e/fake-storage-hosts.txt)
+corefile="$(kubectl --context "kind-${cluster}" -n kube-system get configmap coredns -o jsonpath='{.data.Corefile}')"
+corefile="$(grep -v '^    rewrite name exact ' <<<"$corefile")"$'\n'
+corefile="${corefile/$'.:53 {\n'/$'.:53 {\n'${rewrites}}"
+kubectl --context "kind-${cluster}" -n kube-system patch configmap coredns --type merge \
+	-p "$(jq -n --arg corefile "$corefile" '{data: {Corefile: $corefile}}')" >&2
+
 wait_for_images
 log "loading the images into kind"
 kind load docker-image "$proxy_image" "$helper_image" "$fake_image" --name "$cluster" >&2

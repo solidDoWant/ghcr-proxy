@@ -1,0 +1,6 @@
+# Each line: a fake upstream's storage host name, then the namespace of its fake.
+# up.sh makes the cluster DNS answer the name with the fake's storage Service. The
+# list must match the upstreams in upstream_test.go; the tests check that the names resolve.
+pkg-containers.githubusercontent.com fake-a
+cdn01.quay.io fake-b
+production.cloudflare.docker.com fake-c
