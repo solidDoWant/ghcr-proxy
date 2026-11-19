@@ -18,6 +18,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -187,20 +189,39 @@ func (e *env) setup(ctx context.Context) error {
 		}
 	}
 
-	for _, fake := range e.upstreams {
-		if err := timed("start fake upstream "+fake.key, func() error { return fake.start(ctx, e) }); err != nil {
+	// The installs that don't need each other run at the same time. Each waits until its own
+	// component is ready; the group fails with the first error, which names its component.
+	group, groupCtx := errgroup.WithContext(ctx)
+
+	// The fakes come first, then the cluster DNS entries that point at them.
+	group.Go(func() error {
+		var fakes errgroup.Group
+
+		for _, fake := range e.upstreams {
+			fakes.Go(func() error {
+				return timed("start fake upstream "+fake.key, func() error { return fake.start(groupCtx, e) })
+			})
+		}
+
+		if err := fakes.Wait(); err != nil {
 			return err
 		}
-	}
+
+		return timed("point cluster DNS at the fakes", func() error { return e.pointFakeStorageHostsAtFakes(groupCtx) })
+	})
 
 	// The walkthrough installs the proxy itself, by following the admin guide.
 	if !e.walkthroughOnly {
-		if err := timed("install proxy", func() error { return e.installProxy(ctx) }); err != nil {
-			return err
-		}
+		group.Go(func() error { return timed("install proxy", func() error { return e.installProxy(groupCtx) }) })
 	}
 
-	if err := timed("install Harbor", func() error { return e.installHarbor(ctx) }); err != nil {
+	group.Go(func() error { return timed("install Harbor", func() error { return e.installHarbor(groupCtx) }) })
+
+	if err := group.Wait(); err != nil {
+		return err
+	}
+
+	if err := timed("read Harbor CA", func() error { return e.readHarborCA(ctx) }); err != nil {
 		return err
 	}
 

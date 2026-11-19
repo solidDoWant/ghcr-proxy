@@ -32,7 +32,8 @@ func waitStep() string {
 		name = strings.TrimPrefix(name, "e2e.")
 
 		switch {
-		case name == "TestMain":
+		case name == "TestMain", strings.HasPrefix(name, "(*env).setup"):
+			// setup's goroutines have no TestMain frame, so name them by their own.
 			return "TestMain"
 		case strings.HasPrefix(name, "Test") && !strings.Contains(name, "."):
 			return name
