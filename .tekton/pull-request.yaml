@@ -25,8 +25,9 @@ spec:
       emptyDir: {}
   taskRunSpecs:
     # Every stage runs inside the dind sidecar's cgroup, so its memory is the
-    # memory of all stages together: the sum of their cold-cache peaks plus
-    # dockerd. No CPU limit: a kata VM's CPU request only places the pod and
+    # memory of all stages together. The size is max(8 GiB, 1.5 times the
+    # measured peak of used memory, page cache excluded; the final stage table
+    # prints it). No CPU limit: a kata VM's CPU request only places the pod and
     # sets its share.
     - pipelineTaskName: ci
       sidecarSpecs:
@@ -34,9 +35,9 @@ spec:
           computeResources:
             requests:
               cpu: "8"
-              memory: 14Gi
+              memory: 8Gi
             limits:
-              memory: 14Gi
+              memory: 8Gi
       stepSpecs:
         - name: run
           computeResources:
