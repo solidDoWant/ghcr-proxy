@@ -160,7 +160,7 @@ docker build --no-cache -t local/both:1 .`, mirroredRepo("build"))
 	// background listing is needed.
 	mirrors := map[string]bool{}
 
-	for _, entry := range proxyAuditEntries(t) {
+	for _, entry := range proxyAuditEntries(t, proxyNamespace) {
 		if entry.Namespace == tenant.namespace && entry.Repository == mirroredRepo("build") && entry.Decision == "mirror" {
 			mirrors[entry.Mirror] = true
 		}

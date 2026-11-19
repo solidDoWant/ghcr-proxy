@@ -296,5 +296,5 @@ func TestAdminDocsGetToAPushAndAMirroredPull(t *testing.T) {
 
 	// The mirrored pull went through the namespace's mirror. The proxy logs
 	// each request when it ends, so no wait for Harbor's listing is needed.
-	assert.True(t, servedByMirror(proxyAuditEntries(t), walkthroughTenant, "soliddowant/public"), "the CI pod's pull is served by the mirror")
+	assert.True(t, servedByMirror(proxyAuditEntries(t, walkthroughNamespace), walkthroughTenant, "soliddowant/public"), "the CI pod's pull is served by the mirror")
 }

@@ -20,18 +20,18 @@ type auditEntry struct {
 	Status     int    `json:"status"`
 }
 
-// proxyAuditEntries reads the audit lines of every proxy pod. The proxy logs a
+// proxyAuditEntries reads the audit lines of every proxy pod in inNamespace. The proxy logs a
 // line when it finishes a request, so a pull that has returned is in the log.
-func proxyAuditEntries(t *testing.T) []auditEntry {
+func proxyAuditEntries(t *testing.T, inNamespace string) []auditEntry {
 	t.Helper()
 
-	pods, err := cluster.kubectl(t.Context(), "", "-n", proxyNamespace, "get", "pods", "-o", "jsonpath={.items[*].metadata.name}")
+	pods, err := cluster.kubectl(t.Context(), "", "-n", inNamespace, "get", "pods", "-o", "jsonpath={.items[*].metadata.name}")
 	require.NoError(t, err)
 
 	var entries []auditEntry
 
 	for _, pod := range strings.Fields(pods) {
-		logs, err := cluster.kubectl(t.Context(), "", "-n", proxyNamespace, "logs", pod)
+		logs, err := cluster.kubectl(t.Context(), "", "-n", inNamespace, "logs", pod)
 		require.NoError(t, err, pod)
 
 		for _, line := range strings.Split(logs, "\n") {
