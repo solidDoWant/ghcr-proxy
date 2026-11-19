@@ -22,12 +22,27 @@ mkdir -p build/e2e
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-log() { echo "e2e-up: $*" >&2; }
+start=$SECONDS
+log() { echo "e2e-up: [+$((SECONDS - start))s] $*" >&2; }
 
+# The cluster needs nothing from the image builds and the builds need nothing
+# from the cluster, so create it in the background while the images build. Only
+# the image load needs both.
+cluster_pid=""
+cluster_log="$work/cluster.log"
 if ! kind get clusters 2>/dev/null | grep -qx "$cluster"; then
-	log "creating kind cluster $cluster"
-	kind create cluster --name "$cluster" --image "$node_image" --config test/e2e/kind-config.yaml --wait 120s >&2
+	log "creating kind cluster $cluster (in the background)"
+	kind create cluster --name "$cluster" --image "$node_image" --config test/e2e/kind-config.yaml --wait 120s >"$cluster_log" 2>&1 &
+	cluster_pid=$!
 fi
+# A failed build must not leave the cluster creation running.
+stop_cluster() {
+	if [[ -n "$cluster_pid" ]]; then
+		kill "$cluster_pid" 2>/dev/null || true
+		wait "$cluster_pid" 2>/dev/null || true
+	fi
+}
+trap 'stop_cluster; rm -rf "$work"' EXIT
 
 # Two tracks may run at the same time and share the build tree and the image
 # tags: build one at a time. The second finds everything cached.
@@ -38,7 +53,7 @@ until mkdir "$lock" 2>/dev/null; do
 	if [[ -n "$(find "$lock" -maxdepth 0 -mmin +15 2>/dev/null)" ]]; then rmdir "$lock" 2>/dev/null || true; fi
 	sleep 2
 done
-trap 'rm -rf "$work"; rmdir "$lock" 2>/dev/null || true' EXIT
+trap 'stop_cluster; rm -rf "$work"; rmdir "$lock" 2>/dev/null || true' EXIT
 log "building the images for linux/${arch}"
 mkdir -p "build/images/${arch}"
 CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -ldflags="-s -w -X main.version=${tag}" -o "build/images/${arch}/registrygate" ./cmd/registrygate
@@ -49,7 +64,8 @@ docker buildx build --platform "linux/${arch}" --file Dockerfile.credential-help
 make build-fakeregistry-image >&2
 
 rmdir "$lock" 2>/dev/null || true
-trap 'rm -rf "$work"' EXIT
+trap 'stop_cluster; rm -rf "$work"' EXIT
+log "images built"
 
 # Every other image a pod in the cluster pulls comes through the Docker daemon
 # too, so the node's containerd never pulls from a registry itself. The list is
@@ -62,6 +78,17 @@ export -f pull_image
 # shellcheck disable=SC2016 # $1 must expand in the child shell, not here
 xargs -P 8 -I{} bash -c 'pull_image "$1"' _ {} <"$work/images"
 
+if [[ -n "$cluster_pid" ]]; then
+	log "waiting for the kind cluster"
+	if ! wait "$cluster_pid"; then
+		cluster_pid=""
+		cat "$cluster_log" >&2
+		log "kind cluster creation failed"
+		exit 1
+	fi
+	cluster_pid=""
+	cat "$cluster_log" >&2
+fi
 log "loading the images into kind"
 kind load docker-image "$proxy_image" "$helper_image" "$fake_image" --name "$cluster" >&2
 # kind load fails on multi-platform images from the Docker daemon's containerd
