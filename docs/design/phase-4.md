@@ -455,7 +455,14 @@ The release-manager's gate on `master` stays as in section 3.4: the push Pipelin
 
 ### 10.6 Proof
 
-The first release on Tekton is a pre-release, `v<next>-rc.1`, tagged on a `master` commit after the `ghcrPush` change is live. The implementation makes sure that:
+The first release on Tekton is a pre-release, `v<next>-rc.1`. PaC reads `.tekton/release.yaml` from the tagged commit. So the pipeline must be on `master` before the tag exists, and the pipeline cannot be proved in the PR that adds it. Also, while `release.yml` runs on tag pushes, a tag starts both releases: two image pushes and two attempts to create the GitHub release. So the work has four steps:
+
+1. The pipeline PR adds `release.yaml`, its template and its generation, `scripts/ci/publish-release.sh` and the `release` stage. In the same PR, `release.yml` runs on `workflow_dispatch` only. It stays as a manual fallback until the proof passes, and no tag can start it.
+2. After the pipeline PR merged and the `ghcrPush` change is live, the implementation tells the owner on the issue that rc.1 is ready. The owner gives the go. Then the release-manager tags `v<next>-rc.1` on a `master` commit. The implementation does not push the tag.
+3. The implementation makes sure that the rc.1 run passed the checks below.
+4. The cutover PR (section 10.7) follows.
+
+For the rc.1 run, the implementation makes sure that:
 
 - `push.yaml` did not run for the tag, and `release.yaml` did.
 - Both images exist for linux/amd64 and linux/arm64, by digest, and `:latest` did not move.
@@ -463,11 +470,11 @@ The first release on Tekton is a pre-release, `v<next>-rc.1`, tagged on a `maste
 - A GitHub pre-release exists, not marked latest, with the section as its notes.
 - No log of the run, no Task result and no check run shows a credential.
 
-The PR that adds the pipeline reports the run's wall clock next to the 5.4 minutes of `release.yml` for v0.4.0.
+The cutover PR reports the run's wall clock next to the 5.4 minutes of `release.yml` for v0.4.0.
 
 ### 10.7 Cutover
 
-The cutover happens in the same PR as the pipeline, after the pre-release proved it. If the pre-release fails, `release.yml` stays until the pipeline works.
+The cutover is its own PR, after the rc.1 run passed the checks in section 10.6. If the pre-release fails, `release.yml` stays as the manual fallback until the pipeline works.
 
 1. Delete `.github/workflows/release.yml`. After that, `.github/workflows/` is empty and is deleted too.
 2. Delete `.github/actions/nix-dev-shell` and `.github/actions/go-cache-save`. No workflow uses them.
@@ -494,4 +501,4 @@ If Tekton is down, no PR can merge. The owner can add `checks` back by restoring
 1. Done: onboard the repository (#176), sizes (#182). Not needed: vCPUs (#181).
 2. The pipeline (#178): first the e2e prototype (section 6.1), then `.tekton/`, `scripts/ci/stages.sh`, `scripts/ci/changes.py`, the CI image build, the cleanup, the `report` task, the `OWNERS` file and the generated PipelineRuns.
 3. Measure, make Tekton the required check, move the scheduler and the release-manager to the Tekton interfaces, retire `ci.yml` (#179). Blocked by #178, and by any `needs-human` issue from section 3.4.
-4. The release on Tekton (#251, section 10): this design, the `ghcrPush` infra-mk3 issue, then the pipeline, the pre-release and the cutover in one PR.
+4. The release on Tekton (#251, section 10): this design and the `ghcrPush` infra-mk3 issue, then the pipeline PR, the pre-release and the cutover PR, in the order of section 10.6.

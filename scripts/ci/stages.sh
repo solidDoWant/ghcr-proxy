@@ -5,10 +5,12 @@
 # is the Task's workspace: the step and dockerd see it at the same path.
 #
 #   scripts/ci/stages.sh pull_request|push
+#   RELEASE_VERSION=<version> scripts/ci/stages.sh release
 #
 # A pull request runs the stages its changes need (scripts/ci/changes.py); a
 # push runs them all and then cleans the Docker storage that the cache
-# promoter keeps. The script writes $WS/ci/stages.json, each stage's name,
+# promoter keeps. A release runs one stage, release, which publishes the
+# images and the chart of RELEASE_VERSION (scripts/ci/publish-release.sh). The script writes $WS/ci/stages.json, each stage's name,
 # result, time and failure report (scripts/ci/stages-report.py), also to the
 # file DOCKER_TASK_OUTPUT names (the docker Task's result, read by report), and
 # exits non-zero after writing it when a stage failed, so the run fails even if
@@ -16,7 +18,7 @@
 # result of the failed task and gives each stage its check run).
 set -eu
 
-event="${1:?usage: stages.sh pull_request|push}"
+event="${1:?usage: stages.sh pull_request|push|release}"
 t0=$(date +%s)
 elapsed() { echo $(($(date +%s) - t0)); }
 
@@ -36,7 +38,9 @@ in_image() {
 		'source /etc/devshell.sh && git config --global --add safe.directory "*" && "$@"' bash "$@"
 }
 
-if [ "$event" = push ]; then
+if [ "$event" = release ]; then
+	stages=release
+elif [ "$event" = push ]; then
 	stages=$(in_image ./scripts/ci/changes.py push </dev/null)
 else
 	./scripts/ci/changed-files.sh >"$ci/changed-files"
@@ -95,6 +99,12 @@ command_of() {
 		fi
 		;;
 	scoreboard) echo './scripts/acceptance-scoreboard_test.py' ;;
+	release)
+		# The version comes in through the environment, never the command
+		# text, and the stage container expands it.
+		# shellcheck disable=SC2016
+		echo './scripts/ci/publish-release.sh "$RELEASE_VERSION"'
+		;;
 	esac
 }
 
@@ -125,6 +135,7 @@ start_stage() {
 			-e E2E_CLUSTER="registrygate-ci${stage#e2e}" \
 			-e E2E_IMAGES_EXIT_FILE="${E2E_IMAGES_EXIT_FILE:-}" -e E2E_IMAGES_LOG="${E2E_IMAGES_LOG:-}" \
 			-e E2E_DISCARD_CLUSTER=1 \
+			-e RELEASE_VERSION="${RELEASE_VERSION:-}" \
 			-e STAGE_COMMAND="$(command_of "$stage")" \
 			"$image" bash -c '
 				source /etc/devshell.sh

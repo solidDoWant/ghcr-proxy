@@ -59,6 +59,7 @@ test: ## Run unit tests: Go (race detector; GO_TEST_JSON=file also writes the go
 	./scripts/check-images_test.py
 	./scripts/check-tracking-ids_test.py
 	./scripts/release_test.sh
+	./scripts/ci/publish-release_test.sh
 
 .PHONY: test-guard
 test-guard: ## Fail if HEAD deletes, unlists or skips a test named on a `Tests:` line of a checklist since its merge base with BASE (default origin/master; CI passes the PR labels).

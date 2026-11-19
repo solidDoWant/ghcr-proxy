@@ -1,18 +1,19 @@
 name: release
 
-# A version tag v<version>, pushed by the release-manager on a master commit
-# after `make release VERSION=<version>` (the dry run) passed, publishes:
+# Run by hand on a version tag v<version>, it publishes:
 #   - the images ghcr.io/soliddowant/registrygate:<version> and
 #     ghcr.io/soliddowant/registrygate-credential-helper:<version> (linux/amd64
 #     and linux/arm64; plus :latest for a final version);
 #   - the Helm chart oci://ghcr.io/soliddowant/charts/registrygate;
 #   - the GitHub release v<version>, with the CHANGELOG.md section of the
 #     version as its notes.
+#
+# Releases run on Tekton (.tekton/release.yaml). This workflow stays only as a
+# manual fallback until the first Tekton release is proven, so no tag push
+# starts it: run it by hand on the version tag (`gh workflow run release.yml
+# --ref v<version>`).
 on:
-  push:
-    tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'
-      - 'v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'
+  workflow_dispatch:
 
 permissions:
   contents: write # the GitHub release
