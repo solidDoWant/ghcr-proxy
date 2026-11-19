@@ -316,5 +316,5 @@ func (e *env) helm(ctx context.Context, args ...string) ([]byte, error) {
 		defer func() { logWait(step, "helm "+strings.Join(args[:min(len(args), 3)], " "), started, "") }()
 	}
 
-	return e.helm(ctx, args...)
+	return exec.CommandContext(ctx, "helm", args...).CombinedOutput()
 }
