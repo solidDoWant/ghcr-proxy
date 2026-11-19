@@ -41,6 +41,8 @@ func (e *env) installHarbor(ctx context.Context) error {
 		return fmt.Errorf("helm install harbor: %w\n%s", err, out)
 	}
 
+	e.logHarborPodReadiness(ctx)
+
 	return nil
 }
 
