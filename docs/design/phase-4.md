@@ -130,7 +130,7 @@ Then `docker build`, `docker pull`, `helm` and `crane` in a stage go through reg
 1. `labels` reads the PR's labels from the GitHub API with the PaC run token (`{{ git_auth_secret }}`), at run time, as `ci.yml` does. It writes them, comma-separated, to a file in the workspace. Only this step gets the Secret. It runs only its inline script and no code from the repository.
 2. `guard` has no token. It clones the full history of the PR head and `master`, as the `ci` task does, and runs `make test-guard` with `TEST_GUARD_PR_LABELS` read from the file.
 
-The PaC token has the installation permissions of the PaC GitHub App, which include writes to contents, issues and pull requests. The token is limited to this repository only. If code from the repository had the token, a pull request could add `test-removal-approved` to itself, or push a `v*` tag that starts `release.yml`. `ci.yml` gives this job a read-only token. The split keeps the PR's code away from a token with more rights than that.
+The PaC token has the installation permissions of the PaC GitHub App, which include writes to contents, issues and pull requests. The token is limited to this repository only. If code from the repository had the token, a pull request could add `test-removal-approved` to itself, or push a `v*` tag that starts a release (section 10). `ci.yml` gives this job a read-only token. The split keeps the PR's code away from a token with more rights than that.
 
 After the owner adds `test-removal-approved`, a `/retest` comment starts a new run that reads the label. This run repeats all stages, about 8 minutes, where `ci.yml` re-ran only the guard job. This cost is accepted.
 
@@ -360,9 +360,121 @@ The `dind` memory override (section 3.1) needs no change if the cluster's Tekton
 
 The comparison for the checklist runs the script with the same options for both, over at least 10 runs of each event with e2e.
 
-## 10. Release
+## 10. Release on Tekton
 
-The release stays on GitHub Actions (`release.yml`). It runs a few times per phase, so its time does not matter for the goal of this phase. It builds images for amd64 and arm64. In a kata VM, arm64 builds run under QEMU and are slow. It pushes to ghcr.io with the workflow's `GITHUB_TOKEN` and creates the GitHub release with it. On Tekton it needs the `ghcrPush` credential for the project and a GitHub token that can write releases inside a build pod. Both widen what a build can do, for no gain in time.
+The release moves from GitHub Actions (`release.yml`) to a third PipelineRun, `.tekton/release.yaml`. After the cutover in section 10.7, the project uses no GitHub Actions. A release publishes the same things as before:
+
+- The images `ghcr.io/soliddowant/registrygate` and `ghcr.io/soliddowant/registrygate-credential-helper`, each for linux/amd64 and linux/arm64, with the tag `<version>`. A final version also moves `:latest`.
+- The Helm chart `oci://ghcr.io/soliddowant/charts/registrygate`, version `<version>`.
+- The GitHub release `v<version>`. Its notes are the `## <version>` section of `CHANGELOG.md`. A pre-release (`<version>` has a `-rc.K` suffix) is a GitHub pre-release and is not marked latest. A final version is marked latest.
+
+The release-manager still pushes the tag `v<version>` on a `master` commit after `make release VERSION=<version>` passed. That is the only way to start a release.
+
+Section 10 of the first version of this design kept the release on GitHub Actions for two reasons. Neither one holds:
+
+- "arm64 builds run under QEMU." `make build-images` cross-compiles both binaries with `CGO_ENABLED=0` before it calls `docker buildx`. Neither Dockerfile has a `RUN` instruction: each one only copies the binary for `TARGETARCH` onto a base image. So `buildx` runs nothing for arm64, and QEMU is not needed. On the agents' VM, `make build-images` for both images and both platforms took 18 seconds with a warm Go cache.
+- "A build pod needs credentials." The cluster now gives each CI project a `ci-release` ServiceAccount (infra-mk3#916). Only this ServiceAccount gets registrygate's push rules for ghcr.io, and an admission policy lets a PipelineRun use it only for a `push` event on a release ref. The PAT stays in registrygate. The GitHub release uses the Pipelines-as-Code (PaC) run token, in a task that runs no code from the repository (section 10.3).
+
+### 10.1 Trigger
+
+`release.yaml` has this `on-cel-expression`:
+
+```
+event == "push" && target_branch.matches("^refs/tags/v[0-9]+\\.[0-9]+\\.[0-9]+(-rc\\.[0-9]+)?$")
+```
+
+The pattern is the one in `release.yml` today and the default release ref of infra-mk3's admission policy. PaC gives a tag push the full ref, `refs/tags/<tag>`, as `target_branch`. So `push.yaml`, which requires `target_branch == "master"`, does not run for a tag. The implementation makes sure of both facts with the first pre-release (section 10.6). If PaC gives the ref in a different variable, the expression uses that variable. The rule stays the same.
+
+The PipelineRun sets `taskRunTemplate.serviceAccountName: ci-release`. The admission policy reads the event and the ref from the labels that PaC sets, and a repository's `.tekton/` cannot change these labels. So a pull request or a branch push that names `ci-release` is refused.
+
+`release.yaml` has no `cancel-in-progress` annotation, so PaC never cancels a release run. Each tag is its own ref, so two tags never cancel each other. PaC has no queue of its own for one PipelineRun file. So "one release at a time" is a rule for the release-manager: it pushes one tag, and it pushes the next tag only after the run of the previous tag finished (section 10.5). This is the rule of its playbook today. Two runs at the same time would only race for `:latest` and for the "latest" GitHub release.
+
+### 10.2 Pipeline
+
+```
+release:  publish         (docker Task, ci-release: clone the tag, build and push the images, move :latest, push the chart)
+          github-release  (runAfter publish; inline script with the PaC token: create the GitHub release)
+```
+
+`publish` is a docker Task pod like `ci`. Its step clones the tagged commit (`{{ revision }}`) and runs `scripts/ci/stages.sh release`. The `release` event selects one stage, `release`, that runs `./scripts/ci/publish-release.sh <version>` in the CI image. So the release gets the same setup as the other stages: the CI image, the Go caches, the registrygate CA bundle and the credential helper (section 3.1). The script does what `release.yml` does today, and nothing more:
+
+1. `make build-images VERSION=<version> PUSH_ALL=true`.
+2. For a final version, `crane tag` of both images to `latest`.
+3. `helm package` and `helm push` of the chart to `oci://ghcr.io/soliddowant/charts`.
+
+Docker, crane and helm in the stage reach ghcr.io through registrygate, which pushes with the PAT because the caller is `ci-release`. The stage gets no GitHub token and no PAT.
+
+`buildx` must push a multi-platform image. The docker driver can do that only with the containerd image store, which Docker 29 uses by default (the agents' VM runs 29.9.2 with it). The implementation makes sure that the `dind` sidecar does too. If it does not, `build-images.sh` pushes each platform on its own and joins them with `docker buildx imagetools create`, which needs no QEMU and no other driver.
+
+`github-release` is an inline task with one step, like `report`. It uses the pinned Python image of `report`, gets the PaC run token (`{{ git_auth_secret }}`), and runs only its inline script, never code from the repository. The script:
+
+1. Reads `CHANGELOG.md` at the tagged commit through the GitHub contents API.
+2. Takes the `## <version>` section, with the same rule as `scripts/changelog-section.sh`. If the section is missing or empty, the step fails. `make release` already made sure that it exists.
+3. Looks for a GitHub release for the tag. If one exists, the step does nothing and passes (section 10.4).
+4. Otherwise it creates the release: name and tag `v<version>`, the section as its body, `prerelease` true and `make_latest` false for a `-rc.K` version, `prerelease` false and `make_latest` true for a final version.
+
+The notes cannot go from `publish` to `github-release` as a Task result. A result holds at most 4096 bytes, and the notes of 0.3.0 are 11.8 KB. The two tasks do not share a volume. So the script reads them from GitHub.
+
+The PipelineRun has no `report` task. PaC's check run for the PipelineRun shows the result. The `publish` step log has the stage's log block and table, as for `ci`.
+
+`release.yaml` is generated by `scripts/ci/tekton-generate.sh` from its own template, `scripts/ci/tekton-release.yaml.tmpl`, with the same "Generated" header. So `make check-generate` catches drift. It has `max-keep-runs: 10` and a pipeline timeout of 1 hour (`release.yml` has 45 minutes). The `dind` memory of `publish` is set from the measured peak, as in section 6.
+
+### 10.3 Credentials
+
+| Credential | Where it is | What it can do |
+|---|---|---|
+| The ghcr.io PAT | registrygate only | registrygate uses it for a push only when the caller is `ci-release` and the repository is in the project's `ghcrPush.repositories`. |
+| The registrygate token of `ci-release` | the `publish` pod | Push to the two image repositories and the chart repository, through registrygate. |
+| The PaC run token | the `github-release` pod only | The installation permissions of the PaC GitHub App, which include writes to contents (section 3.2), on this repository only. Creating a release needs `contents: write`. |
+
+The PaC token is the same token that `report` and `test-guard`'s first step already get. So the release adds no new GitHub credential and needs no infra-mk3 change for GitHub. The first pre-release makes sure that the token can create a release. If GitHub refuses it, the implementation files a `needs-human` infra-mk3 issue with these alternatives:
+
+- A fine-grained token with only `contents: write` on this repository, in a Secret that only `github-release` mounts. It is a long-lived credential that someone must rotate.
+- The release-manager creates the GitHub release with `gh release create` after the run passed, outside CI. Then a release has two steps in two places, and the release-manager's account needs the right to write releases.
+- The GitHub release step stays on GitHub Actions. Then the project keeps one workflow.
+
+No step logs a credential. The scripts do not use `set -x`. `github-release` sends the token only in the `Authorization` header of its requests, and it prints only the release URL or GitHub's error status and message. The `publish` stage never sees the token of registrygate in its environment: the credential helper reads it from a file.
+
+Build pods of other runs run as `ci-build`, which can only pull through registrygate. So they cannot push to ghcr.io. They can create releases only in the steps that already hold the PaC token, `report` and `test-guard`'s first step, and these run only their inline scripts (section 3).
+
+The only infra-mk3 change is `ghcrPush` for this project: `enabled: true`, with `repositories` `soliddowant/registrygate`, `soliddowant/registrygate-credential-helper` and `soliddowant/charts/registrygate`. It is its own `needs-human` issue.
+
+### 10.4 Failures and re-runs
+
+The steps run in this order: images, `:latest`, chart, GitHub release. So a GitHub release exists only when everything before it is published. Each step can run again for the same version: a push of the same tag overwrites it, and `github-release` passes if the release exists.
+
+PaC refuses `/retest` for a `ci-release` run. The only way to run a release again is to push its tag again. The release-manager's playbook forbids it to delete, move or push again an existing tag. So when a release run fails:
+
+1. The release-manager reports the failure and the failed step on the `pm:status` issue and hands back.
+2. If nothing was published, or the failure was in the environment, the owner can delete the tag and push it again on the same commit. Because each step can run again, the second run completes the release.
+3. Otherwise the release-manager cuts the next version, as for any bad release.
+
+### 10.5 The release gate and the release-manager
+
+The release-manager's gate on `master` stays as in section 3.4: the push PipelineRun's check run on the commit must have the conclusion `success`. After it pushes the tag, the release-manager waits for the release run's check run on the tagged commit (`Tekton CI / registrygate-release-<suffix>`). It reads the check run with `gh api repos/solidDoWant/registrygate/commits/<sha>/check-runs`. When the check passes, it makes sure that the images (both platforms, by digest), the chart and the GitHub release exist. Its playbook, `CLAUDE.md`, `scripts/release.sh` and any script that names `release.yml` change to this at the cutover.
+
+### 10.6 Proof
+
+The first release on Tekton is a pre-release, `v<next>-rc.1`, tagged on a `master` commit after the `ghcrPush` change is live. The implementation makes sure that:
+
+- `push.yaml` did not run for the tag, and `release.yaml` did.
+- Both images exist for linux/amd64 and linux/arm64, by digest, and `:latest` did not move.
+- The chart exists with the version.
+- A GitHub pre-release exists, not marked latest, with the section as its notes.
+- No log of the run, no Task result and no check run shows a credential.
+
+The PR that adds the pipeline reports the run's wall clock next to the 5.4 minutes of `release.yml` for v0.4.0.
+
+### 10.7 Cutover
+
+The cutover happens in the same PR as the pipeline, after the pre-release proved it. If the pre-release fails, `release.yml` stays until the pipeline works.
+
+1. Delete `.github/workflows/release.yml`. After that, `.github/workflows/` is empty and is deleted too.
+2. Delete `.github/actions/nix-dev-shell` and `.github/actions/go-cache-save`. No workflow uses them.
+3. Remove the `github-actions` manager from Renovate: `.github/renovate.json5` and its rules in `.github/renovate/`.
+4. Change the release-manager's playbook, `CLAUDE.md`, `scripts/release.sh` and the docs that name `release.yml` to the Tekton release run (section 10.5).
+
+A final release after the cutover works as the pre-release did, plus `:latest` and a GitHub release marked latest.
 
 ## 11. Cutover
 
@@ -382,3 +494,4 @@ If Tekton is down, no PR can merge. The owner can add `checks` back by restoring
 1. Done: onboard the repository (#176), sizes (#182). Not needed: vCPUs (#181).
 2. The pipeline (#178): first the e2e prototype (section 6.1), then `.tekton/`, `scripts/ci/stages.sh`, `scripts/ci/changes.py`, the CI image build, the cleanup, the `report` task, the `OWNERS` file and the generated PipelineRuns.
 3. Measure, make Tekton the required check, move the scheduler and the release-manager to the Tekton interfaces, retire `ci.yml` (#179). Blocked by #178, and by any `needs-human` issue from section 3.4.
+4. The release on Tekton (#251, section 10): this design, the `ghcrPush` infra-mk3 issue, then the pipeline, the pre-release and the cutover in one PR.
