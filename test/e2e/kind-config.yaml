@@ -6,3 +6,9 @@ featureGates:
   ImageVolume: true
 nodes:
   - role: control-plane
+# Pull the cluster's images in parallel. The default pulls one at a time,
+# which is slow when every image comes through the proxy.
+kubeadmConfigPatches:
+  - |
+    kind: KubeletConfiguration
+    serializeImagePulls: false
