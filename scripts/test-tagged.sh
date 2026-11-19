@@ -106,6 +106,11 @@ if [[ "$tag" == live && -z "${GHCR_LIVE_PAT_FILE:-}" ]]; then
 	echo "test-live: GHCR_LIVE_PAT_FILE is not set; the live tests skip" >&2
 fi
 
+# The e2e run is verbose: a passing run then still shows each test's time and
+# the e2e-wait lines in the stage log.
+verbose=()
+if [[ "$tag" == e2e ]]; then verbose=(-v); fi
+
 status=0
-timeout "$((minutes + 5))m" ./scripts/ci/go-test-json.sh -race -count=1 -tags "$tag" -timeout "${minutes}m" "${go_filter[@]}" "${packages[@]}" || status=$?
+timeout "$((minutes + 5))m" ./scripts/ci/go-test-json.sh -race -count=1 "${verbose[@]}" -tags "$tag" -timeout "${minutes}m" "${go_filter[@]}" "${packages[@]}" || status=$?
 exit "$status"

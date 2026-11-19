@@ -74,7 +74,10 @@ func (w *walkthrough) run(ctx context.Context, name, script string) {
 	cmd.Stdout, cmd.Stderr = &out, &out
 
 	stop := cluster.clearImageVolumeMountErrors(ctx, walkthroughTenant)
+	started := time.Now()
 	err := cmd.Run()
+
+	logWait(waitStep(), name, started, "")
 
 	stop()
 
@@ -108,11 +111,11 @@ func resetCluster(ctx context.Context, t *testing.T) {
 	t.Helper()
 
 	for release, namespace := range map[string]string{"registrygate": proxyNamespace, "cert-manager": "cert-manager"} {
-		out, err := exec.CommandContext(ctx, "helm", "uninstall", release, "--kube-context", cluster.kubeContext, "--namespace", namespace, "--ignore-not-found", "--wait").CombinedOutput()
+		out, err := cluster.helm(ctx, "uninstall", release, "--kube-context", cluster.kubeContext, "--namespace", namespace, "--ignore-not-found", "--wait")
 		require.NoError(t, err, string(out))
 	}
 
-	out, err := exec.CommandContext(ctx, "helm", "uninstall", "registrygate", "--kube-context", cluster.kubeContext, "--namespace", walkthroughNamespace, "--ignore-not-found", "--wait").CombinedOutput()
+	out, err := cluster.helm(ctx, "uninstall", "registrygate", "--kube-context", cluster.kubeContext, "--namespace", walkthroughNamespace, "--ignore-not-found", "--wait")
 	require.NoError(t, err, string(out))
 
 	// cert-manager's chart keeps its CRDs when it is uninstalled.
@@ -256,7 +259,7 @@ func TestAdminDocsGetToAPushAndAMirroredPull(t *testing.T) {
 		defer stop()
 
 		for release, namespace := range map[string]string{"registrygate": walkthroughNamespace, "cert-manager": "cert-manager"} {
-			_ = exec.CommandContext(cleanup, "helm", "uninstall", release, "--kube-context", cluster.kubeContext, "--namespace", namespace, "--ignore-not-found", "--wait").Run()
+			_, _ = cluster.helm(cleanup, "uninstall", release, "--kube-context", cluster.kubeContext, "--namespace", namespace, "--ignore-not-found", "--wait")
 		}
 
 		_, _ = cluster.kubectl(cleanup, "", "delete", "namespace", "--ignore-not-found", walkthroughNamespace, walkthroughTenant, "cert-manager")
@@ -290,7 +293,7 @@ func TestAdminDocsGetToAPushAndAMirroredPull(t *testing.T) {
 
 	// The mirrored pull went through Harbor: it cached the image.
 	// Harbor lists a repository a little after the pull ends.
-	assert.Eventually(t, func() bool {
+	assertEventually(t, "Harbor lists the mirrored repository in the walkthrough project", func() bool {
 		return slices.Contains(harborRepositories(t, walkthroughProject), "soliddowant/public")
 	}, time.Minute, 2*time.Second, "Harbor caches the image the CI pod pulled")
 }

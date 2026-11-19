@@ -34,12 +34,11 @@ const (
 // registries: the fakes' blob redirects point to their storage host names,
 // which the cluster DNS answers with the fakes' storage Services.
 func (e *env) installHarbor(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, "helm", "upgrade", "--install", "harbor", harborChart, "--version", harborVersion,
+	out, err := e.helm(ctx, "upgrade", "--install", "harbor", harborChart, "--version", harborVersion,
 		"--kube-context", e.kubeContext, "--namespace", harborNamespace,
 		"-f", filepath.Join(e.repoRoot, "test/e2e/harbor-values.yaml"),
 		"--set", "externalURL="+e.harborExternalURL, "--wait", "--timeout", "10m")
-
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if err != nil {
 		return fmt.Errorf("helm install harbor: %w\n%s", err, out)
 	}
 

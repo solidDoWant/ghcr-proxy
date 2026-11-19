@@ -22,7 +22,7 @@ func TestPushToHarborUsesARobotThePodNeverSees(t *testing.T) {
 	_, err := cluster.docker(t.Context(), tenant.namespace, buildScript(ref)+" && docker push "+ref)
 	require.NoError(t, err, "the push must succeed with the robot held by the proxy")
 
-	require.Eventually(t, func() bool {
+	requireEventually(t, "Harbor lists the pushed image in "+project, func() bool {
 		return slices.Contains(harborRepositories(t, project), "app-"+cluster.runID)
 	}, 2*time.Minute, 2*time.Second, "Harbor must hold the pushed image in %s", project)
 
@@ -77,7 +77,7 @@ func TestDockerHubNamesPullAndBuildThroughTheMirror(t *testing.T) {
 
 	project := harborProject(tenant.namespace, hub)
 
-	require.Eventually(t, func() bool {
+	requireEventually(t, "Harbor lists library/alpine in "+project, func() bool {
 		return slices.Contains(harborRepositories(t, project), "library/alpine")
 	}, 2*time.Minute, 2*time.Second, "Harbor must list library/alpine in %s", project)
 }

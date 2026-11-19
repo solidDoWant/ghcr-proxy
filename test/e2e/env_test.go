@@ -115,6 +115,11 @@ func (e *env) kubectl(ctx context.Context, stdin string, args ...string) (string
 
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 
+	if waitingKubectl(args) {
+		step, started := waitStep(), time.Now()
+		defer func() { logWait(step, "kubectl "+strings.Join(args, " "), started, "") }()
+	}
+
 	if err := cmd.Run(); err != nil {
 		return stdout.String(), fmt.Errorf("kubectl %s: %w\n%s%s", strings.Join(args, " "), err, stdout.String(), stderr.String())
 	}
@@ -172,7 +177,7 @@ func (e *env) setup(ctx context.Context) error {
 	}
 
 	// A cluster kept from an earlier run holds old certificates: start clean.
-	if out, err := exec.CommandContext(ctx, "helm", "uninstall", "registrygate", "--kube-context", e.kubeContext, "--namespace", proxyNamespace, "--ignore-not-found", "--wait").CombinedOutput(); err != nil {
+	if out, err := e.helm(ctx, "uninstall", "registrygate", "--kube-context", e.kubeContext, "--namespace", proxyNamespace, "--ignore-not-found", "--wait"); err != nil {
 		return fmt.Errorf("helm uninstall: %w\n%s", err, out)
 	}
 
@@ -183,23 +188,23 @@ func (e *env) setup(ctx context.Context) error {
 	}
 
 	for _, fake := range e.upstreams {
-		if err := fake.start(ctx, e); err != nil {
+		if err := timed("start fake upstream "+fake.key, func() error { return fake.start(ctx, e) }); err != nil {
 			return err
 		}
 	}
 
 	// The walkthrough installs the proxy itself, by following the admin guide.
 	if !e.walkthroughOnly {
-		if err := e.installProxy(ctx); err != nil {
+		if err := timed("install proxy", func() error { return e.installProxy(ctx) }); err != nil {
 			return err
 		}
 	}
 
-	if err := e.installHarbor(ctx); err != nil {
+	if err := timed("install Harbor", func() error { return e.installHarbor(ctx) }); err != nil {
 		return err
 	}
 
-	if err := e.createHarborObjects(ctx); err != nil {
+	if err := timed("create Harbor objects", func() error { return e.createHarborObjects(ctx) }); err != nil {
 		return err
 	}
 
@@ -207,11 +212,11 @@ func (e *env) setup(ctx context.Context) error {
 		return nil
 	}
 
-	if err := e.applyProxyObjects(ctx); err != nil {
+	if err := timed("apply proxy objects", func() error { return e.applyProxyObjects(ctx) }); err != nil {
 		return err
 	}
 
-	return e.setupTenants(ctx)
+	return timed("set up tenants", func() error { return e.setupTenants(ctx) })
 }
 
 func (e *env) namespaceNames() []string {
@@ -262,15 +267,20 @@ func (e *env) installProxy(ctx context.Context) error {
 		"--set", "podDisruptionBudget.enabled=true",
 		"--wait", "--timeout", "5m"}
 
-	if out, err := exec.CommandContext(ctx, "helm", args...).CombinedOutput(); err != nil {
+	if out, err := e.helm(ctx, args...); err != nil {
 		return fmt.Errorf("helm install: %w\n%s", err, out)
 	}
 
 	// After an upgrade the replaced pods are still shutting down. Later tests
 	// count the pods, so wait until only the new ones are left.
 	deadline := time.Now().Add(2 * time.Minute)
+	started, polls := time.Now(), 0
+
+	defer func() { logWait("TestMain", "old proxy pods terminate", started, fmt.Sprintf(" (%d polls)", polls)) }()
 
 	for {
+		polls++
+
 		pods, err := e.kubectl(ctx, "", "-n", proxyNamespace, "get", "pods", "-o", "name")
 		if err != nil {
 			return err
@@ -297,4 +307,14 @@ func (e *env) allHosts() []string {
 	}
 
 	return append(hosts, e.harborHostName)
+}
+
+// helm runs helm against the cluster, logging the time of calls that wait.
+func (e *env) helm(ctx context.Context, args ...string) ([]byte, error) {
+	if helmWaits(args) {
+		step, started := waitStep(), time.Now()
+		defer func() { logWait(step, "helm "+strings.Join(args[:min(len(args), 3)], " "), started, "") }()
+	}
+
+	return exec.CommandContext(ctx, "helm", args...).CombinedOutput()
 }
