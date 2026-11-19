@@ -226,6 +226,8 @@ while [ -n "$remaining" ]; do
 	remaining=$(echo "$next" | xargs)
 	if [ -n "$remaining" ]; then sleep 2; fi
 done
+# Every stage has ended: stop the sampler, or the wait below never returns.
+kill "$sampler" 2>/dev/null || true
 wait
 for stage in $failed; do
 	took=$(($(cat "$out/$stage.end") - $(cat "$out/$stage.start")))
