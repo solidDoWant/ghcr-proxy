@@ -123,7 +123,7 @@ start_stage() {
 			-e REGISTRYGATE_HOSTS="${REGISTRYGATE_HOSTS:-}" -e REGISTRYGATE_TOKEN_FILE="$ci/token" \
 			-e CI_BIN="$ci/bin" -e CI_CA="$ci/ca-bundle.crt" -e CI_STATS="$out/$stage.stats" \
 			-e E2E_CLUSTER="registrygate-ci${stage#e2e}" \
-			-e E2E_IMAGES_BUILT="${E2E_IMAGES_BUILT:-}" \
+			-e E2E_IMAGES_BUILT="${E2E_IMAGES_BUILT:-}" -e E2E_DISCARD_CLUSTER=1 \
 			-e STAGE_COMMAND="$(command_of "$stage")" \
 			"$image" bash -c '
 				source /etc/devshell.sh
