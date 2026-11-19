@@ -33,8 +33,9 @@ cluster_log="$work/cluster.log"
 if ! kind get clusters 2>/dev/null | grep -qx "$cluster"; then
 	log "creating kind cluster $cluster (in the background)"
 	if [[ -x "$ci_kind_config" ]]; then
-		# CI's nodes pull through registrygate and the Harbor caches.
-		{ "$ci_kind_config" test/e2e/kind-config.yaml | kind create cluster --name "$cluster" --image "$node_image" --config=- --wait 120s; } >"$cluster_log" 2>&1 &
+		# ci-kind-config keeps each node's image store between builds, keyed by
+		# the cluster name, so it takes the name and image instead of kind.
+		{ "$ci_kind_config" --name "$cluster" --image "$node_image" test/e2e/kind-config.yaml | kind create cluster --config=- --wait 120s; } >"$cluster_log" 2>&1 &
 	else
 		kind create cluster --name "$cluster" --image "$node_image" --config test/e2e/kind-config.yaml --wait 120s >"$cluster_log" 2>&1 &
 	fi
