@@ -13,7 +13,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -295,9 +294,7 @@ func TestAdminDocsGetToAPushAndAMirroredPull(t *testing.T) {
 
 	assert.True(t, pushed, "a manifest PUT with the PAT's token")
 
-	// The mirrored pull went through Harbor: it cached the image.
-	// Harbor lists a repository a little after the pull ends.
-	assertEventually(t, "Harbor lists the mirrored repository in the walkthrough project", func() bool {
-		return slices.Contains(harborRepositories(t, walkthroughProject), "soliddowant/public")
-	}, time.Minute, 500*time.Millisecond, "Harbor caches the image the CI pod pulled")
+	// The mirrored pull went through the namespace's mirror. The proxy logs
+	// each request when it ends, so no wait for Harbor's listing is needed.
+	assert.True(t, servedByMirror(proxyAuditEntries(t), walkthroughTenant, "soliddowant/public"), "the CI pod's pull is served by the mirror")
 }

@@ -156,12 +156,18 @@ docker build --no-cache -t local/both:1 .`, mirroredRepo("build"))
 	_, err := cluster.docker(t.Context(), tenant.namespace, script)
 	require.NoError(t, err)
 
-	for _, fake := range cluster.upstreams[:2] {
-		project := harborProject(tenant.namespace, fake)
+	// The proxy logs each request when it ends, so no wait for Harbor's
+	// background listing is needed.
+	mirrors := map[string]bool{}
 
-		requireEventually(t, "Harbor lists the build base image in "+project, func() bool {
-			return slices.Contains(harborRepositories(t, project), mirroredRepo("build"))
-		}, 2*time.Minute, 500*time.Millisecond, "the base image from upstream %s must come through %s", fake.key, project)
+	for _, entry := range proxyAuditEntries(t) {
+		if entry.Namespace == tenant.namespace && entry.Repository == mirroredRepo("build") && entry.Decision == "mirror" {
+			mirrors[entry.Mirror] = true
+		}
+	}
+
+	for _, fake := range cluster.upstreams[:2] {
+		assert.True(t, mirrors[tenant.namespace+"/mirror-"+fake.key], "the base image from upstream %s must come through its mirror", fake.key)
 	}
 }
 
