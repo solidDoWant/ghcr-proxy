@@ -120,7 +120,7 @@ func TestEachNamespacePullsThroughItsOwnHarborProject(t *testing.T) {
 	for _, tenant := range cluster.tenants {
 		project := harborProject(tenant.namespace, first)
 
-		require.Eventually(t, func() bool {
+		requireEventually(t, "Harbor lists the base image in "+project, func() bool {
 			return slices.Contains(harborRepositories(t, project), mirroredRepo("base"))
 		}, 2*time.Minute, 2*time.Second, "Harbor must list the image in %s", project)
 	}
@@ -148,7 +148,7 @@ docker build --no-cache -t local/both:1 .`, mirroredRepo("build"))
 	for _, fake := range cluster.upstreams[:2] {
 		project := harborProject(tenant.namespace, fake)
 
-		require.Eventually(t, func() bool {
+		requireEventually(t, "Harbor lists the build base image in "+project, func() bool {
 			return slices.Contains(harborRepositories(t, project), mirroredRepo("build"))
 		}, 2*time.Minute, 2*time.Second, "the base image from upstream %s must come through %s", fake.key, project)
 	}
