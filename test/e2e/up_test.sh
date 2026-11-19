@@ -20,7 +20,7 @@ export -f pull_image import_image
 export work
 
 # Run the xargs lines of up.sh exactly as written.
-grep -E '^xargs ' "$here/up.sh" | sed "s|\"\$work/images\"|\"$work/images\"|" >"$work/loops.sh"
+grep -E '^[[:space:]]*xargs ' "$here/up.sh" | sed -E "s|\"\$work/images\"|\"$work/images\"|" >"$work/loops.sh"
 [ "$(wc -l <"$work/loops.sh")" -eq 2 ] || { echo "expected two xargs loops in up.sh" >&2; exit 1; }
 bash "$work/loops.sh" >/dev/null
 
