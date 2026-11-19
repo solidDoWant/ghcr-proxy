@@ -98,4 +98,3 @@
         });
       });
 }
-# cold-cache measurement for the dind memory size (reverted next commit)
