@@ -107,6 +107,10 @@ start_stage() {
 		git -C "$generate_src" checkout -q --detach "$(git rev-parse HEAD)"
 		mount="$mount -v $generate_src:$src"
 	fi
+	# The e2e kind nodes pull through registrygate with the config CI provides.
+	case "$stage" in
+	e2e*) [ -x /run/ci-kind/bin/ci-kind-config ] && mount="$mount -v /run/ci-kind:/run/ci-kind:ro -v /opt/ci-kind:/opt/ci-kind:ro" ;;
+	esac
 	date +%s >"$out/$stage.start"
 	(
 		status=0
