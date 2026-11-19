@@ -30,9 +30,7 @@ const (
 	harborPassword = "Harbor12345"
 )
 
-// installHarbor installs Harbor from its chart and makes it reach the fake
-// registries: the fakes' blob redirects point to their storage host names,
-// which the cluster DNS answers with the fakes' storage Services.
+// installHarbor installs Harbor from its chart and waits until it is ready.
 func (e *env) installHarbor(ctx context.Context) error {
 	out, err := e.helm(ctx, "upgrade", "--install", "harbor", harborChart, "--version", harborVersion,
 		"--kube-context", e.kubeContext, "--namespace", harborNamespace,
@@ -42,6 +40,12 @@ func (e *env) installHarbor(ctx context.Context) error {
 		return fmt.Errorf("helm install harbor: %w\n%s", err, out)
 	}
 
+	return nil
+}
+
+// pointFakeStorageHostsAtFakes makes Harbor reach the fake registries: the fakes' blob redirects point to their
+// storage host names, which the cluster DNS answers with the fakes' storage Services.
+func (e *env) pointFakeStorageHostsAtFakes(ctx context.Context) error {
 	var hosts strings.Builder
 
 	for _, fake := range e.upstreams {
@@ -79,6 +83,11 @@ func (e *env) installHarbor(ctx context.Context) error {
 		return err
 	}
 
+	return nil
+}
+
+// readHarborCA reads the CA that signed Harbor's generated certificate. Harbor must be installed.
+func (e *env) readHarborCA(ctx context.Context) error {
 	// Harbor's generated certificate is signed by the CA in this Secret.
 	ca, err := e.kubectl(ctx, "", "-n", harborNamespace, "get", "secret", "harbor-nginx", "-o", `go-template={{index .data "ca.crt"}}`)
 	if err != nil {
