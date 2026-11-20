@@ -11,8 +11,8 @@
 #
 # publish runs code from the repository but never sees the PAT: registrygate
 # keeps it. github-release reaches GitHub through githubgate's interceptor,
-# which the CI cluster adds to every ci-report and ci-release task; githubgate
-# allows ci-release only to read the release and CHANGELOG.md and to create a
+# which the CI cluster adds to every pod; githubgate allows ci-release only to
+# fetch the repository, read the release and CHANGELOG.md, and create a
 # release of a v* tag. Only a version-tag push starts this run, so only what
 # can push tags reaches that access.
 apiVersion: tekton.dev/v1
