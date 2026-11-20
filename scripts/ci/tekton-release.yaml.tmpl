@@ -11,10 +11,11 @@
 #
 # publish runs code from the repository but holds no GitHub token and never
 # sees the PAT: registrygate keeps the PAT. github-release reaches GitHub
-# through githubgate's interceptor (the inject label below), as ci-release:
+# through githubgate's interceptor, as ci-release (the CI cluster intercepts ci-report and ci-release tasks):
 # githubgate allows only reading the release and CHANGELOG.md and creating a
 # release of a v* tag. It runs only its inline script, never code from the
-# repository. publish isn't labelled, so repository code gets no GitHub access.
+# repository. Only a version-tag push starts this run, so only what can push
+# tags reaches ci-release's GitHub access.
 apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
@@ -42,13 +43,6 @@ spec:
     - name: source
       emptyDir: {}
   taskRunSpecs:
-    - pipelineTaskName: github-release
-      metadata:
-        labels:
-          # githubgate's injection webhook adds its interceptor: GitHub
-          # requests go through githubgate's proxy as this task's
-          # ServiceAccount, with no token in the pod.
-          githubgate.soliddowant.dev/inject: "true"
     # The stage runs inside the dind sidecar's cgroup: it cross-compiles four
     # binaries, scans them and assembles two images for two platforms. No CPU
     # limit: a kata VM's CPU request only places the pod and sets its share.
